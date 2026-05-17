@@ -13,18 +13,15 @@ import time
 
 from .api_client import api_headers
 from .window_snap import snap_to_available_screen
+from .i18n import tr
 
 VALID_STATUSES = {"idle", "running", "error", "update", "disconnected"}
-STATUS_TEXT = {
-    "running": "运行中",
-    "error": "发生错误",
-    "update": "更新中",
-    "disconnected": "连接断开",
-    "idle": "闲置",
-}
 
 def normalize_status(status):
     return status if status in VALID_STATUSES else "idle"
+
+def get_status_text(status):
+    return tr(normalize_status(status))
 
 def app_base_dir():
     if getattr(sys, "frozen", False):
@@ -277,7 +274,7 @@ class MainConfigRow(QWidget):
         self._refresh_label()
 
     def _refresh_label(self):
-        full_text = f"{self.config_name}: {STATUS_TEXT.get(self.current_status, STATUS_TEXT['idle'])}"
+        full_text = f"{self.config_name}: {get_status_text(self.current_status)}"
         metrics = QFontMetrics(self.statusLabel.font())
         width = max(self.statusLabel.width() - 2, 20)
         self.statusLabel.setText(metrics.elidedText(full_text, Qt.ElideRight, width))
@@ -442,11 +439,11 @@ class CardWidget(QFrame):
             ic.setCursor(Qt.PointingHandCursor)
             ic.setObjectName("unicodeIconBtn")
 
-        self.setIcon.setToolTip("系统设置")
-        self.homeIcon.setToolTip("打开 Alas 主页")
-        self.floatIcon.setToolTip("切换到悬浮窗")
-        self.logIcon.setToolTip("查看实时日志")
-        self.exportIcon.setToolTip("导出 fastapi.py")
+        self.setIcon.setToolTip(tr("settings_btn_tip"))
+        self.homeIcon.setToolTip(tr("home_btn_tip"))
+        self.floatIcon.setToolTip(tr("float_btn_tip"))
+        self.logIcon.setToolTip(tr("log_btn_tip"))
+        self.exportIcon.setToolTip(tr("export_btn_tip"))
             
         bot_layout.addWidget(self.setIcon)
         bot_layout.addStretch()
@@ -466,6 +463,14 @@ class CardWidget(QFrame):
         self.exportIcon.mousePressEvent = lambda e: self._on_icon_click("导出", self.exportIcon)
 
         main_layout.addWidget(self.bottomBg)
+
+    def retranslate_ui(self):
+        self.setIcon.setToolTip(tr("settings_btn_tip"))
+        self.homeIcon.setToolTip(tr("home_btn_tip"))
+        self.floatIcon.setToolTip(tr("float_btn_tip"))
+        self.logIcon.setToolTip(tr("log_btn_tip"))
+        self.exportIcon.setToolTip(tr("export_btn_tip"))
+        self._rebuild_rows()
 
     def _save_config(self):
         try:
@@ -672,14 +677,32 @@ class CardWidget(QFrame):
             dialog = SettingsWindow(self.window(), self.config, self._configs, self.current_config)
             if dialog.exec():
                 try:
+                    from .i18n import set_language
+                    set_language(self.config.get("lang", "zh"))
+
                     with open(self.config_path, "w", encoding="utf-8") as f:
                         json.dump(self.config, f, indent=4, ensure_ascii=False)
                     print(f"[日志] 配置已成功持久化到 {self.config_path}")
-                    
+
+                    # 动态更新主界面翻译
+                    self.retranslate_ui()
+
+                    # 动态更新系统托盘菜单翻译
+                    app = QApplication.instance()
+                    if hasattr(app, "_alas_tray"):
+                        tray = app._alas_tray
+                        actions = tray.contextMenu().actions()
+                        if len(actions) >= 7:
+                            actions[0].setText(tr("show_main"))
+                            actions[1].setText(tr("show_float"))
+                            actions[2].setText(tr("open_webui"))
+                            actions[4].setText(tr("wizard"))
+                            actions[5].setText(tr("export_btn_tip"))
+                            actions[7].setText(tr("quit"))
+
                     # 动态应用主题
-                    from PySide6.QtWidgets import QApplication
                     from .theme import apply_theme
-                    apply_theme(QApplication.instance(), self.config.get("theme", "dark"))
+                    apply_theme(app, self.config.get("theme", "dark"))
                     
                     if hasattr(self.window(), "apply_always_on_top"):
                         self.window().apply_always_on_top(self.config.get("always_on_top", False))

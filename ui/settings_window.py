@@ -12,6 +12,7 @@ from .api_client import api_base_url, api_headers
 from updater import check_for_updates, do_update
 from main import VERSION
 from .main_window import WindowButton
+from .i18n import tr
 
 class CheckBox(QCheckBox):
     def paintEvent(self, event):
@@ -29,14 +30,13 @@ class CheckBox(QCheckBox):
         painter.end()
 
 class SettingsWindow(QDialog):
-    # 定义测试结果信号
     test_result_signal = Signal(bool, str)
 
     def __init__(self, parent=None, config=None, configs=None, current_config="alas"):
         super().__init__(parent)
         self.config = config if config is not None else {}
         self.setObjectName("settingsWindow")
-        self.setFixedSize(420, 420)
+        self.setFixedSize(420, 440)  # 高度微调至 440 以完美容纳多一行复选框
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog)
         self.setAttribute(Qt.WA_TranslucentBackground)
 
@@ -58,7 +58,7 @@ class SettingsWindow(QDialog):
         top_layout = QHBoxLayout(self.topBg)
         top_layout.setContentsMargins(20, 0, 8, 0)
 
-        title = QLabel("系统设置")
+        title = QLabel(tr("settings_title"))
         title.setObjectName("settingsTitle")
         top_layout.addWidget(title)
         top_layout.addStretch()
@@ -75,17 +75,17 @@ class SettingsWindow(QDialog):
         self.formBg.setAttribute(Qt.WA_StyledBackground, True)
         form_layout = QVBoxLayout(self.formBg)
         form_layout.setContentsMargins(24, 18, 24, 16)
-        form_layout.setSpacing(14)
+        form_layout.setSpacing(12)
 
         # 开关选项第1行
         option_layout1 = QHBoxLayout()
         option_layout1.setSpacing(28)
 
-        self.autoStartCheck = CheckBox("开机自启动")
+        self.autoStartCheck = CheckBox(tr("auto_start"))
         self.autoStartCheck.setCursor(Qt.PointingHandCursor)
         self.autoStartCheck.setChecked(self.config.get("auto_start", False))
 
-        self.alwaysOnTopCheck = CheckBox("主窗口置顶")
+        self.alwaysOnTopCheck = CheckBox(tr("always_on_top"))
         self.alwaysOnTopCheck.setCursor(Qt.PointingHandCursor)
         self.alwaysOnTopCheck.setChecked(self.config.get("always_on_top", False))
 
@@ -97,12 +97,11 @@ class SettingsWindow(QDialog):
         option_layout2 = QHBoxLayout()
         option_layout2.setSpacing(28)
 
-        self.miniClickThroughCheck = CheckBox("悬浮窗穿透")
+        self.miniClickThroughCheck = CheckBox(tr("click_through"))
         self.miniClickThroughCheck.setCursor(Qt.PointingHandCursor)
         self.miniClickThroughCheck.setChecked(self.config.get("mini_click_through", False))
-        self.miniClickThroughCheck.setToolTip("开启后悬浮窗不再接收鼠标点击，点击会穿透到后面的窗口。")
 
-        self.lightThemeCheck = CheckBox("浅色模式")
+        self.lightThemeCheck = CheckBox(tr("light_mode"))
         self.lightThemeCheck.setCursor(Qt.PointingHandCursor)
         self.lightThemeCheck.setChecked(self.config.get("theme", "dark") == "light")
 
@@ -110,12 +109,24 @@ class SettingsWindow(QDialog):
         option_layout2.addWidget(self.lightThemeCheck)
         option_layout2.addStretch()
 
+        # 开关选项第3行 (语言设置)
+        option_layout3 = QHBoxLayout()
+        option_layout3.setSpacing(28)
+
+        self.englishLangCheck = CheckBox(tr("english_mode"))
+        self.englishLangCheck.setCursor(Qt.PointingHandCursor)
+        self.englishLangCheck.setChecked(self.config.get("lang", "zh") == "en")
+
+        option_layout3.addWidget(self.englishLangCheck)
+        option_layout3.addStretch()
+
         form_layout.addLayout(option_layout1)
         form_layout.addLayout(option_layout2)
+        form_layout.addLayout(option_layout3)
 
         opacity_layout = QHBoxLayout()
         opacity_layout.setSpacing(10)
-        opacity_label = QLabel("悬浮透明")
+        opacity_label = QLabel(tr("float_opacity"))
         opacity_label.setObjectName("formLabel")
         opacity_label.setFixedWidth(66)
         self.miniOpacitySlider = QSlider(Qt.Horizontal)
@@ -139,7 +150,7 @@ class SettingsWindow(QDialog):
         # IP 布局
         ip_layout = QHBoxLayout()
         ip_layout.setSpacing(10)
-        ip_label = QLabel("IP 地址")
+        ip_label = QLabel(tr("ip_address"))
         ip_label.setObjectName("formLabel")
         ip_label.setFixedWidth(66)
         self.ipInput = QLineEdit()
@@ -153,7 +164,7 @@ class SettingsWindow(QDialog):
         port_layout = QHBoxLayout()
         port_layout.setSpacing(10)
         
-        port_label = QLabel("服务端口")
+        port_label = QLabel(tr("service_port"))
         port_label.setObjectName("formLabel")
         port_label.setFixedWidth(66)
         self.portInput = QLineEdit()
@@ -164,7 +175,7 @@ class SettingsWindow(QDialog):
         port_layout.addWidget(self.portInput)
         port_layout.addStretch()
 
-        self.testBtn = QPushButton("测试连接")
+        self.testBtn = QPushButton(tr("test_connection"))
         self.testBtn.setObjectName("testBtn")
         self.testBtn.setCursor(Qt.PointingHandCursor)
         self.testBtn.setFocusPolicy(Qt.NoFocus)
@@ -185,7 +196,7 @@ class SettingsWindow(QDialog):
         token_layout.addWidget(token_label)
         token_layout.addWidget(self.tokenInput, stretch=1)
 
-        self.tokenGenerateBtn = QPushButton("生成")
+        self.tokenGenerateBtn = QPushButton(tr("generate"))
         self.tokenGenerateBtn.setObjectName("tokenBtn")
         self.tokenGenerateBtn.setCursor(Qt.PointingHandCursor)
         self.tokenGenerateBtn.setFocusPolicy(Qt.NoFocus)
@@ -197,14 +208,14 @@ class SettingsWindow(QDialog):
         update_layout = QHBoxLayout()
         update_layout.setSpacing(10)
         
-        update_label = QLabel("版本更新")
+        update_label = QLabel(tr("version_update"))
         update_label.setObjectName("formLabel")
         update_label.setFixedWidth(66)
         
-        self.versionLabel = QLabel(f"当前版本 {VERSION}")
+        self.versionLabel = QLabel(f"{tr('current_version')} {VERSION}")
         self.versionLabel.setStyleSheet("color: #a6abb4; font-size: 13px; font-family: 'Microsoft YaHei', 'Segoe UI';")
         
-        self.updateBtn = QPushButton("检查更新")
+        self.updateBtn = QPushButton(tr("check_update"))
         self.updateBtn.setObjectName("updateBtn")
         self.updateBtn.setCursor(Qt.PointingHandCursor)
         self.updateBtn.setFocusPolicy(Qt.NoFocus)
@@ -242,14 +253,14 @@ class SettingsWindow(QDialog):
         btn_layout.setContentsMargins(0, 8, 0, 0)
         btn_layout.addStretch()
 
-        self.cancelBtn = QPushButton("取消")
+        self.cancelBtn = QPushButton(tr("cancel"))
         self.cancelBtn.setObjectName("cancelBtn")
         self.cancelBtn.setCursor(Qt.PointingHandCursor)
         self.cancelBtn.setFocusPolicy(Qt.NoFocus)
         self.cancelBtn.setFixedSize(62, 30)
         self.cancelBtn.clicked.connect(self.reject)
 
-        self.saveBtn = QPushButton("保存")
+        self.saveBtn = QPushButton(tr("save"))
         self.saveBtn.setObjectName("saveBtn")
         self.saveBtn.setCursor(Qt.PointingHandCursor)
         self.saveBtn.setFocusPolicy(Qt.NoFocus)
@@ -282,7 +293,7 @@ class SettingsWindow(QDialog):
 
     def _check_for_updates(self):
         self.updateBtn.setEnabled(False)
-        self.updateBtn.setText("检查中...")
+        self.updateBtn.setText(tr("checking"))
         self._checking_active = True
         QTimer.singleShot(4000, self._on_update_timeout)
         threading.Thread(target=self._update_task, daemon=True).start()
@@ -296,7 +307,7 @@ class SettingsWindow(QDialog):
             return
         self._checking_active = False
         if result.get("has_update"):
-            self.updateBtn.setText("下载更新")
+            self.updateBtn.setText(tr("download_update"))
             self.updateBtn.setStyleSheet("""
                 QPushButton#updateBtn {
                     background-color: #28e06f;
@@ -310,21 +321,19 @@ class SettingsWindow(QDialog):
                 }
             """)
             self.updateBtn.setEnabled(True)
-            # Rebind click
             try:
                 self.updateBtn.clicked.disconnect()
             except Exception:
                 pass
             
-            # 使用闭包保存 download_url
             download_url = result["url"]
             self.updateBtn.clicked.connect(lambda: self._start_download(download_url))
         elif "error" in result:
-            self.updateBtn.setText("检查失败")
+            self.updateBtn.setText(tr("check_failed"))
             self.updateBtn.setEnabled(True)
             QTimer.singleShot(2000, self._reset_update_btn)
         else:
-            self.updateBtn.setText("已是最新")
+            self.updateBtn.setText(tr("new_version"))
             QTimer.singleShot(2000, self._reset_update_btn)
 
     def _start_download(self, download_url):
@@ -337,7 +346,7 @@ class SettingsWindow(QDialog):
 
     def _on_update_finish(self, success, message):
         def _ui_update():
-            self.updateBtn.setText("重启中..." if success else "更新失败")
+            self.updateBtn.setText(tr("restart") if success else tr("check_failed"))
             if not success:
                 self.updateBtn.setEnabled(True)
                 QTimer.singleShot(3000, self._reset_update_btn)
@@ -346,12 +355,12 @@ class SettingsWindow(QDialog):
     def _on_update_timeout(self):
         if getattr(self, "_checking_active", False):
             self._checking_active = False
-            self.updateBtn.setText("检查超时")
+            self.updateBtn.setText(tr("timeout"))
             self.updateBtn.setEnabled(True)
             QTimer.singleShot(2000, self._reset_update_btn)
 
     def _reset_update_btn(self):
-        self.updateBtn.setText("检查更新")
+        self.updateBtn.setText(tr("check_update"))
         self.updateBtn.setEnabled(True)
         self.updateBtn.setStyleSheet("""
             QPushButton#updateBtn {
@@ -373,7 +382,6 @@ class SettingsWindow(QDialog):
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
-            # 原生拖拽
             import sys
             if sys.platform == "win32":
                 import ctypes
@@ -392,19 +400,18 @@ class SettingsWindow(QDialog):
                 event.accept()
 
     def accept(self):
-        # 保存时写回字典
         self.config["auto_start"] = self.autoStartCheck.isChecked()
         self.config["always_on_top"] = self.alwaysOnTopCheck.isChecked()
         self.config["theme"] = "light" if self.lightThemeCheck.isChecked() else "dark"
+        self.config["lang"] = "en" if self.englishLangCheck.isChecked() else "zh"
         self.config["ip"] = self.ipInput.text()
         self.config["port"] = self.portInput.text()
         self.config["api_token"] = self.tokenInput.text().strip()
         self.config["mini_click_through"] = self.miniClickThroughCheck.isChecked()
         self.config["mini_opacity"] = self._normalize_opacity(self.miniOpacitySlider.value())
-        # 清除不再需要的 api_port
         if "api_port" in self.config:
             del self.config["api_port"]
-        print(f"[配置保存] 自动启动: {self.config['auto_start']}, 主窗口置顶: {self.config['always_on_top']}, 主题: {self.config['theme']}, IP: {self.config['ip']}, Port: {self.config['port']}")
+        print(f"[配置保存] 语言: {self.config['lang']}, 自动启动: {self.config['auto_start']}, 主窗口置顶: {self.config['always_on_top']}, 主题: {self.config['theme']}, IP: {self.config['ip']}, Port: {self.config['port']}")
         super().accept()
 
     def _normalize_opacity(self, value):
@@ -423,7 +430,7 @@ class SettingsWindow(QDialog):
         port_str = self.portInput.text().strip()
         
         if not ip or not port_str.isdigit():
-            self._on_test_result(False, "IP 或端口无效")
+            self._on_test_result(False, tr("test_invalid"))
             return
             
         self.testBtn.setText("...")
@@ -433,7 +440,6 @@ class SettingsWindow(QDialog):
         self.testBtn.style().unpolish(self.testBtn)
         self.testBtn.style().polish(self.testBtn)
         
-        # 启动后台测试线程
         threading.Thread(
             target=self._test_api,
             args=(ip, port_str, self.tokenInput.text().strip()),
@@ -456,7 +462,7 @@ class SettingsWindow(QDialog):
             )
             success = resp.status_code == 200
             if resp.status_code == 401:
-                message = "Token 无效或未导出新的 fastapi.py"
+                message = tr("test_unauthorized")
             elif not success:
                 message = f"HTTP {resp.status_code}"
         except Exception as exc:
@@ -465,6 +471,8 @@ class SettingsWindow(QDialog):
 
     def _create_icon(self, state):
         pixmap = QPixmap(24, 24)
+        pixmap.fill(Qt.transparent)
+        p = QPixmap(24, 24)
         pixmap.fill(Qt.transparent)
         p = QPainter(pixmap)
         p.setRenderHint(QPainter.Antialiasing)
@@ -498,12 +506,11 @@ class SettingsWindow(QDialog):
         self.testBtn.style().unpolish(self.testBtn)
         self.testBtn.style().polish(self.testBtn)
         
-        # 2秒后重置按钮状态
         QTimer.singleShot(2000, self._reset_test_btn)
 
     def _reset_test_btn(self):
         self.testBtn.setIcon(QIcon())
-        self.testBtn.setText("测试连接")
+        self.testBtn.setText(tr("test_connection"))
         self.testBtn.setToolTip("")
         self.testBtn.setProperty("state", "normal")
         self.testBtn.style().unpolish(self.testBtn)

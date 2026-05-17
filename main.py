@@ -1,5 +1,6 @@
 import sys
 import os
+import json
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 from PySide6.QtGui import QAction, QFont, QIcon
 
@@ -7,6 +8,7 @@ from ui import AlasConsole
 from ui.init_window import InitSetupWindow
 from ui.main_window import config_path, fastapi_output_path, fastapi_source_path
 from updater import cleanup_old_exe
+from ui.i18n import set_language, tr
 
 VERSION = "v1.0.0"
 
@@ -17,6 +19,18 @@ def resource_path(relative_path):
 
 def main():
     cleanup_old_exe()
+    
+    # 提前载入配置中的语言设置
+    lang = "zh"
+    try:
+        cfg_p = config_path()
+        if os.path.exists(cfg_p):
+            with open(cfg_p, "r", encoding="utf-8") as f:
+                cfg = json.load(f)
+                lang = cfg.get("lang", "zh")
+    except Exception as e:
+        print(f"[警告] 提前读取语言失败: {e}")
+    set_language(lang)
     
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)
@@ -63,31 +77,31 @@ def create_tray(app, app_icon, window):
     tray.setToolTip("Alas-Gyre")
     menu = QMenu()
 
-    show_action = QAction("显示主界面", menu)
+    show_action = QAction(tr("show_main"), menu)
     show_action.triggered.connect(window.card.restore_main_window)
     menu.addAction(show_action)
 
-    mini_action = QAction("显示悬浮窗", menu)
+    mini_action = QAction(tr("show_float"), menu)
     mini_action.triggered.connect(window.card.show_mini_window)
     menu.addAction(mini_action)
 
-    home_action = QAction("打开 Alas 主页", menu)
+    home_action = QAction(tr("open_webui"), menu)
     home_action.triggered.connect(lambda: window.card._on_icon_click("主页", window.card.homeIcon))
     menu.addAction(home_action)
 
     menu.addSeparator()
 
-    setup_action = QAction("初始化向导", menu)
+    setup_action = QAction(tr("wizard"), menu)
     setup_action.triggered.connect(lambda: open_init_setup(window, app_icon))
     menu.addAction(setup_action)
 
-    export_action = QAction("导出 fastapi.py", menu)
+    export_action = QAction(tr("export_btn_tip"), menu)
     export_action.triggered.connect(lambda: window.card._on_icon_click("导出", window.card.exportIcon))
     menu.addAction(export_action)
 
     menu.addSeparator()
 
-    quit_action = QAction("退出", menu)
+    quit_action = QAction(tr("quit"), menu)
     quit_action.triggered.connect(app.quit)
     menu.addAction(quit_action)
 

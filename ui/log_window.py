@@ -7,6 +7,7 @@ import html
 
 from .api_client import api_headers
 from .main_window import WindowButton
+from .i18n import tr
 
 LOG_LEVEL_STYLES = {
     "CRITICAL": {"fg": "#ff6b6b", "bg": "#2b171a", "bar": "#ff5c5c"},
@@ -61,7 +62,7 @@ class LogWindow(QDialog):
         top_layout = QHBoxLayout(self.topBg)
         top_layout.setContentsMargins(20, 0, 8, 0)
 
-        self.titleLabel = QLabel("实时日志")
+        self.titleLabel = QLabel(tr("log_title", config=self.current_config))
         self.titleLabel.setObjectName("logTitle")
         top_layout.addWidget(self.titleLabel)
 
@@ -189,6 +190,7 @@ class LogWindow(QDialog):
 
     def set_config(self, config_name):
         self.current_config = config_name
+        self.titleLabel.setText(tr("log_title", config=self.current_config))
         if self.current_config not in self.configs:
             self.configs.insert(0, self.current_config)
             self.set_configs(self.configs, self.current_config)

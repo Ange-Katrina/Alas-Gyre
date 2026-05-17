@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
     QLabel, QLineEdit, QPushButton, QVBoxLayout, QWidget
 )
 from .main_window import WindowButton
+from .i18n import tr
 
 TOKEN_ASSIGNMENT = 'ALAS_GYRE_API_TOKEN = "__ALAS_GYRE_API_TOKEN__"'
 
@@ -82,7 +83,7 @@ class FastapiExportWindow(QDialog):
         top_layout = QHBoxLayout(self.topBg)
         top_layout.setContentsMargins(20, 0, 8, 0)
 
-        title = QLabel("FastAPI 文件导出")
+        title = QLabel(tr("export_title"))
         title.setObjectName("fastapiTitle")
         top_layout.addWidget(title)
         top_layout.addStretch()
@@ -100,15 +101,12 @@ class FastapiExportWindow(QDialog):
         body_layout.setContentsMargins(24, 16, 24, 18)
         body_layout.setSpacing(7)
 
-        desc = QLabel(
-            "生成适配 AzurLaneAutoScript WebUI 的 fastapi.py。"
-            "覆盖后，本工具可远程读取配置、同步状态、启停任务和查看实时日志。"
-        )
+        desc = QLabel(tr("export_desc"))
         desc.setObjectName("fastapiDesc")
         desc.setWordWrap(True)
         body_layout.addWidget(desc)
 
-        path_title = QLabel("输出文件")
+        path_title = QLabel(tr("output_file"))
         path_title.setObjectName("fastapiSectionTitle")
         body_layout.addWidget(path_title)
 
@@ -134,7 +132,7 @@ class FastapiExportWindow(QDialog):
         path_layout.addWidget(self.outputPathInput)
         body_layout.addWidget(self.pathBox)
 
-        steps_title = QLabel("安装步骤")
+        steps_title = QLabel(tr("install_steps"))
         steps_title.setObjectName("fastapiSectionTitle")
         body_layout.addWidget(steps_title)
 
@@ -145,13 +143,13 @@ class FastapiExportWindow(QDialog):
         steps_layout = QVBoxLayout(self.stepsBox)
         steps_layout.setContentsMargins(12, 9, 12, 9)
         steps_layout.setSpacing(6)
-        steps_layout.addWidget(self._create_step("1", "点击“导出 fastapi.py”生成文件。"))
-        steps_layout.addWidget(self._create_step("2", "上传并覆盖 AzurLaneAutoScript 的 module/webui/fastapi.py。"))
-        steps_layout.addWidget(self._create_step("3", "重启 AzurLaneAutoScript 或 WebUI 服务，让新接口生效。"))
-        steps_layout.addWidget(self._create_step("4", "回到设置页点击“测试连接”，确认 Token 和接口可用。"))
+        steps_layout.addWidget(self._create_step("1", tr("step_1")))
+        steps_layout.addWidget(self._create_step("2", tr("step_2")))
+        steps_layout.addWidget(self._create_step("3", tr("step_3")))
+        steps_layout.addWidget(self._create_step("4", tr("step_4")))
         body_layout.addWidget(self.stepsBox)
 
-        warning = QLabel("安全提示：导出的 fastapi.py 内含 Token，请勿公开上传 config.json 或 output/fastapi.py。")
+        warning = QLabel(tr("export_warning"))
         warning.setObjectName("fastapiWarning")
         warning.setWordWrap(True)
         warning.setFixedHeight(44)
@@ -169,7 +167,7 @@ class FastapiExportWindow(QDialog):
         btn_layout.setContentsMargins(0, 0, 0, 0)
         btn_layout.addStretch()
 
-        self.exportBtn = QPushButton("导出 fastapi.py")
+        self.exportBtn = QPushButton(tr("export_btn"))
         self.exportBtn.setObjectName("fastapiExportBtn")
         self.exportBtn.setCursor(Qt.PointingHandCursor)
         self.exportBtn.setFocusPolicy(Qt.NoFocus)
@@ -245,7 +243,7 @@ class FastapiExportWindow(QDialog):
 
     def _export_fastapi(self):
         if not os.path.exists(self.source_path):
-            self._set_status(f"导出失败：未找到源文件 {self.source_path}", "error")
+            self._set_status(tr("export_fail", error=f"Source path not found: {self.source_path}"), "error")
             return
 
         try:
@@ -255,9 +253,9 @@ class FastapiExportWindow(QDialog):
                 self.config,
                 self.config_path,
             )
-            self._set_status(f"已导出：{self.output_path}", "success")
+            self._set_status(tr("export_success", path=self.output_path), "success")
         except Exception as exc:
-            self._set_status(f"导出失败：{exc}", "error")
+            self._set_status(tr("export_fail", error=str(exc)), "error")
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:

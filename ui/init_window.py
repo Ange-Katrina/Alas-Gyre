@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
 from .api_client import api_base_url, api_headers
 from .fastapi_export_window import ensure_api_token, export_fastapi_file, save_config
 from .main_window import WindowButton
+from .i18n import tr
 
 
 class InitSetupWindow(QDialog):
@@ -52,7 +53,7 @@ class InitSetupWindow(QDialog):
         top_layout = QHBoxLayout(self.topBg)
         top_layout.setContentsMargins(20, 0, 8, 0)
 
-        title = QLabel("初始化设置")
+        title = QLabel(tr("wizard_title"))
         title.setObjectName("initTitle")
         top_layout.addWidget(title)
         top_layout.addStretch()
@@ -70,10 +71,7 @@ class InitSetupWindow(QDialog):
         body_layout.setContentsMargins(24, 18, 24, 18)
         body_layout.setSpacing(12)
 
-        desc = QLabel(
-            "首次运行需要设置 AzurLaneAutoScript WebUI 地址，并导出适配后的 fastapi.py。"
-            "上传覆盖并重启 WebUI 后，本工具才能远程读取状态、启停任务和查看日志。"
-        )
+        desc = QLabel(tr("welcome_desc"))
         desc.setObjectName("initDesc")
         desc.setWordWrap(True)
         body_layout.addWidget(desc)
@@ -86,7 +84,7 @@ class InitSetupWindow(QDialog):
 
         ip_layout = QHBoxLayout()
         ip_layout.setSpacing(10)
-        ip_label = QLabel("IP 地址")
+        ip_label = QLabel(tr("ip_address"))
         ip_label.setObjectName("formLabel")
         ip_label.setFixedWidth(68)
         self.ipInput = QLineEdit(self.config.get("ip", "127.0.0.1"))
@@ -98,7 +96,7 @@ class InitSetupWindow(QDialog):
 
         port_layout = QHBoxLayout()
         port_layout.setSpacing(10)
-        port_label = QLabel("服务端口")
+        port_label = QLabel(tr("service_port"))
         port_label.setObjectName("formLabel")
         port_label.setFixedWidth(68)
         self.portInput = QLineEdit(self.config.get("port", "22267"))
@@ -109,7 +107,7 @@ class InitSetupWindow(QDialog):
         port_layout.addWidget(self.portInput)
         port_layout.addStretch()
 
-        self.testBtn = QPushButton("测试连接")
+        self.testBtn = QPushButton(tr("test_connection"))
         self.testBtn.setObjectName("testBtn")
         self.testBtn.setCursor(Qt.PointingHandCursor)
         self.testBtn.setFocusPolicy(Qt.NoFocus)
@@ -130,7 +128,7 @@ class InitSetupWindow(QDialog):
         token_layout.addWidget(token_label)
         token_layout.addWidget(self.tokenInput, stretch=1)
 
-        self.generateBtn = QPushButton("生成")
+        self.generateBtn = QPushButton(tr("generate"))
         self.generateBtn.setObjectName("tokenBtn")
         self.generateBtn.setCursor(Qt.PointingHandCursor)
         self.generateBtn.setFocusPolicy(Qt.NoFocus)
@@ -146,21 +144,18 @@ class InitSetupWindow(QDialog):
         install_layout.setContentsMargins(12, 10, 12, 10)
         install_layout.setSpacing(8)
 
-        install_title = QLabel("安装 fastapi.py")
+        install_title = QLabel(tr("step3_title"))
         install_title.setObjectName("initPanelTitle")
         install_layout.addWidget(install_title)
 
-        install_text = QLabel(
-            "点击导出后，将 output/fastapi.py 上传并覆盖 "
-            "AzurLaneAutoScript/module/webui/fastapi.py，然后重启 WebUI。"
-        )
+        install_text = QLabel(tr("step3_desc"))
         install_text.setObjectName("initHint")
         install_text.setWordWrap(True)
         install_layout.addWidget(install_text)
 
         install_btn_layout = QHBoxLayout()
         install_btn_layout.addStretch()
-        self.exportBtn = QPushButton("导出 fastapi.py")
+        self.exportBtn = QPushButton(tr("export_btn"))
         self.exportBtn.setObjectName("fastapiExportBtn")
         self.exportBtn.setCursor(Qt.PointingHandCursor)
         self.exportBtn.setFocusPolicy(Qt.NoFocus)
@@ -177,7 +172,7 @@ class InitSetupWindow(QDialog):
 
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
-        self.skipBtn = QPushButton("稍后设置")
+        self.skipBtn = QPushButton(tr("cancel"))
         self.skipBtn.setObjectName("cancelBtn")
         self.skipBtn.setCursor(Qt.PointingHandCursor)
         self.skipBtn.setFocusPolicy(Qt.NoFocus)
@@ -185,7 +180,7 @@ class InitSetupWindow(QDialog):
         self.skipBtn.clicked.connect(self.reject)
         btn_layout.addWidget(self.skipBtn)
 
-        self.finishBtn = QPushButton("保存并进入")
+        self.finishBtn = QPushButton(tr("finish"))
         self.finishBtn.setObjectName("saveBtn")
         self.finishBtn.setCursor(Qt.PointingHandCursor)
         self.finishBtn.setFocusPolicy(Qt.NoFocus)
@@ -244,7 +239,7 @@ class InitSetupWindow(QDialog):
         token = ensure_api_token(self.config, self.config_path)
         self.tokenInput.setText(token)
         self.tokenInput.setFocus()
-        self._set_status("已生成 API Token。导出 fastapi.py 后，请上传覆盖到 AzurLaneAutoScript。", "success")
+        self._set_status(tr("token_generated"), "success")
 
     def _export_fastapi(self):
         self._sync_config_from_ui()
@@ -256,9 +251,9 @@ class InitSetupWindow(QDialog):
                 self.config_path,
             )
             self.tokenInput.setText(self.config.get("api_token", ""))
-            self._set_status(f"已导出：{output_path}", "success")
+            self._set_status(tr("export_success", path=output_path), "success")
         except Exception as exc:
-            self._set_status(f"导出失败：{exc}", "error")
+            self._set_status(tr("export_fail", error=str(exc)), "error")
 
     def _finish_setup(self):
         self._sync_config_from_ui()
@@ -267,12 +262,12 @@ class InitSetupWindow(QDialog):
             save_config(self.config, self.config_path)
             self.accept()
         except Exception as exc:
-            self._set_status(f"保存失败：{exc}", "error")
+            self._set_status(tr("export_fail", error=str(exc)), "error")
 
     def _run_connection_test(self):
         self._sync_config_from_ui()
         if not self.config["ip"] or not self.config["port"].isdigit():
-            self._on_test_result(False, "IP 或端口无效")
+            self._on_test_result(False, tr("test_invalid"))
             return
 
         self.testBtn.setText("...")
@@ -294,7 +289,7 @@ class InitSetupWindow(QDialog):
             )
             success = resp.status_code == 200
             if resp.status_code == 401:
-                message = "Token 无效，或还没有上传新导出的 fastapi.py"
+                message = tr("test_unauthorized")
             elif not success:
                 message = f"HTTP {resp.status_code}"
         except Exception as exc:
@@ -328,12 +323,12 @@ class InitSetupWindow(QDialog):
         self.testBtn.setProperty("state", "success" if success else "error")
         self.testBtn.style().unpolish(self.testBtn)
         self.testBtn.style().polish(self.testBtn)
-        self._set_status("连接测试成功。" if success else f"连接测试失败：{message}", "success" if success else "error")
+        self._set_status(tr("test_success") if success else tr("test_failed", error=message), "success" if success else "error")
         QTimer.singleShot(2000, self._reset_test_btn)
 
     def _reset_test_btn(self):
         self.testBtn.setIcon(QIcon())
-        self.testBtn.setText("测试连接")
+        self.testBtn.setText(tr("test_connection"))
         self.testBtn.setToolTip("")
         self.testBtn.setProperty("state", "normal")
         self.testBtn.style().unpolish(self.testBtn)

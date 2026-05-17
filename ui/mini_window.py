@@ -5,14 +5,7 @@ import sys
 from .api_client import api_headers
 from .main_window import StatusIndicator, normalize_status, ConfigActionButton
 from .window_snap import snap_to_available_screen
-
-STATUS_TEXT = {
-    "running": "运行中",
-    "error": "发生错误",
-    "update": "更新中",
-    "disconnected": "断开",
-    "idle": "闲置",
-}
+from .i18n import tr
 
 class MarqueeLabel(QLabel):
     def __init__(self, parent=None):
@@ -144,7 +137,7 @@ class MiniConfigRow(QWidget):
         layout.addWidget(self.toggleBtn)
         self.current_status = "idle"
         self.toggleBtn.set_status("idle")
-        self._status_text = STATUS_TEXT["idle"]
+        self._status_text = tr("idle")
         self._refresh_status_label()
 
     def resizeEvent(self, event):
@@ -195,7 +188,7 @@ class MiniConfigRow(QWidget):
         self.current_status = status
         self.statusIndicator.setStatus(status)
         self.toggleBtn.set_status(status)
-        self._set_status_text(STATUS_TEXT.get(status, STATUS_TEXT["idle"]))
+        self._set_status_text(tr(status))
 
 class MiniWindow(QWidget):
     """
@@ -225,7 +218,7 @@ class MiniWindow(QWidget):
         top_bar.setContentsMargins(0, 0, 8, 0)
         top_bar.setSpacing(0)
         top_bar.addStretch()
-        self.restoreBtn = QPushButton("⛶ 返回主界面")
+        self.restoreBtn = QPushButton("⛶ " + tr("show_main"))
         self.restoreBtn.setObjectName("miniRestoreBtn")
         self.restoreBtn.setCursor(Qt.PointingHandCursor)
         self.restoreBtn.setFocusPolicy(Qt.NoFocus)
@@ -291,6 +284,12 @@ class MiniWindow(QWidget):
         self.apply_window_settings()
 
     def apply_window_settings(self):
+        self.restoreBtn.setText("⛶ " + tr("show_main"))
+        self.rebuild_rows()
+        for c, status in self.main_card._statuses.items():
+            if c in self.rows:
+                self.rows[c].update_status(status)
+
         opacity = self._normalize_opacity(self.main_card.config.get("mini_opacity", 100))
         self.setWindowOpacity(opacity / 100.0)
 

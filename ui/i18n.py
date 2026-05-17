@@ -1,0 +1,196 @@
+TRANSLATIONS = {
+    "zh": {
+        # General / Common
+        "cancel": "取消",
+        "save": "保存",
+        "close": "关闭",
+        "minimize": "最小化",
+        "show_main": "显示主界面",
+        "show_float": "显示悬浮窗",
+        "open_webui": "打开 Alas 主页",
+        "wizard": "初始化向导",
+        "quit": "退出",
+        
+        # MainWindow
+        "main_title": "Alas-Gyre 极简控制台",
+        "config_label": "配置:",
+        "status_label": "状态:",
+        "idle": "空闲",
+        "running": "运行中",
+        "error": "出错",
+        "update": "更新中",
+        "disconnected": "未连接",
+        "start": "启 动",
+        "stop": "停 止",
+        "export_btn_tip": "导出 fastapi.py",
+        "settings_btn_tip": "系统设置",
+        "log_btn_tip": "查看日志",
+        "home_btn_tip": "打开 WebUI",
+        "float_btn_tip": "显示悬浮窗",
+        
+        # Settings
+        "settings_title": "系统设置",
+        "auto_start": "开机自启动",
+        "always_on_top": "主窗口置顶",
+        "click_through": "悬浮窗穿透",
+        "light_mode": "浅色模式",
+        "english_mode": "英文模式 (English)",
+        "float_opacity": "悬浮透明",
+        "ip_address": "IP 地址",
+        "service_port": "服务端口",
+        "test_connection": "测试连接",
+        "version_update": "版本更新",
+        "current_version": "当前版本",
+        "check_update": "检查更新",
+        "checking": "检查中...",
+        "check_failed": "检查失败",
+        "new_version": "已是最新",
+        "download_update": "下载更新",
+        "downloading": "下载中...",
+        "timeout": "检查超时",
+        "restart": "重启中...",
+        "test_invalid": "IP 或端口无效",
+        "test_unauthorized": "Token 无效或未导出新的 fastapi.py",
+        "test_success": "连接测试成功。",
+        "test_failed": "连接测试失败：{error}",
+        
+        # Logs
+        "log_title": "实时日志 - {config}",
+        "clear_log": "清空日志",
+        "scroll_lock": "滚动锁定",
+        
+        # Export
+        "export_title": "导出 fastapi.py",
+        "export_desc": "生成适配 Alas-Gyre 控制面板的 fastapi.py。覆盖后，本工具可远程读取配置、同步状态、启停任务和查看实时日志。",
+        "export_btn": "导出 fastapi.py",
+        "export_success": "导出成功！文件已保存至：\n{path}",
+        "export_fail": "导出失败：{error}",
+        "output_file": "输出文件",
+        "install_steps": "安装步骤",
+        "step_1": "点击“导出 fastapi.py”生成文件。",
+        "step_2": "上传并覆盖 Alas 的 module/webui/fastapi.py。",
+        "step_3": "重启 Alas 或 WebUI 服务，让新接口生效。",
+        "step_4": "回到设置页点击“测试连接”，确认 Token 和接口可用。",
+        "export_warning": "安全提示：导出的 fastapi.py 内含 Token，请勿公开上传 config.json 或 output/fastapi.py。",
+        
+        # Setup Wizard
+        "wizard_title": "Alas-Gyre 初始化向导",
+        "welcome": "欢迎使用 Alas-Gyre",
+        "welcome_desc": "在开始之前，我们需要配置连接到您的 Alas WebUI 服务端。\n请填写您的 Alas 服务端网络地址：",
+        "test_connect": "测试连接",
+        "step2_title": "安全 Token 验证",
+        "step2_desc": "Alas-Gyre 采用专有的安全验证机制保护您的 API 端点。\n请输入或生成您的 API Token：",
+        "generate": "生成",
+        "step3_title": "导出并覆盖 fastapi.py",
+        "step3_desc": "请点击下方按钮导出 fastapi.py，并将其上传覆盖至 ALAS 的：\nmodule/webui/fastapi.py\n\n覆盖完成后请重启 ALAS，然后点击“测试连接”验证通道：",
+        "next": "下一步",
+        "prev": "上一步",
+        "finish": "完成并启动",
+        "token_generated": "已生成 API Token。导出 fastapi.py 后，请上传覆盖到 Alas 服务端。",
+    },
+    "en": {
+        # General / Common
+        "cancel": "Cancel",
+        "save": "Save",
+        "close": "Close",
+        "minimize": "Minimize",
+        "show_main": "Show Console",
+        "show_float": "Show Floating Widget",
+        "open_webui": "Open ALAS WebUI",
+        "wizard": "Setup Wizard",
+        "quit": "Quit",
+        
+        # MainWindow
+        "main_title": "Alas-Gyre Console",
+        "config_label": "Config:",
+        "status_label": "Status:",
+        "idle": "Idle",
+        "running": "Running",
+        "error": "Error",
+        "update": "Updating",
+        "disconnected": "Disconnected",
+        "start": "Start",
+        "stop": "Stop",
+        "export_btn_tip": "Export fastapi.py",
+        "settings_btn_tip": "Settings",
+        "log_btn_tip": "View Logs",
+        "home_btn_tip": "Open WebUI",
+        "float_btn_tip": "Show Floating Widget",
+        
+        # Settings
+        "settings_title": "System Settings",
+        "auto_start": "Auto Start",
+        "always_on_top": "Always on Top",
+        "click_through": "Widget Penetration",
+        "light_mode": "Light Mode",
+        "english_mode": "English Mode",
+        "float_opacity": "Widget Opacity",
+        "ip_address": "IP Address",
+        "service_port": "Service Port",
+        "test_connection": "Test Connection",
+        "version_update": "Updates",
+        "current_version": "Version",
+        "check_update": "Check Update",
+        "checking": "Checking...",
+        "check_failed": "Failed",
+        "new_version": "Latest",
+        "download_update": "Download",
+        "downloading": "Downloading...",
+        "timeout": "Timeout",
+        "restart": "Restarting...",
+        "test_invalid": "Invalid IP or Port",
+        "test_unauthorized": "Invalid Token or missing new fastapi.py",
+        "test_success": "Connection tested successfully.",
+        "test_failed": "Connection test failed: {error}",
+        
+        # Logs
+        "log_title": "Real-time Log - {config}",
+        "clear_log": "Clear Logs",
+        "scroll_lock": "Scroll Lock",
+        
+        # Export
+        "export_title": "Export fastapi.py",
+        "export_desc": "Generate fastapi.py for Alas-Gyre. Once replaced, this tool can remotely read config, sync status, control tasks and view real-time logs.",
+        "export_btn": "Export fastapi.py",
+        "export_success": "Exported successfully! Saved to:\n{path}",
+        "export_fail": "Export failed: {error}",
+        "output_file": "Output File",
+        "install_steps": "Installation Steps",
+        "step_1": "Click 'Export fastapi.py' to generate the file.",
+        "step_2": "Upload and overwrite module/webui/fastapi.py in Alas.",
+        "step_3": "Restart Alas or WebUI service to make the new endpoints active.",
+        "step_4": "Go back to settings and click 'Test Connection' to verify.",
+        "export_warning": "Security Warning: The exported fastapi.py contains your secret Token. Do not share or upload config.json or output/fastapi.py publicly.",
+        
+        # Setup Wizard
+        "wizard_title": "Alas-Gyre Setup Wizard",
+        "welcome": "Welcome to Alas-Gyre",
+        "welcome_desc": "Before starting, we need to configure the connection to your ALAS WebUI.\nPlease enter the network address of your ALAS WebUI:",
+        "test_connect": "Test Connect",
+        "step2_title": "Security Token",
+        "step2_desc": "Alas-Gyre uses a custom security token to secure your API endpoints.\nPlease enter or generate your API Token:",
+        "generate": "Generate",
+        "step3_title": "Deploy fastapi.py",
+        "step3_desc": "Please click below to export fastapi.py, and overwrite it on your ALAS host under:\nmodule/webui/fastapi.py\n\nRestart ALAS after replacing, then click 'Test Connection' to verify:",
+        "next": "Next",
+        "prev": "Prev",
+        "finish": "Finish & Launch",
+        "token_generated": "API Token generated. Once exported, please upload and overwrite fastapi.py under Alas host.",
+    }
+}
+
+_current_lang = "zh"
+
+def set_language(lang):
+    global _current_lang
+    if lang in TRANSLATIONS:
+        _current_lang = lang
+
+def get_language():
+    return _current_lang
+
+def tr(key, **kwargs):
+    text = TRANSLATIONS.get(_current_lang, TRANSLATIONS["zh"]).get(key, key)
+    if kwargs:
+        return text.format(**kwargs)
+    return text
