@@ -21,12 +21,12 @@
 
 | Main Control (Single Instance) | Main Control (Multi-Instance) |
 | :---: | :---: |
-| <img src="ui_preview_en.png?v=4" alt="Single Config" width="314"/> | <img src="multi_preview_en.png?v=4" alt="Multi Config" width="314"/> |
+| <img src="docs/images/ui_preview_en.png?v=4" alt="Single Config" width="314"/> | <img src="docs/images/multi_preview_en.png?v=4" alt="Multi Config" width="314"/> |
 | *Main Control Dashboard (Single Config)* | *Real-time Multi-Instance Dashboard* |
 
 | Secure Settings Window | Real-Time Log Viewer | Micro-Floating Widget |
 | :---: | :---: | :---: |
-| <img src="settings_preview_en.png?v=4" alt="Settings Window" width="350"/> | <img src="log_preview_en.png?v=4" alt="Log Viewer" width="350"/> | <img src="float_preview_en.png?v=4" alt="Floating Widget" width="220"/> |
+| <img src="docs/images/settings_preview_en.png?v=4" alt="Settings Window" width="350"/> | <img src="docs/images/log_preview_en.png?v=4" alt="Log Viewer" width="350"/> | <img src="docs/images/float_preview_en.png?v=4" alt="Floating Widget" width="220"/> |
 | *Secure Connection Settings* | *Trace Log Streamer* | *Translucent Floating Monitor* |
 
 ## ✨ Key Features
@@ -84,7 +84,7 @@ If you want to run the project using raw Python or make custom modifications:
 Alas-Gyre communicates with the ALAS instance over HTTP using a secure customized API token.
 
 <div align="center">
-  <img src="settings_preview_en.png?v=4" alt="Alas-Gyre Settings Preview" width="420"/>
+  <img src="docs/images/settings_preview_en.png?v=4" alt="Alas-Gyre Settings Preview" width="420"/>
   <p><em>Secure Connection Settings & Client Customization</em></p>
 </div>
 

@@ -21,12 +21,12 @@
 
 | 单实例主界面 | 多配置实例并行运行 |
 | :---: | :---: |
-| <img src="ui_preview.png?v=4" alt="单实例主界面" width="314"/> | <img src="multi_preview.png?v=4" alt="多配置实例主界面" width="314"/> |
+| <img src="docs/images/ui_preview.png?v=4" alt="单实例主界面" width="314"/> | <img src="docs/images/multi_preview.png?v=4" alt="多配置实例主界面" width="314"/> |
 | *极简单配置卡片面板* | *多配置实例并行并发控制与心跳* |
 
 | 安全连接与个性化设置 | 实时日志高亮流式查看器 | 桌面上层透明呼吸悬浮窗 |
 | :---: | :---: | :---: |
-| <img src="settings_preview.png?v=4" alt="设置界面" width="350"/> | <img src="log_preview.png?v=4" alt="日志查看器" width="350"/> | <img src="float_preview.png?v=4" alt="悬浮窗" width="220"/> |
+| <img src="docs/images/settings_preview.png?v=4" alt="设置界面" width="350"/> | <img src="docs/images/log_preview.png?v=4" alt="日志查看器" width="350"/> | <img src="docs/images/float_preview.png?v=4" alt="悬浮窗" width="220"/> |
 | *安全认证连接设置* | *动态日志等级染色高亮面板* | *鼠标穿透与半透明桌面监控* |
 
 ## ✨ 核心特性
@@ -84,7 +84,7 @@
 Alas-Gyre 通过内置的安全加密握手协议与 ALAS 服务端交互。
 
 <div align="center">
-  <img src="settings_preview.png?v=4" alt="Alas-Gyre 设置界面预览" width="420"/>
+  <img src="docs/images/settings_preview.png?v=4" alt="Alas-Gyre 设置界面预览" width="420"/>
   <p><em>安全连接配置与客户端个性化设置</em></p>
 </div>
 
