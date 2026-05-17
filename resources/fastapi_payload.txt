@@ -1,0 +1,470 @@
+"""
+Copy from pywebio.platform.fastapi, with Alas-Gyre remote API routes.
+"""
+import asyncio
+from collections import deque
+import os
+import secrets
+
+import uvicorn
+from pywebio.platform.fastapi import (STATIC_PATH, Session, cdn_validation,
+                                      get_free_port,
+                                      open_webbrowser_on_server_started,
+                                      start_remote_access_service,
+                                      webio_routes)
+try:
+    from rich.console import Console
+except Exception:  # pragma: no cover - fallback for unusual deployments
+    Console = None
+from starlette.applications import Starlette
+from starlette.middleware import Middleware
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import JSONResponse
+from starlette.routing import Mount, Route
+from starlette.staticfiles import StaticFiles
+
+from module.webui.process_manager import ProcessManager
+
+
+DEFAULT_CONFIG = "alas"
+CONFIG_DIR = "config"
+LOG_DIR = "log"
+LOG_TAIL_CHUNK_SIZE = 64 * 1024
+DEFAULT_LOG_LINES = 200
+MAX_LOG_LINES = 2000
+ALAS_GYRE_API_TOKEN = "__ALAS_GYRE_API_TOKEN__"
+TOKEN_PLACEHOLDER = "__" + "ALAS_GYRE_API_TOKEN" + "__"
+TOKEN_HEADER = "X-Alas-Gyre-Token"
+
+STATE_MAP = {
+    1: "running",
+    2: "idle",
+    3: "error",
+    4: "update",
+}
+VALID_STATUSES = {"idle", "running", "error", "update", "disconnected"}
+
+
+def normalize_status(status):
+    if isinstance(status, str) and status in VALID_STATUSES:
+        return status
+    return STATE_MAP.get(status, "idle")
+
+
+def is_api_authorized(request):
+    expected_token = ALAS_GYRE_API_TOKEN.strip()
+    if not expected_token or expected_token == TOKEN_PLACEHOLDER:
+        return False
+
+    provided_token = request.headers.get(TOKEN_HEADER, "")
+    return secrets.compare_digest(provided_token, expected_token)
+
+
+def get_config_names():
+    configs = []
+    if os.path.isdir(CONFIG_DIR):
+        for entry in os.scandir(CONFIG_DIR):
+            if not entry.is_file():
+                continue
+            file_name = entry.name
+            if not file_name.endswith(".json") or file_name.startswith("template"):
+                continue
+            configs.append(file_name[:-5])
+    configs.sort(key=str.lower)
+    return configs or [DEFAULT_CONFIG]
+
+
+def get_default_config():
+    configs = get_config_names()
+    if DEFAULT_CONFIG in configs:
+        return DEFAULT_CONFIG
+    return configs[0] if configs else DEFAULT_CONFIG
+
+
+def get_requested_config(request):
+    config_name = request.query_params.get("config")
+    if config_name is None:
+        return get_default_config()
+    return config_name.strip() or get_default_config()
+
+
+def validate_requested_config(request, config_name):
+    configs = get_config_names()
+    if config_name not in configs:
+        return JSONResponse(
+            {
+                "error": "unknown_config",
+                "config": config_name,
+                "configs": configs,
+            },
+            status_code=404,
+        )
+    return None
+
+
+def get_manager(config_name):
+    return ProcessManager.get_manager(config_name)
+
+
+def get_status(config_name):
+    manager = get_manager(config_name)
+    return normalize_status(getattr(manager, "state", None))
+
+
+def get_log_line_limit(request):
+    try:
+        value = int(request.query_params.get("lines", str(DEFAULT_LOG_LINES)))
+    except (TypeError, ValueError):
+        value = DEFAULT_LOG_LINES
+    return max(1, min(value, MAX_LOG_LINES))
+
+
+def get_latest_log_file(config_name):
+    if not os.path.isdir(LOG_DIR):
+        return None
+
+    suffix = f"_{config_name}.txt"
+    candidates = []
+    for entry in os.scandir(LOG_DIR):
+        if not entry.is_file() or not entry.name.endswith(suffix):
+            continue
+        candidates.append(entry.path)
+
+    if not candidates:
+        return None
+
+    candidates.sort(
+        key=lambda path: (os.path.getmtime(path), os.path.basename(path)),
+        reverse=True,
+    )
+    return candidates[0]
+
+
+def tail_log_file(log_file, line_limit):
+    file_size = os.path.getsize(log_file)
+    if file_size <= 0:
+        return ""
+
+    chunks = []
+    newline_count = 0
+    position = file_size
+
+    with open(log_file, "rb") as f:
+        while position > 0 and newline_count <= line_limit:
+            read_size = min(LOG_TAIL_CHUNK_SIZE, position)
+            position -= read_size
+            f.seek(position)
+            chunk = f.read(read_size)
+            chunks.append(chunk)
+            newline_count += chunk.count(b"\n")
+
+    data = b"".join(reversed(chunks))
+    lines = data.splitlines(keepends=True)
+    return b"".join(lines[-line_limit:]).decode("utf-8", errors="replace")
+
+
+def render_log_item(renderable):
+    if isinstance(renderable, str):
+        return renderable if renderable.endswith("\n") else renderable + "\n"
+    if Console is None:
+        return str(renderable) + "\n"
+
+    console = Console(no_color=True, highlight=False, width=119)
+    with console.capture() as capture:
+        console.print(renderable)
+    return capture.get()
+
+
+def get_live_log(config_name, line_limit):
+    manager = get_manager(config_name)
+    renderables = getattr(manager, "renderables", None)
+    if not renderables:
+        return ""
+
+    lines = deque(maxlen=line_limit)
+    for renderable in renderables:
+        lines.extend(render_log_item(renderable).splitlines(True))
+    return "".join(lines)
+
+
+class HeaderMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        if (
+            request.url.path.startswith("/api/")
+            and request.method.upper() != "OPTIONS"
+            and not is_api_authorized(request)
+        ):
+            response = JSONResponse({"error": "unauthorized"}, status_code=401)
+        else:
+            response = await call_next(request)
+        response.headers["Cache-Control"] = "no-cache"
+        response.headers["Access-Control-Allow-Origin"] = "*"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+        response.headers["Access-Control-Allow-Headers"] = (
+            "Content-Type, Authorization, X-Alas-Gyre-Token"
+        )
+        return response
+
+
+def asgi_app(
+    applications,
+    cdn=True,
+    static_dir=None,
+    debug=False,
+    allowed_origins=None,
+    check_origin=None,
+    **starlette_settings
+):
+    debug = Session.debug = os.environ.get("PYWEBIO_DEBUG", debug)
+    cdn = cdn_validation(cdn, "warn")
+    if cdn is False:
+        cdn = "pywebio_static"
+    routes = webio_routes(
+        applications,
+        cdn=cdn,
+        allowed_origins=allowed_origins,
+        check_origin=check_origin,
+    )
+
+    async def api_options(request):
+        return JSONResponse({"ok": True})
+
+    async def api_health(request):
+        configs = get_config_names()
+        return JSONResponse(
+            {
+                "ok": True,
+                "configs": configs,
+                "default": get_default_config(),
+            }
+        )
+
+    async def api_get_configs(request):
+        configs = get_config_names()
+        return JSONResponse(
+            {
+                "configs": configs,
+                "default": get_default_config(),
+            }
+        )
+
+    async def api_get_status_all(request):
+        statuses = {}
+        errors = {}
+        for config_name in get_config_names():
+            try:
+                statuses[config_name] = get_status(config_name)
+            except Exception as exc:
+                statuses[config_name] = "error"
+                errors[config_name] = str(exc)
+
+        payload = {"statuses": statuses}
+        if errors:
+            payload["errors"] = errors
+        return JSONResponse(payload)
+
+    async def api_get_status(request):
+        config_name = get_requested_config(request)
+        error_response = validate_requested_config(request, config_name)
+        if error_response is not None:
+            return error_response
+
+        try:
+            status = get_status(config_name)
+        except Exception as exc:
+            return JSONResponse(
+                {
+                    "config": config_name,
+                    "status": "error",
+                    "error": str(exc),
+                },
+                status_code=500,
+            )
+        return JSONResponse({"config": config_name, "status": status})
+
+    async def api_post_start(request):
+        config_name = get_requested_config(request)
+        error_response = validate_requested_config(request, config_name)
+        if error_response is not None:
+            return error_response
+
+        try:
+            manager = get_manager(config_name)
+            already_running = bool(getattr(manager, "alive", False))
+            if not already_running:
+                manager.start(None)
+            return JSONResponse(
+                {
+                    "config": config_name,
+                    "message": "already_running" if already_running else "started",
+                    "status": get_status(config_name),
+                }
+            )
+        except Exception as exc:
+            return JSONResponse(
+                {
+                    "config": config_name,
+                    "message": "start_failed",
+                    "status": "error",
+                    "error": str(exc),
+                },
+                status_code=500,
+            )
+
+    async def api_post_stop(request):
+        config_name = get_requested_config(request)
+        error_response = validate_requested_config(request, config_name)
+        if error_response is not None:
+            return error_response
+
+        try:
+            manager = get_manager(config_name)
+            was_running = bool(getattr(manager, "alive", False))
+            if was_running:
+                manager.stop()
+            return JSONResponse(
+                {
+                    "config": config_name,
+                    "message": "stopped" if was_running else "already_stopped",
+                    "status": get_status(config_name),
+                }
+            )
+        except Exception as exc:
+            return JSONResponse(
+                {
+                    "config": config_name,
+                    "message": "stop_failed",
+                    "status": "error",
+                    "error": str(exc),
+                },
+                status_code=500,
+            )
+
+    async def api_get_log(request):
+        config_name = get_requested_config(request)
+        error_response = validate_requested_config(request, config_name)
+        if error_response is not None:
+            return error_response
+
+        line_limit = get_log_line_limit(request)
+        live_error = None
+        try:
+            live_log = get_live_log(config_name, line_limit)
+        except Exception as exc:
+            live_log = ""
+            live_error = str(exc)
+
+        if live_log:
+            return JSONResponse(
+                {
+                    "config": config_name,
+                    "exists": True,
+                    "source": "live",
+                    "lines": line_limit,
+                    "log": live_log,
+                }
+            )
+
+        log_file = get_latest_log_file(config_name)
+        if not log_file or not os.path.exists(log_file):
+            payload = {
+                "config": config_name,
+                "exists": False,
+                "source": "none",
+                "lines": line_limit,
+                "log": "",
+            }
+            if live_error:
+                payload["live_error"] = live_error
+            return JSONResponse(payload)
+
+        try:
+            payload = {
+                "config": config_name,
+                "exists": True,
+                "source": "file",
+                "file": os.path.basename(log_file),
+                "lines": line_limit,
+                "log": tail_log_file(log_file, line_limit),
+            }
+            if live_error:
+                payload["live_error"] = live_error
+            return JSONResponse(payload)
+        except Exception as exc:
+            return JSONResponse(
+                {
+                    "config": config_name,
+                    "exists": True,
+                    "source": "file",
+                    "file": os.path.basename(log_file),
+                    "lines": line_limit,
+                    "log": "",
+                    "error": str(exc),
+                },
+                status_code=500,
+            )
+
+    routes.append(Route("/api/{path:path}", api_options, methods=["OPTIONS"]))
+    routes.append(Route("/api/health", api_health, methods=["GET"]))
+    routes.append(Route("/api/configs", api_get_configs, methods=["GET"]))
+    routes.append(Route("/api/status", api_get_status, methods=["GET"]))
+    routes.append(Route("/api/status_all", api_get_status_all, methods=["GET"]))
+    routes.append(Route("/api/start", api_post_start, methods=["POST"]))
+    routes.append(Route("/api/stop", api_post_stop, methods=["POST"]))
+    routes.append(Route("/api/log", api_get_log, methods=["GET"]))
+
+    if static_dir:
+        routes.append(
+            Mount("/static", app=StaticFiles(directory=static_dir), name="static")
+        )
+    routes.append(
+        Mount(
+            "/pywebio_static",
+            app=StaticFiles(directory=STATIC_PATH),
+            name="pywebio_static",
+        )
+    )
+    middleware = [Middleware(HeaderMiddleware)]
+    return Starlette(
+        routes=routes, middleware=middleware, debug=debug, **starlette_settings
+    )
+
+
+def start_server(
+    applications,
+    port=0,
+    host="",
+    cdn=True,
+    static_dir=None,
+    remote_access=False,
+    debug=False,
+    allowed_origins=None,
+    check_origin=None,
+    auto_open_webbrowser=False,
+    **uvicorn_settings
+):
+
+    app = asgi_app(
+        applications,
+        cdn=cdn,
+        static_dir=static_dir,
+        debug=debug,
+        allowed_origins=allowed_origins,
+        check_origin=check_origin,
+    )
+
+    if auto_open_webbrowser:
+        asyncio.get_event_loop().create_task(
+            open_webbrowser_on_server_started("localhost", port)
+        )
+
+    if not host:
+        host = "0.0.0.0"
+
+    if port == 0:
+        port = get_free_port()
+
+    if remote_access:
+        start_remote_access_service(local_port=port)
+
+    uvicorn.run(app, host=host, port=port, **uvicorn_settings)

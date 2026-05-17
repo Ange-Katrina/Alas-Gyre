@@ -1,0 +1,151 @@
+name: 统一构建并发布
+
+on:
+  push:
+    tags:
+      - 'v*'  # 版本号标记
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  meta:
+    name: Gather Meta Information
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.set_tag.outputs.tag }}
+      prerelease: ${{ steps.set_pre.outputs.prerelease }}
+    steps:
+      - name: Check-out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set tag
+        id: set_tag
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            tag="${{ github.ref_name }}"
+          else
+            tag=$(git describe --tags --match "v*" HEAD 2>/dev/null || echo "v0.0.1-$(git rev-parse --short HEAD)")
+          fi
+          echo "tag=${tag}" | tee -a $GITHUB_OUTPUT
+
+      - name: Check if it is a pre-release
+        id: set_pre
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          if [[ '${{ steps.set_tag.outputs.tag }}' =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "prerelease=false" | tee -a $GITHUB_OUTPUT
+          else
+            echo "prerelease=true" | tee -a $GITHUB_OUTPUT
+          fi
+
+      - name: Generate Changelog
+        id: generate_changelog
+        run: |
+          echo "=== Generating Changelog ==="
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            previous_tag=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+            if [[ -n "$previous_tag" ]]; then
+              git log --oneline "$previous_tag..HEAD" | grep -v "Merge pull request" > full_commits.txt
+              total_commits=$(wc -l < full_commits.txt)
+              head -15 full_commits.txt > CHANGELOG.md
+              if [[ $total_commits -gt 15 ]]; then
+                echo "" >> CHANGELOG.md
+                echo "**Full Changelog**: https://github.com/${{ github.repository }}/compare/$previous_tag...${{ steps.set_tag.outputs.tag }}" >> CHANGELOG.md
+              fi
+            else
+              git log --oneline | grep -v "Merge pull request" | head -15 > CHANGELOG.md
+            fi
+          else
+            git log --oneline --since="1 week ago" | grep -v "Merge pull request" | head -15 > CHANGELOG.md
+          fi
+          echo "## What's Changed" > temp_changelog.md
+          echo "" >> temp_changelog.md
+          cat CHANGELOG.md >> temp_changelog.md
+          mv temp_changelog.md CHANGELOG.md
+
+      - name: Update version in main.py
+        run: |
+          tag="${{ steps.set_tag.outputs.tag }}"
+          sed -i "s/VERSION = \"v[0-9]\+\.[0-9]\+\.[0-9]\+\"/VERSION = \"$tag\"/g" main.py
+
+      - name: Upload updated code
+        uses: actions/upload-artifact@v4
+        with:
+          name: updated-code
+          path: .
+          retention-days: 1
+
+  build-pyinstaller:
+    name: Build with PyInstaller
+    needs: meta
+    runs-on: windows-latest
+    steps:
+      - name: Download updated code
+        uses: actions/download-artifact@v4
+        with:
+          name: updated-code
+          path: .
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          architecture: 'x64'
+          cache: 'pip'
+          cache-dependency-path: 'requirements.txt'
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller
+          pip install -r requirements.txt
+
+      - name: Build with PyInstaller
+        run: |
+          pyinstaller AlasHelper.spec --noconfirm
+
+      - name: Upload PyInstaller artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AlasHelper-PyInstaller-${{ needs.meta.outputs.tag }}
+          path: dist/AlasHelper.exe
+          retention-days: 1
+
+  release:
+    name: Publish Release
+    needs: [meta, build-pyinstaller]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - name: Download artifacts from GitHub
+        uses: actions/download-artifact@v4
+        with:
+          path: assets
+
+      - name: Clean up files
+        run: |
+          mkdir -p release
+          if [ -d "assets/AlasHelper-PyInstaller-${{ needs.meta.outputs.tag }}" ]; then
+            cp -f "assets/AlasHelper-PyInstaller-${{ needs.meta.outputs.tag }}/AlasHelper.exe" "release/AlasHelper.exe"
+          fi
+          if [ -f "assets/updated-code/CHANGELOG.md" ]; then
+            cp -f "assets/updated-code/CHANGELOG.md" "release/CHANGELOG.md"
+          fi
+          rm -rf assets
+        shell: bash
+
+      - name: Publish release to GitHub
+        uses: softprops/action-gh-release@v2.5.0
+        with:
+          tag_name: ${{ needs.meta.outputs.tag }}
+          name: ${{ needs.meta.outputs.tag }}
+          body_path: release/CHANGELOG.md
+          files: |
+            release/*.exe
+            release/CHANGELOG.md
+          prerelease: ${{ needs.meta.outputs.prerelease != 'false' }}

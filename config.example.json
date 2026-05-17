@@ -1,0 +1,11 @@
+{
+    "ip": "127.0.0.1",
+    "port": "22267",
+    "api_token": "",
+    "auto_start": false,
+    "always_on_top": false,
+    "mini_click_through": false,
+    "mini_opacity": 100,
+    "setup_completed": false,
+    "current_config": "alas"
+}

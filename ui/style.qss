@@ -1,0 +1,629 @@
+/* 主卡片 */
+QFrame#card, QFrame#settingsCard, QFrame#logCard, QFrame#fastapiCard, QFrame#initCard {
+    background-color: #262a31;
+    border: 1px solid #1b1e24;
+    border-radius: 8px;
+}
+
+QToolTip {
+    background-color: #1f2228;
+    color: #e8ebf0;
+    border: 1px solid #3a414d;
+    border-radius: 6px;
+    padding: 6px 8px;
+    font-size: 12px;
+    font-family: "Microsoft YaHei", "Segoe UI";
+}
+
+QWidget#configListBg {
+    background-color: #202329;
+    border-bottom: 1px solid #171a20;
+}
+
+QWidget#compactCtrlBg {
+    background-color: #191c21;
+    border-top-left-radius: 8px;
+    border-top-right-radius: 8px;
+    border-bottom: 1px solid #111419;
+}
+
+QWidget#mainBottomBg {
+    background-color: #2b2d33;
+    border-bottom-left-radius: 8px;
+    border-bottom-right-radius: 8px;
+}
+
+/* 窗口控制区 */
+QWidget#windowCtrlBg {
+    background-color: #191c21;
+    border-top-left-radius: 8px;
+    border-top-right-radius: 8px;
+    border-bottom: 1px solid #111419;
+}
+
+QWidget#topBg {
+    background-color: #202329;
+    border-bottom: 1px solid #171a20;
+}
+
+QWidget#settingsTopBg, QWidget#logTopBg, QWidget#fastapiTopBg, QWidget#initTopBg {
+    background-color: #191c21;
+    border-top-left-radius: 8px;
+    border-top-right-radius: 8px;
+    border-bottom: 1px solid #111419;
+}
+
+/* 中下区域背景 */
+QWidget#midBg, QWidget#settingsFormBg, QWidget#fastapiBodyBg, QWidget#initBodyBg {
+    background-color: transparent;
+    border: none;
+    border-bottom-left-radius: 8px;
+    border-bottom-right-radius: 8px;
+}
+
+QLabel#configLabel {
+    color: #f0f0f0;
+    font-size: 14px;
+    background: transparent;
+    border: none;
+}
+
+QLabel#statusLabel {
+    color: #c8ccd5;
+    font-size: 13px;
+    background: transparent;
+}
+
+QLabel#sectionTitle, QLabel#settingsTitle {
+    color: #8b8f99;
+    font-size: 12px;
+    background: transparent;
+}
+
+QLabel#settingsTitle, QLabel#logTitle, QLabel#fastapiTitle, QLabel#initTitle {
+    color: #c8ccd5;
+    font-size: 12px;
+    font-weight: normal;
+    font-family: "Microsoft YaHei", "Segoe UI";
+}
+
+QLabel#fastapiDesc {
+    color: #c8ccd5;
+    font-size: 13px;
+    background: transparent;
+    line-height: 1.4;
+}
+
+QLabel#initDesc, QLabel#initHint {
+    color: #c8ccd5;
+    font-size: 13px;
+    background: transparent;
+}
+
+QFrame#initPanel {
+    background-color: #1f232a;
+    border: 1px solid #303640;
+    border-radius: 6px;
+}
+
+QLabel#initPanelTitle {
+    color: #d9dee7;
+    font-size: 13px;
+    font-weight: 600;
+    background: transparent;
+}
+
+QLabel#initStatus {
+    color: #8b8f99;
+    font-size: 12px;
+    background: transparent;
+}
+QLabel#initStatus[state="success"] {
+    color: #42d392;
+}
+QLabel#initStatus[state="error"] {
+    color: #ff6b6b;
+}
+
+QLabel#fastapiSectionTitle {
+    color: #8f96a3;
+    font-size: 12px;
+    background: transparent;
+    padding-top: 2px;
+}
+
+QWidget#fastapiPathBox {
+    background-color: #1a1d23;
+    border: 1px solid #2f3540;
+    border-radius: 6px;
+}
+
+QLabel#fastapiPathTitle {
+    color: #d9dee7;
+    font-size: 12px;
+    font-weight: 600;
+    background: transparent;
+}
+
+QLineEdit#fastapiPathInput {
+    background-color: #11141a;
+    border: 1px solid #242a34;
+    border-radius: 5px;
+    color: #aeb5c0;
+    padding: 0px 8px;
+    min-height: 26px;
+    font-size: 12px;
+    selection-background-color: #2f7d61;
+}
+
+QLineEdit#fastapiPathInput:focus {
+    border: 1px solid #3c4655;
+}
+
+QWidget#fastapiStepsBox {
+    background-color: #1a1d23;
+    border: 1px solid #2b313b;
+    border-radius: 6px;
+}
+
+QWidget#fastapiStepRow {
+    background: transparent;
+}
+
+QLabel#fastapiStepBadge {
+    background-color: #2e3642;
+    color: #d9dee7;
+    border-radius: 10px;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+QLabel#fastapiStepText {
+    color: #d8dde6;
+    font-size: 12px;
+    background: transparent;
+}
+
+QLabel#fastapiWarning {
+    background-color: #221d15;
+    color: #e0bd7a;
+    border: 1px solid #3b2f1c;
+    border-radius: 6px;
+    padding: 7px 10px;
+    font-size: 12px;
+}
+
+QLabel#fastapiStatus {
+    color: #8b8f99;
+    font-size: 12px;
+    background: transparent;
+}
+QLabel#fastapiStatus[state="success"] {
+    color: #42d392;
+}
+QLabel#fastapiStatus[state="error"] {
+    color: #ff6b6b;
+}
+
+QLabel#formLabel {
+    color: #c8ccd5;
+    font-size: 13px;
+}
+
+QLabel#sliderValueLabel {
+    color: #aeb5c0;
+    font-size: 12px;
+    background: transparent;
+}
+
+/* 配置下拉框 */
+QComboBox {
+    background: transparent;
+    border: none;
+    color: transparent;
+    font-size: 14px;
+    padding: 0px;
+}
+QComboBox::drop-down {
+    border: none;
+    width: 0px;
+}
+QComboBox QAbstractItemView {
+    background-color: #1f2228;
+    color: #e6e6e6;
+    border: 1px solid #171a20;
+    selection-background-color: #1b1f26;
+    font-size: 13px;
+    padding: 4px;
+}
+
+/* 底部图标按钮 */
+QPushButton.iconBtn {
+    background-color: transparent;
+    border: none;
+}
+QPushButton.iconBtn:hover {
+    background-color: rgba(255, 255, 255, 10);
+    border: none;
+}
+QPushButton.iconBtn:focus {
+    outline: none;
+}
+
+/* Unicode 文本图标按钮 */
+QPushButton#unicodeIconBtn {
+    background-color: transparent;
+    border: none;
+    color: #a6abb4;
+    font-size: 22px;
+    font-family: "Segoe UI Symbol", "Segoe UI", "Microsoft YaHei";
+    padding-bottom: 2px;
+}
+QPushButton#unicodeIconBtn:hover {
+    color: #d4d8df;
+}
+QPushButton#unicodeIconBtn:focus {
+    outline: none;
+}
+
+/* 设置窗口关闭按钮 */
+QPushButton#settingsCloseBtn, QPushButton#logCloseBtn, QPushButton#fastapiCloseBtn, QPushButton#initCloseBtn {
+    background: transparent;
+    border: none;
+    color: #a6abb4;
+    font-size: 14px;
+    font-weight: normal;
+    padding: 0px;
+}
+QPushButton#settingsCloseBtn:hover, QPushButton#logCloseBtn:hover, QPushButton#fastapiCloseBtn:hover, QPushButton#initCloseBtn:hover {
+    background-color: #c42b1c;
+    color: #ffffff;
+}
+QPushButton#settingsCloseBtn:pressed, QPushButton#logCloseBtn:pressed, QPushButton#fastapiCloseBtn:pressed, QPushButton#initCloseBtn:pressed {
+    background-color: #9f2318;
+    color: #ffffff;
+}
+QPushButton#settingsCloseBtn:focus, QPushButton#logCloseBtn:focus, QPushButton#fastapiCloseBtn:focus, QPushButton#initCloseBtn:focus {
+    outline: none;
+}
+
+/* 表单输入框 */
+QLineEdit {
+    background-color: #1a1d22;
+    border: 1px solid #14171a;
+    border-radius: 4px;
+    color: #f0f0f0;
+    padding: 4px 8px;
+    font-size: 13px;
+}
+QLineEdit:focus {
+    border: 1px solid #42d392;
+}
+
+QLineEdit#settingsInput {
+    background-color: #171a20;
+    border: 1px solid #2f3540;
+    border-radius: 6px;
+    color: #f3f6fb;
+    padding: 0px 10px;
+    font-size: 13px;
+    selection-background-color: #2f7d61;
+}
+QLineEdit#settingsInput:hover {
+    background-color: #1a1e25;
+    border: 1px solid #3b4350;
+}
+QLineEdit#settingsInput:focus {
+    background-color: #171b22;
+    border: 1px solid #42d392;
+}
+
+/* 复选框 */
+QCheckBox {
+    color: #c8ccd5;
+    font-size: 13px;
+    spacing: 7px;
+    min-height: 22px;
+}
+QCheckBox::indicator {
+    width: 14px;
+    height: 14px;
+    border-radius: 5px;
+    border: 1px solid #30343f;
+    background-color: #1a1d22;
+}
+QCheckBox::indicator:hover {
+    border: 1px solid #42d392;
+}
+QCheckBox::indicator:checked {
+    background-color: #1a1d22;
+    border: 1px solid #42d392;
+    image: none;
+}
+QCheckBox::indicator:checked:hover {
+    border: 1px solid #54e6a5;
+}
+
+QSlider#settingsSlider::groove:horizontal {
+    height: 4px;
+    background-color: #171a20;
+    border: 1px solid #30343f;
+    border-radius: 3px;
+}
+QSlider#settingsSlider::sub-page:horizontal {
+    background-color: #42d392;
+    border-radius: 3px;
+}
+QSlider#settingsSlider::add-page:horizontal {
+    background-color: #171a20;
+    border-radius: 3px;
+}
+QSlider#settingsSlider::handle:horizontal {
+    width: 14px;
+    height: 14px;
+    margin: -6px 0px;
+    background-color: #d8dee8;
+    border: 1px solid #4b5563;
+    border-radius: 7px;
+}
+QSlider#settingsSlider::handle:horizontal:hover {
+    background-color: #ffffff;
+    border: 1px solid #42d392;
+}
+
+/* 保存/取消按钮 */
+QPushButton#saveBtn {
+    background-color: #47d99a;
+    color: #0f1419;
+    border: none;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: bold;
+}
+QPushButton#saveBtn:hover {
+    background-color: #55e3a6;
+}
+QPushButton#saveBtn:pressed {
+    background-color: #37bf83;
+}
+QPushButton#saveBtn:focus {
+    outline: none;
+}
+
+QPushButton#fastapiExportBtn {
+    background-color: #47d99a;
+    color: #0f1419;
+    border: none;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: bold;
+}
+QPushButton#fastapiExportBtn:hover {
+    background-color: #55e3a6;
+}
+QPushButton#fastapiExportBtn:pressed {
+    background-color: #37bf83;
+}
+QPushButton#fastapiExportBtn:focus {
+    outline: none;
+}
+
+QPushButton#cancelBtn {
+    background-color: #20242b;
+    color: #a7adb8;
+    border: 1px solid #333a45;
+    border-radius: 6px;
+    font-size: 13px;
+}
+QPushButton#cancelBtn:hover {
+    background-color: #282d36;
+    color: #f1f4f8;
+    border: 1px solid #3f4855;
+}
+QPushButton#cancelBtn:pressed {
+    background-color: #1b1f26;
+}
+QPushButton#cancelBtn:focus {
+    outline: none;
+}
+
+/* 测试连接按钮 */
+QPushButton#testBtn {
+    background-color: #20242b;
+    color: #b5bbc6;
+    border: 1px solid #333a45;
+    border-radius: 6px;
+    font-size: 12px;
+}
+QPushButton#testBtn:hover {
+    background-color: #282d36;
+    color: #f1f4f8;
+    border: 1px solid #3f4855;
+}
+QPushButton#testBtn:pressed {
+    background-color: #1b1f26;
+}
+QPushButton#testBtn:focus {
+    outline: none;
+}
+QPushButton#tokenBtn {
+    background-color: #20242b;
+    color: #b5bbc6;
+    border: 1px solid #333a45;
+    border-radius: 6px;
+    font-size: 12px;
+}
+QPushButton#tokenBtn:hover {
+    background-color: #282d36;
+    color: #f1f4f8;
+    border: 1px solid #3f4855;
+}
+QPushButton#tokenBtn:pressed {
+    background-color: #1b1f26;
+}
+QPushButton#tokenBtn:focus {
+    outline: none;
+}
+QPushButton#testBtn[state="testing"] {
+    background-color: #282d36;
+    color: #f1f4f8;
+}
+QPushButton#testBtn[state="success"] {
+    background-color: #172820;
+    color: #42d392;
+    border: 1px solid #42d392;
+    font-weight: bold;
+}
+QPushButton#testBtn[state="error"] {
+    background-color: #2a191c;
+    color: #ff5c5c;
+    border: 1px solid #ff5c5c;
+    font-weight: bold;
+}
+
+/* 配置动作按钮（Play/Stop） */
+QPushButton#configActionBtn {
+    background-color: #3b3d46;
+    border: 1px solid #24262d;
+    border-radius: 8px;
+}
+QPushButton#configActionBtn:hover {
+    background-color: #454852;
+}
+QPushButton#configActionBtn:pressed {
+    background-color: #333640;
+}
+QPushButton#configActionBtn:disabled {
+    background-color: #30323a;
+}
+QPushButton#configActionBtn:focus {
+    outline: none;
+}
+
+/* 主面板行文本标签 */
+QLabel#rowStatusLabel {
+    color: #d1d5db;
+    font-size: 14px;
+    font-family: "Microsoft YaHei", "Segoe UI";
+    background: transparent;
+}
+
+/* 日志窗口下拉框与文本面板 */
+QComboBox#logConfigCombo {
+    background-color: #171a20;
+    border: 1px solid #2f3540;
+    border-radius: 5px;
+    color: #f0f0f0;
+    padding: 2px 22px 2px 8px;
+    font-size: 13px;
+    font-family: "Microsoft YaHei", "Segoe UI";
+}
+QComboBox#logConfigCombo:hover {
+    background-color: #1a1e25;
+    border: 1px solid #3b4350;
+}
+QComboBox#logConfigCombo:focus {
+    outline: none;
+}
+QComboBox#logConfigCombo::drop-down {
+    subcontrol-origin: padding;
+    subcontrol-position: top right;
+    border: none;
+    width: 20px;
+}
+QComboBox#logConfigCombo::down-arrow {
+    image: none;
+    width: 0px;
+    height: 0px;
+}
+QComboBox#logConfigCombo QAbstractItemView {
+    background-color: #1f2228;
+    color: #e6e6e6;
+    border: 1px solid #30343f;
+    border-radius: 5px;
+    selection-background-color: #303641;
+    outline: none;
+    padding: 4px;
+    font-size: 13px;
+}
+
+QTextEdit#logTextPanel {
+    background-color: #171a20;
+    color: #cfd3dc;
+    border: none;
+    border-bottom-left-radius: 8px;
+    border-bottom-right-radius: 8px;
+    padding: 10px 16px 16px 10px;
+    font-family: Consolas, "Courier New", monospace;
+    font-size: 12px;
+    line-height: 1.5;
+}
+QTextEdit#logTextPanel QScrollBar:vertical {
+    border: none;
+    background: #171a20;
+    width: 8px;
+    margin: 8px 3px 8px 0px;
+}
+QTextEdit#logTextPanel QScrollBar::handle:vertical {
+    background: #343a45;
+    min-height: 20px;
+    border-radius: 4px;
+}
+QTextEdit#logTextPanel QScrollBar::handle:vertical:hover {
+    background: #4b5563;
+}
+QTextEdit#logTextPanel QScrollBar::add-line:vertical, QTextEdit#logTextPanel QScrollBar::sub-line:vertical {
+    height: 0px;
+}
+QTextEdit#logTextPanel QScrollBar::add-page:vertical, QTextEdit#logTextPanel QScrollBar::sub-page:vertical {
+    background: transparent;
+}
+QTextEdit#logTextPanel QScrollBar:horizontal {
+    border: none;
+    background: #171a20;
+    height: 8px;
+    margin: 0px 8px 3px 8px;
+}
+QTextEdit#logTextPanel QScrollBar::handle:horizontal {
+    background: #343a45;
+    min-width: 20px;
+    border-radius: 4px;
+}
+QTextEdit#logTextPanel QScrollBar::handle:horizontal:hover {
+    background: #4b5563;
+}
+QTextEdit#logTextPanel QScrollBar::add-line:horizontal, QTextEdit#logTextPanel QScrollBar::sub-line:horizontal {
+    width: 0px;
+}
+QTextEdit#logTextPanel QScrollBar::add-page:horizontal, QTextEdit#logTextPanel QScrollBar::sub-page:horizontal {
+    background: transparent;
+}
+
+/* 悬浮窗面板 */
+QFrame#miniBg {
+    background-color: rgba(30, 32, 40, 240);
+    border-radius: 12px;
+    border: 1px solid #3b3e4b;
+}
+QPushButton#miniRestoreBtn {
+    background: transparent;
+    color: #a6abb4;
+    border: none;
+    font-size: 11px;
+    padding: 2px 8px;
+}
+QPushButton#miniRestoreBtn:hover {
+    color: #42d392;
+}
+QPushButton#miniRestoreBtn:focus {
+    outline: none;
+}
+QFrame#miniDivider {
+    background-color: #3b3e4b;
+}
+QLabel#miniStatusLabel {
+    color: #d1d5db;
+    font-size: 13px;
+    font-family: "Microsoft YaHei", "Segoe UI";
+    background: transparent;
+}
