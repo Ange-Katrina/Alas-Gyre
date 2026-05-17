@@ -18,7 +18,7 @@ def get_current_exe_path():
 def check_for_updates(current_version):
     """检查是否有新版本"""
     try:
-        resp = requests.get(API_URL, timeout=3)
+        resp = requests.get(API_URL, timeout=8)
         if resp.status_code == 200:
             data = resp.json()
             latest_version = data.get("tag_name", "")
@@ -49,7 +49,12 @@ def do_update(download_url, progress_callback, finish_callback):
             finish_callback(False, "仅支持在打包后的 exe 运行环境中自动更新。")
             return
             
-        resp = requests.get(download_url, stream=True, timeout=8)
+        # 在中国大陆网络环境下，自动使用 ghproxy 镜像进行超高速下载
+        download_url_to_use = download_url
+        if download_url.startswith("https://github.com/"):
+            download_url_to_use = f"https://mirror.ghproxy.com/{download_url}"
+            
+        resp = requests.get(download_url_to_use, stream=True, timeout=15)
         resp.raise_for_status()
         
         total_length = resp.headers.get('content-length')

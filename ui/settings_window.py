@@ -295,7 +295,7 @@ class SettingsWindow(QDialog):
         self.updateBtn.setEnabled(False)
         self.updateBtn.setText(tr("checking"))
         self._checking_active = True
-        QTimer.singleShot(4000, self._on_update_timeout)
+        QTimer.singleShot(10000, self._on_update_timeout)
         threading.Thread(target=self._update_task, daemon=True).start()
 
     def _update_task(self):
