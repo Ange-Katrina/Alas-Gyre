@@ -36,31 +36,39 @@
 
 ## 🚀 Getting Started
 
-### Prerequisites
+### 📦 Download & Run (Recommended)
+This is the easiest way to use Alas-Gyre. You do **not** need to install Python or clone the repository!
+
+1. Go to the [Releases](https://github.com/Ange-Katrina/Alas-Gyre/releases) page of this repository.
+2. Download the latest compiled executable file: **`Alas-Gyre.exe`**.
+3. Move `Alas-Gyre.exe` to any folder of your choice and **double-click to run**!
+   *(On your first launch, the **Interactive Initialization Wizard** will automatically open to guide you through connection settings.)*
+
+---
+
+### 💻 Run from Source (Developers)
+If you want to run the project using raw Python or make custom modifications:
+
+#### Prerequisites
 - Windows 10 / 11
 - Python 3.9 or higher
 
-### Installation
-
-1. Clone or download the repository:
+#### Steps
+1. Clone the repository:
    ```powershell
    git clone https://github.com/Ange-Katrina/Alas-Gyre.git
    cd Alas-Gyre
    ```
-
-2. Create a virtual environment and install the required packages:
+2. Create a virtual environment and install the required dependencies:
    ```powershell
    python -m venv .venv
    .\.venv\Scripts\activate
    pip install -r requirements.txt
    ```
-
 3. Run the application:
    ```powershell
    python main.py
    ```
-
-*Note: On your first run, the **Interactive Initialization Wizard** will automatically launch to guide you through configuration.*
 
 ---
 
@@ -93,7 +101,7 @@ To support status calls and token validation on the ALAS server side:
 
 ## 📦 Packaging & Distribution
 
-To compile the project into a standalone, single-executable Windows binary:
+To compile the project into a standalone, single-executable Windows binary yourself:
 
 ```powershell
 # Install development dependencies

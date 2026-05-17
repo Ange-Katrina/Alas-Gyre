@@ -36,31 +36,39 @@
 
 ## 🚀 快速开始
 
-### 环境准备
+### 📦 下载与运行（推荐方式）
+这是使用 Alas-Gyre 最为简单快捷的方式。您**无需安装 Python** 环境，也无需克隆项目！
+
+1. 前往本仓库的 [Releases](https://github.com/Ange-Katrina/Alas-Gyre/releases) 发布页面。
+2. 下载最新编译打包好的单文件执行程序：**`Alas-Gyre.exe`**。
+3. 将下载好的 `Alas-Gyre.exe` 移动到您电脑的任意文件夹中，**直接双击运行**即可！
+   *(首次打开时，软件会自动弹出 **交互式初始化向导** 引导您完成所有连接设置。)*
+
+---
+
+### 💻 源码运行与开发（开发者指南）
+如果您想直接通过原始 Python 运行程序或进行二次开发：
+
+#### 环境要求
 - 操作系统：Windows 10 / 11
 - Python 版本：3.9 及以上
 
-### 安装运行
-
-1. 克隆或下载本项目到本地：
+#### 操作步骤
+1. 克隆本项目到本地：
    ```powershell
    git clone https://github.com/Ange-Katrina/Alas-Gyre.git
    cd Alas-Gyre
    ```
-
-2. 创建虚拟环境并安装所需依赖：
+2. 创建虚拟环境并安装运行依赖：
    ```powershell
    python -m venv .venv
    .\.venv\Scripts\activate
    pip install -r requirements.txt
    ```
-
 3. 启动运行：
    ```powershell
    python main.py
    ```
-
-*注意：若本地没有检测到 `config.json`，软件会自动打开 **初始化向导** 引导您完成配置。*
 
 ---
 
