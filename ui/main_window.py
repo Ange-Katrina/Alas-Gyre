@@ -669,7 +669,6 @@ class CardWidget(QFrame):
     def _on_icon_click(self, name, widget):
         print(f"[日志] 点击图标 → {name}")
         if name == "关闭":
-            from PySide6.QtWidgets import QApplication
             QApplication.quit()
         elif name == "设置":
             from .settings_window import SettingsWindow

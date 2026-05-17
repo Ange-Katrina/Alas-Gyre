@@ -11,11 +11,21 @@ from updater import cleanup_old_exe
 from ui.i18n import set_language, tr
 
 VERSION = "v1.0.7"
+APP_USER_MODEL_ID = "AngeKatrina.AlasGyre"
 
 def resource_path(relative_path):
     if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
         return os.path.join(sys._MEIPASS, relative_path)
     return os.path.join(os.path.dirname(__file__), relative_path)
+
+def configure_windows_app_id():
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_USER_MODEL_ID)
+    except Exception as exc:
+        print(f"[警告] 设置 Windows AppUserModelID 失败: {exc}")
 
 def main():
     cleanup_old_exe()
@@ -31,8 +41,12 @@ def main():
     except Exception as e:
         print(f"[警告] 提前读取语言失败: {e}")
     set_language(lang)
-    
+
+    configure_windows_app_id()
     app = QApplication(sys.argv)
+    app.setApplicationName("Alas-Gyre")
+    app.setApplicationDisplayName("Alas-Gyre")
+    app.setOrganizationName("Ange-Katrina")
     app.setQuitOnLastWindowClosed(False)
     app.setFont(QFont("Microsoft YaHei", 9))
 
@@ -54,7 +68,7 @@ def main():
 
     if not window.card.config.get("setup_completed", False):
         setup_dialog = InitSetupWindow(
-            window,
+            None,
             window.card.config,
             window.card.config_path,
             fastapi_source_path(),

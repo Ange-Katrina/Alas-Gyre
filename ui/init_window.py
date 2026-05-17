@@ -33,7 +33,7 @@ class InitSetupWindow(QDialog):
 
         self.setObjectName("initWindow")
         self.setFixedSize(520, 500)
-        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog)
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Window)
         self.setAttribute(Qt.WA_TranslucentBackground)
 
         main_layout = QVBoxLayout(self)
