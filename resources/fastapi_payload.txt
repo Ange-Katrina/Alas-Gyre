@@ -45,6 +45,21 @@ STATE_MAP = {
 VALID_STATUSES = {"idle", "running", "error", "update", "disconnected"}
 
 
+def get_alas_root():
+    return os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+
+
+def get_data_dir(dirname):
+    candidates = [
+        os.path.abspath(dirname),
+        os.path.join(get_alas_root(), dirname),
+    ]
+    for path in candidates:
+        if os.path.isdir(path):
+            return path
+    return candidates[0]
+
+
 def normalize_status(status):
     if isinstance(status, str) and status in VALID_STATUSES:
         return status
@@ -62,8 +77,9 @@ def is_api_authorized(request):
 
 def get_config_names():
     configs = []
-    if os.path.isdir(CONFIG_DIR):
-        for entry in os.scandir(CONFIG_DIR):
+    config_dir = get_data_dir(CONFIG_DIR)
+    if os.path.isdir(config_dir):
+        for entry in os.scandir(config_dir):
             if not entry.is_file():
                 continue
             file_name = entry.name
@@ -120,12 +136,13 @@ def get_log_line_limit(request):
 
 
 def get_latest_log_file(config_name):
-    if not os.path.isdir(LOG_DIR):
+    log_dir = get_data_dir(LOG_DIR)
+    if not os.path.isdir(log_dir):
         return None
 
     suffix = f"_{config_name}.txt"
     candidates = []
-    for entry in os.scandir(LOG_DIR):
+    for entry in os.scandir(log_dir):
         if not entry.is_file() or not entry.name.endswith(suffix):
             continue
         candidates.append(entry.path)

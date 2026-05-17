@@ -3,7 +3,7 @@ import os
 import json
 from PySide6.QtWidgets import (
     QApplication, QWidget, QLabel, QPushButton, QFrame,
-    QGraphicsDropShadowEffect, QVBoxLayout, QHBoxLayout, QSizePolicy
+    QGraphicsDropShadowEffect, QVBoxLayout, QHBoxLayout, QSizePolicy, QScrollArea
 )
 from PySide6.QtCore import Qt, QRectF, QTimer, Signal, QPointF
 from PySide6.QtGui import QColor, QPainter, QPen, QFontMetrics, QPainterPath
@@ -355,6 +355,8 @@ class CardWidget(QFrame):
         self.current_config = self.config.get("current_config", "alas")
         self._configs[0] = self.current_config
         self._configs_fetching = False
+        self._configs_last_fetch_at = 0.0
+        self._configs_fetch_interval = 15.0
         self._statuses = {}
         self.rows = {}
         
@@ -406,7 +408,16 @@ class CardWidget(QFrame):
         ctrl_layout.addWidget(self.closeDot, alignment=Qt.AlignVCenter)
         main_layout.addWidget(self.windowCtrlBg)
 
-        self.configListBg = QWidget(self)
+        self.configScroll = QScrollArea(self)
+        self.configScroll.setObjectName("configScrollArea")
+        self.configScroll.setAttribute(Qt.WA_StyledBackground, True)
+        self.configScroll.setWidgetResizable(True)
+        self.configScroll.setFrameShape(QFrame.NoFrame)
+        self.configScroll.setFocusPolicy(Qt.NoFocus)
+        self.configScroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.configScroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+
+        self.configListBg = QWidget()
         self.configListBg.setObjectName("configListBg")
         self.configListBg.setAttribute(Qt.WA_StyledBackground, True)
         self.configListBg.setCursor(Qt.SizeAllCursor)
@@ -417,7 +428,8 @@ class CardWidget(QFrame):
         list_layout.setContentsMargins(10, 8, 10, 6)
         list_layout.setSpacing(2)
         self.rows_layout = list_layout
-        main_layout.addWidget(self.configListBg, stretch=1)
+        self.configScroll.setWidget(self.configListBg)
+        main_layout.addWidget(self.configScroll, stretch=1)
 
         self._rebuild_rows()
 
@@ -481,6 +493,14 @@ class CardWidget(QFrame):
             print(f"[错误] 写入 {self.config_path} 失败: {e}")
             return False
 
+    def _sync_window_size(self):
+        row_count = min(max(len(self._configs), 2), 5)
+        list_height = 8 + 6 + row_count * 36 + max(row_count - 1, 0) * 2 + 8
+        card_height = 30 + list_height + 40
+        self.setFixedSize(294, card_height)
+        if self.window() and self.window() is not self:
+            self.window().setFixedSize(314, card_height + 20)
+
     def _rebuild_rows(self):
         while self.rows_layout.count():
             item = self.rows_layout.takeAt(0)
@@ -489,20 +509,18 @@ class CardWidget(QFrame):
                 widget.deleteLater()
         self.rows.clear()
 
-        if len(self._configs) > 2 and self.current_config in self._configs[:2]:
-            visible_configs = self._configs[:2]
-        elif len(self._configs) > 2 and self.current_config in self._configs:
-            visible_configs = [self.current_config]
-            visible_configs.extend(config for config in self._configs if config != self.current_config)
-            visible_configs = visible_configs[:2]
-        else:
-            visible_configs = self._configs[:2] if len(self._configs) > 2 else self._configs
+        visible_configs = list(self._configs)
+        if self.current_config and self.current_config not in visible_configs:
+            visible_configs.insert(0, self.current_config)
+
         for config_name in visible_configs:
             row = MainConfigRow(config_name, self)
             self.rows_layout.addWidget(row)
             self.rows[config_name] = row
             if config_name in self._statuses:
                 row.update_status(self._statuses[config_name])
+        self.rows_layout.addStretch()
+        self._sync_window_size()
 
     def set_current_config(self, config_name):
         if not config_name or self.current_config == config_name:
@@ -552,6 +570,7 @@ class CardWidget(QFrame):
         # 只要还没成功获取过完整的配置列表，就启动一次获取任务
         if not hasattr(self, "_configs_fetched") and not self._configs_fetching:
             self._configs_fetching = True
+            self._configs_last_fetch_at = time.monotonic()
             threading.Thread(target=self._fetch_configs_task, daemon=True).start()
         threading.Thread(target=self._poll_status_task, daemon=True).start()
 
@@ -598,11 +617,22 @@ class CardWidget(QFrame):
 
     def _on_status_all_updated(self, statuses):
         self._statuses.update(statuses)
+        new_configs = [str(config_name) for config_name in statuses if str(config_name) not in self._configs]
+        if new_configs:
+            self._configs.extend(new_configs)
+            self._configs.sort(key=str.lower)
+            self._rebuild_rows()
         for config_name, status in statuses.items():
             if config_name in self.rows:
                 self.rows[config_name].update_status(status)
 
     def _poll_status_task(self):
+        if (
+            hasattr(self, "_configs_fetched")
+            and time.monotonic() - self._configs_last_fetch_at >= self._configs_fetch_interval
+        ):
+            delattr(self, "_configs_fetched")
+
         ip = self.config.get("ip", "127.0.0.1")
         port = self.config.get("port", "22267")
         try:
@@ -742,6 +772,8 @@ class CardWidget(QFrame):
             self.show_mini_window()
 
 class AlasConsole(QWidget):
+    auto_update_result_signal = Signal(dict, int)
+
     def __init__(self):
         super().__init__()
         self.setObjectName("mainWindow")
@@ -764,7 +796,49 @@ class AlasConsole(QWidget):
         shadow.setColor(QColor(0, 0, 0, 90))
         self.card.setGraphicsEffect(shadow)
 
+        self._auto_update_check_id = 0
+        self._update_prompt_shown = False
+        self.auto_update_result_signal.connect(self._on_auto_update_result)
         self._center_on_screen()
+
+    def start_auto_update_check(self, current_version):
+        if self._update_prompt_shown:
+            return
+        self._auto_update_check_id += 1
+        check_id = self._auto_update_check_id
+        threading.Thread(
+            target=self._auto_update_check_task,
+            args=(current_version, check_id),
+            daemon=True,
+        ).start()
+
+    def _auto_update_check_task(self, current_version, check_id):
+        try:
+            from updater import check_for_updates
+            result = check_for_updates(current_version)
+        except Exception as exc:
+            result = {"has_update": False, "error": str(exc)}
+        self.auto_update_result_signal.emit(result, check_id)
+
+    def _on_auto_update_result(self, result, check_id):
+        if check_id != self._auto_update_check_id:
+            return
+        if not result.get("has_update"):
+            if result.get("error"):
+                print(f"[更新检查] 自动检查失败: {result.get('error')}")
+            return
+
+        self._update_prompt_shown = True
+        from .update_window import UpdatePromptWindow
+
+        if self.isMinimized():
+            self.showNormal()
+        self.show()
+        self.raise_()
+        self.activateWindow()
+
+        self.update_dialog = UpdatePromptWindow(self, result)
+        self.update_dialog.show()
 
     def apply_always_on_top(self, enabled, show_after=True):
         self.setWindowFlag(Qt.WindowStaysOnTopHint, bool(enabled))

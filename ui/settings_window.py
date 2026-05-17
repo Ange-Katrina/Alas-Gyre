@@ -31,6 +31,9 @@ class CheckBox(QCheckBox):
 
 class SettingsWindow(QDialog):
     test_result_signal = Signal(bool, str)
+    update_result_signal = Signal(dict, int)
+    update_progress_signal = Signal(int)
+    update_finish_signal = Signal(bool, str)
 
     def __init__(self, parent=None, config=None, configs=None, current_config="alas"):
         super().__init__(parent)
@@ -247,6 +250,9 @@ class SettingsWindow(QDialog):
 
         # 绑定测试结果信号
         self.test_result_signal.connect(self._on_test_result)
+        self.update_result_signal.connect(self._handle_update_check_result)
+        self.update_progress_signal.connect(self._on_download_progress)
+        self.update_finish_signal.connect(self._on_update_finish)
 
         # 底部按钮
         btn_layout = QHBoxLayout()
@@ -294,20 +300,27 @@ class SettingsWindow(QDialog):
     def _check_for_updates(self):
         self.updateBtn.setEnabled(False)
         self.updateBtn.setText(tr("checking"))
+        self.updateBtn.setToolTip("")
         self._checking_active = True
-        QTimer.singleShot(10000, self._on_update_timeout)
-        threading.Thread(target=self._update_task, daemon=True).start()
+        self._update_check_id = getattr(self, "_update_check_id", 0) + 1
+        check_id = self._update_check_id
+        QTimer.singleShot(60000, lambda: self._on_update_timeout(check_id))
+        threading.Thread(target=self._update_task, args=(check_id,), daemon=True).start()
 
-    def _update_task(self):
+    def _update_task(self, check_id):
         result = check_for_updates(VERSION)
-        QTimer.singleShot(0, lambda: self._handle_update_check_result(result))
+        self.update_result_signal.emit(result, check_id)
 
-    def _handle_update_check_result(self, result):
+    def _handle_update_check_result(self, result, check_id):
         if not getattr(self, "_checking_active", False):
+            return
+        if check_id != getattr(self, "_update_check_id", None):
             return
         self._checking_active = False
         if result.get("has_update"):
             self.updateBtn.setText(tr("download_update"))
+            if result.get("version"):
+                self.updateBtn.setToolTip(result["version"])
             self.updateBtn.setStyleSheet("""
                 QPushButton#updateBtn {
                     background-color: #28e06f;
@@ -330,37 +343,46 @@ class SettingsWindow(QDialog):
             self.updateBtn.clicked.connect(lambda: self._start_download(download_url))
         elif "error" in result:
             self.updateBtn.setText(tr("check_failed"))
+            self.updateBtn.setToolTip(result.get("error", ""))
             self.updateBtn.setEnabled(True)
-            QTimer.singleShot(2000, self._reset_update_btn)
+            QTimer.singleShot(3000, self._reset_update_btn)
         else:
             self.updateBtn.setText(tr("new_version"))
-            QTimer.singleShot(2000, self._reset_update_btn)
+            self.updateBtn.setToolTip(result.get("version", ""))
+            QTimer.singleShot(3000, self._reset_update_btn)
 
     def _start_download(self, download_url):
         self.updateBtn.setEnabled(False)
         self.updateBtn.setText("0%")
-        threading.Thread(target=do_update, args=(download_url, self._on_download_progress, self._on_update_finish), daemon=True).start()
+        threading.Thread(
+            target=do_update,
+            args=(download_url, self.update_progress_signal.emit, self.update_finish_signal.emit),
+            daemon=True,
+        ).start()
 
     def _on_download_progress(self, percentage):
-        QTimer.singleShot(0, lambda: self.updateBtn.setText(f"{percentage}%"))
+        self.updateBtn.setText(f"{percentage}%")
 
     def _on_update_finish(self, success, message):
-        def _ui_update():
-            self.updateBtn.setText(tr("restart") if success else tr("check_failed"))
-            if not success:
-                self.updateBtn.setEnabled(True)
-                QTimer.singleShot(3000, self._reset_update_btn)
-        QTimer.singleShot(0, _ui_update)
+        self.updateBtn.setText(tr("restart") if success else tr("check_failed"))
+        self.updateBtn.setToolTip(message or "")
+        if not success:
+            self.updateBtn.setEnabled(True)
+            QTimer.singleShot(3000, self._reset_update_btn)
 
-    def _on_update_timeout(self):
+    def _on_update_timeout(self, check_id=None):
         if getattr(self, "_checking_active", False):
+            if check_id is not None and check_id != getattr(self, "_update_check_id", None):
+                return
             self._checking_active = False
             self.updateBtn.setText(tr("timeout"))
+            self.updateBtn.setToolTip("")
             self.updateBtn.setEnabled(True)
             QTimer.singleShot(2000, self._reset_update_btn)
 
     def _reset_update_btn(self):
         self.updateBtn.setText(tr("check_update"))
+        self.updateBtn.setToolTip("")
         self.updateBtn.setEnabled(True)
         self.updateBtn.setStyleSheet("""
             QPushButton#updateBtn {

@@ -2,6 +2,7 @@ import sys
 import os
 import json
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
+from PySide6.QtCore import QTimer
 from PySide6.QtGui import QAction, QFont, QIcon
 
 from ui import AlasConsole
@@ -79,6 +80,7 @@ def main():
         setup_dialog.exec()
 
     window.show()
+    QTimer.singleShot(1500, lambda: window.start_auto_update_check(VERSION))
 
     sys.exit(app.exec())
 

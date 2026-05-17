@@ -47,26 +47,91 @@ jobs:
         id: generate_changelog
         run: |
           echo "=== Generating Changelog ==="
+          cat > bilingual_changelog.py <<'PY'
+          import re
+          import sys
+
+          PHRASE_MAP = {
+              "fix: improve startup taskbar integration": "修复：改进启动任务栏集成",
+              "fix: allow floating widget buttons during click-through": "修复：允许悬浮窗穿透时按钮仍可点击",
+              "feat: Implement intelligent failover update download logic: official first, dual-mirror backup fallbacks": "功能：实现智能故障转移更新下载逻辑：官方优先，双镜像备份回退",
+              "fix: Increase updater and GUI timeouts and implement high-speed mirror.ghproxy.com download acceleration": "修复：增加更新程序和界面超时时间，并实现 mirror.ghproxy.com 高速下载加速",
+          }
+
+          PREFIX_MAP = {
+              "feat": "功能",
+              "fix": "修复",
+              "docs": "文档",
+              "style": "样式",
+              "refactor": "重构",
+              "perf": "性能",
+              "test": "测试",
+              "build": "构建",
+              "ci": "持续集成",
+              "chore": "维护",
+              "revert": "回滚",
+          }
+
+          def translate(message):
+              if message in PHRASE_MAP:
+                  return PHRASE_MAP[message]
+              match = re.match(r"^([a-zA-Z]+)(\(.+?\))?:\s*(.+)$", message)
+              if not match:
+                  return ""
+              prefix = PREFIX_MAP.get(match.group(1).lower())
+              if not prefix:
+                  return ""
+              scope = match.group(2) or ""
+              return f"{prefix}{scope}：{match.group(3)}"
+
+          def format_commit(line):
+              if not line:
+                  return []
+              parts = line.split(" ", 1)
+              if len(parts) != 2:
+                  return [line]
+              commit_hash, message = parts
+              lines = [line]
+              zh = translate(message)
+              if zh:
+                  lines.append(f"{commit_hash} {zh}")
+              return lines
+
+          source = sys.argv[1]
+          previous_tag = sys.argv[2] if len(sys.argv) > 2 else ""
+          current_tag = sys.argv[3] if len(sys.argv) > 3 else ""
+
+          raw_lines = [line for line in source.splitlines() if line.strip()]
+          output = ["## What's Changed / 发生了哪些变化？", ""]
+          for raw in raw_lines:
+              output.extend(format_commit(raw.strip()))
+          if previous_tag and current_tag:
+              output.extend([
+                  "",
+                  f"**Full Changelog / 完整更新记录**: https://github.com/${{ github.repository }}/compare/{previous_tag}...{current_tag}",
+              ])
+          with open("CHANGELOG.md", "w", encoding="utf-8", newline="\n") as f:
+              f.write("\n".join(output).rstrip() + "\n")
+          PY
+
           if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
             previous_tag=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
             if [[ -n "$previous_tag" ]]; then
-              git log --oneline "$previous_tag..HEAD" | grep -v "Merge pull request" > full_commits.txt
+              git log --oneline "$previous_tag..HEAD" | grep -v "Merge pull request" > full_commits.txt || true
               total_commits=$(wc -l < full_commits.txt)
-              head -15 full_commits.txt > CHANGELOG.md
-              if [[ $total_commits -gt 15 ]]; then
-                echo "" >> CHANGELOG.md
-                echo "**Full Changelog**: https://github.com/${{ github.repository }}/compare/$previous_tag...${{ steps.set_tag.outputs.tag }}" >> CHANGELOG.md
-              fi
+              commits="$(head -15 full_commits.txt)"
+              compare_from="$previous_tag"
             else
-              git log --oneline | grep -v "Merge pull request" | head -15 > CHANGELOG.md
+              commits="$(git log --oneline | grep -v "Merge pull request" | head -15 || true)"
+              compare_from=""
+              total_commits=0
             fi
           else
-            git log --oneline --since="1 week ago" | grep -v "Merge pull request" | head -15 > CHANGELOG.md
+            commits="$(git log --oneline --since="1 week ago" | grep -v "Merge pull request" | head -15 || true)"
+            compare_from=""
+            total_commits=0
           fi
-          echo "## What's Changed" > temp_changelog.md
-          echo "" >> temp_changelog.md
-          cat CHANGELOG.md >> temp_changelog.md
-          mv temp_changelog.md CHANGELOG.md
+          python bilingual_changelog.py "$commits" "$compare_from" "${{ steps.set_tag.outputs.tag }}"
 
       - name: Update version in main.py
         run: |
