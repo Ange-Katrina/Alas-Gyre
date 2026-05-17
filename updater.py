@@ -6,7 +6,7 @@ import threading
 from packaging import version
 
 # 请在此修改您的 GitHub 仓库名
-GITHUB_REPO = "NEANC/Alas-Gyre"
+GITHUB_REPO = "Ange-Katrina/Alas-Gyre"
 API_URL = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 
 def get_current_exe_path():
