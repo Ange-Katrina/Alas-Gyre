@@ -89,10 +89,10 @@ def main():
         dialog = LogWindow(parent=win, config=win.card.config, current_config="alas", configs=["alas", "alas2"])
         dialog.show()
         dialog._on_log_updated(
-            "2026-05-17 20:58:30.123 | INFO | ALAS 初始化成功。\n"
-            "2026-05-17 20:58:31.456 | SUCCESS | 登录验证成功。 (当前等级 125, 第一舰队)\n"
-            "2026-05-17 20:58:32.789 | WARNING | 任务队列为空，开始执行日常任务...\n"
-            "2026-05-17 20:58:33.012 | INFO | 正在运行任务: 委托任务 (进行中)"
+            "2026-05-17 20:58:30.123 | INFO | ALAS initialized.\n"
+            "2026-05-17 20:58:31.456 | SUCCESS | Login successful. (Level 125, Fleet 1)\n"
+            "2026-05-17 20:58:32.789 | WARNING | Task queue is empty. Searching for daily tasks...\n"
+            "2026-05-17 20:58:33.012 | INFO | Running commission task in progress..."
         )
         
         def do_capture():
@@ -189,8 +189,8 @@ def main():
         dialog = LogWindow(parent=win, config=win.card.config, current_config="alas", configs=["alas", "alas2"])
         dialog.show()
         dialog._on_log_updated(
-            "2026-05-17 20:58:30.123 | INFO | ALAS initialized successfully.\n"
-            "2026-05-17 20:58:31.456 | SUCCESS | Login verification successful. (Level 125, Fleet 1)\n"
+            "2026-05-17 20:58:30.123 | INFO | ALAS initialized.\n"
+            "2026-05-17 20:58:31.456 | SUCCESS | Login successful. (Level 125, Fleet 1)\n"
             "2026-05-17 20:58:32.789 | WARNING | Task queue is empty. Searching for daily tasks...\n"
             "2026-05-17 20:58:33.012 | INFO | Running commission task in progress..."
         )
