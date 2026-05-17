@@ -81,9 +81,19 @@ jobs:
           retention-days: 1
 
   build-pyinstaller:
-    name: Build with PyInstaller
+    name: Build on ${{ matrix.os }}
     needs: meta
-    runs-on: windows-latest
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            artifact_name: Alas-Gyre-Windows
+          - os: macos-latest
+            artifact_name: Alas-Gyre-macOS
+          - os: ubuntu-latest
+            artifact_name: Alas-Gyre-Linux
     steps:
       - name: Download updated code
         uses: actions/download-artifact@v4
@@ -109,11 +119,28 @@ jobs:
         run: |
           pyinstaller Alas-Gyre.spec --noconfirm
 
+      - name: Package macOS bundle
+        if: matrix.os == 'macos-latest'
+        run: |
+          cd dist
+          zip -r ../Alas-Gyre-macOS.zip Alas-Gyre.app Alas-Gyre
+          cd ..
+
+      - name: Package Linux binary
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          cd dist
+          tar -czf ../Alas-Gyre-Linux.tar.gz Alas-Gyre
+          cd ..
+
       - name: Upload PyInstaller artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Alas-Gyre-PyInstaller-${{ needs.meta.outputs.tag }}
-          path: dist/Alas-Gyre.exe
+          name: ${{ matrix.artifact_name }}-${{ needs.meta.outputs.tag }}
+          path: |
+            dist/Alas-Gyre.exe
+            Alas-Gyre-macOS.zip
+            Alas-Gyre-Linux.tar.gz
           retention-days: 1
 
   release:
@@ -130,13 +157,15 @@ jobs:
       - name: Clean up files
         run: |
           mkdir -p release
-          if [ -d "assets/Alas-Gyre-PyInstaller-${{ needs.meta.outputs.tag }}" ]; then
-            cp -f "assets/Alas-Gyre-PyInstaller-${{ needs.meta.outputs.tag }}/Alas-Gyre.exe" "release/Alas-Gyre.exe"
-          fi
-          if [ -f "assets/updated-code/CHANGELOG.md" ]; then
-            cp -f "assets/updated-code/CHANGELOG.md" "release/CHANGELOG.md"
-          fi
-          rm -rf assets
+          # Copy Windows exe
+          find assets/ -name "Alas-Gyre.exe" -exec cp {} release/ \;
+          # Copy macOS zip
+          find assets/ -name "Alas-Gyre-macOS.zip" -exec cp {} release/ \;
+          # Copy Linux tar.gz
+          find assets/ -name "Alas-Gyre-Linux.tar.gz" -exec cp {} release/ \;
+          
+          # Copy CHANGELOG.md (only for body_path description)
+          find assets/ -name "CHANGELOG.md" -exec cp {} release/ \;
         shell: bash
 
       - name: Publish release to GitHub
@@ -146,6 +175,7 @@ jobs:
           name: ${{ needs.meta.outputs.tag }}
           body_path: release/CHANGELOG.md
           files: |
-            release/*.exe
-            release/CHANGELOG.md
+            release/Alas-Gyre.exe
+            release/Alas-Gyre-macOS.zip
+            release/Alas-Gyre-Linux.tar.gz
           prerelease: ${{ needs.meta.outputs.prerelease != 'false' }}

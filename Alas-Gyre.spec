@@ -5,10 +5,10 @@ a = Analysis(
     pathex=[],
     binaries=[],
     datas=[
-        ('ui\\style.qss', 'ui'),
-        ('ui\\light.qss', 'ui'),
-        ('ui\\assets\\alas.ico', 'ui\\assets'),
-        ('resources\\fastapi_payload.txt', 'resources'),
+        ('ui/style.qss', 'ui'),
+        ('ui/light.qss', 'ui'),
+        ('ui/assets/alas.ico', 'ui/assets'),
+        ('resources/fastapi_payload.txt', 'resources'),
     ],
     hiddenimports=[],
     hookspath=[],
@@ -39,5 +39,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon='ui\\assets\\alas.ico'
+    icon='ui/assets/alas.ico'
 )
