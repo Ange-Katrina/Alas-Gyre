@@ -107,13 +107,13 @@ jobs:
 
       - name: Build with PyInstaller
         run: |
-          pyinstaller AlasHelper.spec --noconfirm
+          pyinstaller Alas-Gyre.spec --noconfirm
 
       - name: Upload PyInstaller artifact
         uses: actions/upload-artifact@v4
         with:
-          name: AlasHelper-PyInstaller-${{ needs.meta.outputs.tag }}
-          path: dist/AlasHelper.exe
+          name: Alas-Gyre-PyInstaller-${{ needs.meta.outputs.tag }}
+          path: dist/Alas-Gyre.exe
           retention-days: 1
 
   release:
@@ -130,8 +130,8 @@ jobs:
       - name: Clean up files
         run: |
           mkdir -p release
-          if [ -d "assets/AlasHelper-PyInstaller-${{ needs.meta.outputs.tag }}" ]; then
-            cp -f "assets/AlasHelper-PyInstaller-${{ needs.meta.outputs.tag }}/AlasHelper.exe" "release/AlasHelper.exe"
+          if [ -d "assets/Alas-Gyre-PyInstaller-${{ needs.meta.outputs.tag }}" ]; then
+            cp -f "assets/Alas-Gyre-PyInstaller-${{ needs.meta.outputs.tag }}/Alas-Gyre.exe" "release/Alas-Gyre.exe"
           fi
           if [ -f "assets/updated-code/CHANGELOG.md" ]; then
             cp -f "assets/updated-code/CHANGELOG.md" "release/CHANGELOG.md"
