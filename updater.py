@@ -49,13 +49,30 @@ def do_update(download_url, progress_callback, finish_callback):
             finish_callback(False, "仅支持在打包后的 exe 运行环境中自动更新。")
             return
             
-        # 在中国大陆网络环境下，自动使用 ghproxy 镜像进行超高速下载
-        download_url_to_use = download_url
-        if download_url.startswith("https://github.com/"):
-            download_url_to_use = f"https://mirror.ghproxy.com/{download_url}"
-            
-        resp = requests.get(download_url_to_use, stream=True, timeout=15)
-        resp.raise_for_status()
+        resp = None
+        # 第一阶段：尝试官方链接直接下载 (海外用户或开启代理的用户)
+        try:
+            print(f"[更新下载] 尝试连接官方下载源: {download_url}")
+            resp = requests.get(download_url, stream=True, timeout=3.5)
+            resp.raise_for_status()
+        except Exception as e:
+            # 第二阶段：如果官方直连失败/超时，且链接属于 GitHub，则平滑降级至高速镜像
+            if download_url.startswith("https://github.com/"):
+                print(f"[更新下载] 官方连接失败或超时 ({e})，正在自动切换至 ghproxy 高速镜像...")
+                try:
+                    # 尝试主镜像 mirror.ghproxy.com
+                    mirror_url = f"https://mirror.ghproxy.com/{download_url}"
+                    resp = requests.get(mirror_url, stream=True, timeout=15)
+                    resp.raise_for_status()
+                except Exception as mirror_e:
+                    print(f"[更新下载] 主加速镜像连接失败 ({mirror_e})，正在切换至备用加速镜像...")
+                    # 尝试备用镜像 ghproxy.net
+                    backup_mirror_url = f"https://ghproxy.net/{download_url}"
+                    resp = requests.get(backup_mirror_url, stream=True, timeout=15)
+                    resp.raise_for_status()
+            else:
+                # 非 GitHub 链接则直接抛出原异常
+                raise e
         
         total_length = resp.headers.get('content-length')
         downloaded = 0

@@ -10,7 +10,7 @@ from ui.main_window import config_path, fastapi_output_path, fastapi_source_path
 from updater import cleanup_old_exe
 from ui.i18n import set_language, tr
 
-VERSION = "v1.0.6"
+VERSION = "v1.0.7"
 
 def resource_path(relative_path):
     if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
