@@ -18,7 +18,7 @@
 **Alas-Gyre** is a sleek, premium, and secure desktop companion designed exclusively for [AzurLaneAutoScript (ALAS)](https://github.com/LmeSzinc/AzurLaneAutoScript). Built with **PySide6**, it offers multi-instance status monitoring and absolute background control in a beautiful Windows 11 Fluent-inspired aesthetic, fully supporting custom dark and light themes.
 
 <div align="center">
-  <img src="ui_preview_en.png?v=3" alt="Alas-Gyre UI Preview" width="314"/>
+  <img src="ui_preview_en.png?v=4" alt="Alas-Gyre UI Preview" width="314"/>
   <p><em>Main Control Dashboard (Dark Mode)</em></p>
 </div>
 
@@ -77,7 +77,7 @@ If you want to run the project using raw Python or make custom modifications:
 Alas-Gyre communicates with the ALAS instance over HTTP using a secure customized API token.
 
 <div align="center">
-  <img src="settings_preview_en.png?v=3" alt="Alas-Gyre Settings Preview" width="420"/>
+  <img src="settings_preview_en.png?v=4" alt="Alas-Gyre Settings Preview" width="420"/>
   <p><em>Secure Connection Settings & Client Customization</em></p>
 </div>
 

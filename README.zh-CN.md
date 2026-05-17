@@ -18,7 +18,7 @@
 **Alas-Gyre** 是一款专为 [AzurLaneAutoScript (ALAS)](https://github.com/LmeSzinc/AzurLaneAutoScript) 设计的高颜值、轻量且高度安全的极简桌面控制面板。项目基于 **PySide6** 开发，采用现代 Windows 11 Fluent 风格设计，并完美原生适配深色/浅色双重视觉模式。
 
 <div align="center">
-  <img src="ui_preview.png?v=3" alt="Alas-Gyre 界面预览" width="314"/>
+  <img src="ui_preview.png?v=4" alt="Alas-Gyre 界面预览" width="314"/>
   <p><em>主控制面板（深色模式）</em></p>
 </div>
 
@@ -77,7 +77,7 @@
 Alas-Gyre 通过内置的安全加密握手协议与 ALAS 服务端交互。
 
 <div align="center">
-  <img src="settings_preview.png?v=3" alt="Alas-Gyre 设置界面预览" width="420"/>
+  <img src="settings_preview.png?v=4" alt="Alas-Gyre 设置界面预览" width="420"/>
   <p><em>安全连接配置与客户端个性化设置</em></p>
 </div>
 
