@@ -17,10 +17,17 @@
 
 **Alas-Gyre** 是一款专为 [AzurLaneAutoScript (ALAS)](https://github.com/LmeSzinc/AzurLaneAutoScript) 设计的高颜值、轻量且高度安全的极简桌面控制面板。项目基于 **PySide6** 开发，采用现代 Windows 11 Fluent 风格设计，并完美原生适配深色/浅色双重视觉模式。
 
-<div align="center">
-  <img src="ui_preview.png?v=4" alt="Alas-Gyre 界面预览" width="314"/>
-  <p><em>主控制面板（深色模式）</em></p>
-</div>
+### 📸 软件界面效果展示
+
+| 单实例主界面 | 多配置实例并行运行 |
+| :---: | :---: |
+| <img src="ui_preview.png?v=4" alt="单实例主界面" width="314"/> | <img src="multi_preview.png?v=4" alt="多配置实例主界面" width="314"/> |
+| *极简单配置卡片面板* | *多配置实例并行并发控制与心跳* |
+
+| 安全连接与个性化设置 | 实时日志高亮流式查看器 | 桌面上层透明呼吸悬浮窗 |
+| :---: | :---: | :---: |
+| <img src="settings_preview.png?v=4" alt="设置界面" width="350"/> | <img src="log_preview.png?v=4" alt="日志查看器" width="350"/> | <img src="float_preview.png?v=4" alt="悬浮窗" width="220"/> |
+| *安全认证连接设置* | *动态日志等级染色高亮面板* | *鼠标穿透与半透明桌面监控* |
 
 ## ✨ 核心特性
 

@@ -17,10 +17,17 @@
 
 **Alas-Gyre** is a sleek, premium, and secure desktop companion designed exclusively for [AzurLaneAutoScript (ALAS)](https://github.com/LmeSzinc/AzurLaneAutoScript). Built with **PySide6**, it offers multi-instance status monitoring and absolute background control in a beautiful Windows 11 Fluent-inspired aesthetic, fully supporting custom dark and light themes.
 
-<div align="center">
-  <img src="ui_preview_en.png?v=4" alt="Alas-Gyre UI Preview" width="314"/>
-  <p><em>Main Control Dashboard (Dark Mode)</em></p>
-</div>
+### 📸 Interface Gallery
+
+| Main Control (Single Instance) | Main Control (Multi-Instance) |
+| :---: | :---: |
+| <img src="ui_preview_en.png?v=4" alt="Single Config" width="314"/> | <img src="multi_preview_en.png?v=4" alt="Multi Config" width="314"/> |
+| *Main Control Dashboard (Single Config)* | *Real-time Multi-Instance Dashboard* |
+
+| Secure Settings Window | Real-Time Log Viewer | Micro-Floating Widget |
+| :---: | :---: | :---: |
+| <img src="settings_preview_en.png?v=4" alt="Settings Window" width="350"/> | <img src="log_preview_en.png?v=4" alt="Log Viewer" width="350"/> | <img src="float_preview_en.png?v=4" alt="Floating Widget" width="220"/> |
+| *Secure Connection Settings* | *Trace Log Streamer* | *Translucent Floating Monitor* |
 
 ## ✨ Key Features
 
