@@ -128,7 +128,7 @@ class SettingsWindow(QDialog):
         opacity_layout.setSpacing(10)
         opacity_label = QLabel(tr("float_opacity"))
         opacity_label.setObjectName("formLabel")
-        opacity_label.setFixedWidth(66)
+        opacity_label.setFixedWidth(100)
         self.miniOpacitySlider = QSlider(Qt.Horizontal)
         self.miniOpacitySlider.setObjectName("settingsSlider")
         self.miniOpacitySlider.setRange(35, 100)
@@ -152,7 +152,7 @@ class SettingsWindow(QDialog):
         ip_layout.setSpacing(10)
         ip_label = QLabel(tr("ip_address"))
         ip_label.setObjectName("formLabel")
-        ip_label.setFixedWidth(66)
+        ip_label.setFixedWidth(100)
         self.ipInput = QLineEdit()
         self.ipInput.setObjectName("settingsInput")
         self.ipInput.setFixedHeight(30)
@@ -166,10 +166,10 @@ class SettingsWindow(QDialog):
         
         port_label = QLabel(tr("service_port"))
         port_label.setObjectName("formLabel")
-        port_label.setFixedWidth(66)
+        port_label.setFixedWidth(100)
         self.portInput = QLineEdit()
         self.portInput.setObjectName("settingsInput")
-        self.portInput.setFixedSize(120, 30)
+        self.portInput.setFixedSize(90, 30)
         self.portInput.setText(self.config.get("port", "22267"))
         port_layout.addWidget(port_label)
         port_layout.addWidget(self.portInput)
@@ -179,7 +179,7 @@ class SettingsWindow(QDialog):
         self.testBtn.setObjectName("testBtn")
         self.testBtn.setCursor(Qt.PointingHandCursor)
         self.testBtn.setFocusPolicy(Qt.NoFocus)
-        self.testBtn.setFixedSize(78, 30)
+        self.testBtn.setFixedSize(120, 30)
         self.testBtn.clicked.connect(self._run_connection_test)
         port_layout.addWidget(self.testBtn)
 
@@ -187,7 +187,7 @@ class SettingsWindow(QDialog):
         token_layout.setSpacing(10)
         token_label = QLabel("API Token")
         token_label.setObjectName("formLabel")
-        token_label.setFixedWidth(66)
+        token_label.setFixedWidth(100)
         self.tokenInput = QLineEdit()
         self.tokenInput.setObjectName("settingsInput")
         self.tokenInput.setFixedHeight(30)
@@ -200,7 +200,7 @@ class SettingsWindow(QDialog):
         self.tokenGenerateBtn.setObjectName("tokenBtn")
         self.tokenGenerateBtn.setCursor(Qt.PointingHandCursor)
         self.tokenGenerateBtn.setFocusPolicy(Qt.NoFocus)
-        self.tokenGenerateBtn.setFixedSize(62, 30)
+        self.tokenGenerateBtn.setFixedSize(80, 30)
         self.tokenGenerateBtn.clicked.connect(self._generate_token)
         token_layout.addWidget(self.tokenGenerateBtn)
 
@@ -210,7 +210,7 @@ class SettingsWindow(QDialog):
         
         update_label = QLabel(tr("version_update"))
         update_label.setObjectName("formLabel")
-        update_label.setFixedWidth(66)
+        update_label.setFixedWidth(100)
         
         self.versionLabel = QLabel(f"{tr('current_version')} {VERSION}")
         self.versionLabel.setStyleSheet("color: #a6abb4; font-size: 13px; font-family: 'Microsoft YaHei', 'Segoe UI';")
@@ -219,7 +219,7 @@ class SettingsWindow(QDialog):
         self.updateBtn.setObjectName("updateBtn")
         self.updateBtn.setCursor(Qt.PointingHandCursor)
         self.updateBtn.setFocusPolicy(Qt.NoFocus)
-        self.updateBtn.setFixedSize(76, 30)
+        self.updateBtn.setFixedSize(110, 30)
         self.updateBtn.setStyleSheet("""
             QPushButton#updateBtn {
                 background-color: transparent;
@@ -257,14 +257,14 @@ class SettingsWindow(QDialog):
         self.cancelBtn.setObjectName("cancelBtn")
         self.cancelBtn.setCursor(Qt.PointingHandCursor)
         self.cancelBtn.setFocusPolicy(Qt.NoFocus)
-        self.cancelBtn.setFixedSize(62, 30)
+        self.cancelBtn.setFixedSize(76, 30)
         self.cancelBtn.clicked.connect(self.reject)
 
         self.saveBtn = QPushButton(tr("save"))
         self.saveBtn.setObjectName("saveBtn")
         self.saveBtn.setCursor(Qt.PointingHandCursor)
         self.saveBtn.setFocusPolicy(Qt.NoFocus)
-        self.saveBtn.setFixedSize(62, 30)
+        self.saveBtn.setFixedSize(76, 30)
         self.saveBtn.clicked.connect(self.accept)
 
         btn_layout.addWidget(self.cancelBtn)
