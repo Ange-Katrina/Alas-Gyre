@@ -1,5 +1,5 @@
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QGraphicsDropShadowEffect, QFrame, QSizePolicy
-from PySide6.QtCore import Qt, Signal, QTimer
+from PySide6.QtCore import QPoint, Qt, Signal, QTimer
 from PySide6.QtGui import QColor, QPainter, QFontMetrics, QPainterPath
 import sys
 from .api_client import api_headers
@@ -294,9 +294,8 @@ class MiniWindow(QWidget):
         self.setWindowOpacity(opacity / 100.0)
 
         enabled = bool(self.main_card.config.get("mini_click_through", False))
-        self.setAttribute(Qt.WA_TransparentForMouseEvents, enabled)
-        self._apply_qt_click_through(enabled)
-        self._apply_native_click_through(enabled)
+        self._click_through_enabled = enabled
+        self._disable_global_click_through()
 
     def _normalize_opacity(self, value):
         try:
@@ -305,22 +304,17 @@ class MiniWindow(QWidget):
             value = 100
         return max(35, min(value, 100))
 
-    def _apply_qt_click_through(self, enabled):
-        if self._click_through_enabled == enabled:
-            return
-
+    def _disable_global_click_through(self):
+        self.setAttribute(Qt.WA_TransparentForMouseEvents, False)
         transparent_flag = getattr(Qt, "WindowTransparentForInput", None)
         if transparent_flag is None and hasattr(Qt, "WindowType"):
             transparent_flag = getattr(Qt.WindowType, "WindowTransparentForInput", None)
-        if transparent_flag is None:
-            self._click_through_enabled = enabled
-            return
-
-        was_visible = self.isVisible()
-        self.setWindowFlag(transparent_flag, enabled)
-        self._click_through_enabled = enabled
-        if was_visible:
-            self.show()
+        if transparent_flag is not None:
+            was_visible = self.isVisible()
+            self.setWindowFlag(transparent_flag, False)
+            if was_visible:
+                self.show()
+        self._apply_native_click_through(False)
 
     def _apply_native_click_through(self, enabled):
         if sys.platform != "win32":
@@ -340,6 +334,35 @@ class MiniWindow(QWidget):
             ctypes.windll.user32.SetWindowLongW(hwnd, gwl_exstyle, style)
         except Exception as exc:
             print(f"[警告] 应用悬浮窗鼠标穿透失败: {exc}")
+
+    def nativeEvent(self, event_type, message):
+        if (
+            sys.platform == "win32"
+            and self._click_through_enabled
+            and int(message.message) == 0x0084  # WM_NCHITTEST
+        ):
+            point = self._point_from_lparam(int(message.lParam))
+            local_pos = self.mapFromGlobal(point)
+            if not self._is_interactive_point(local_pos):
+                return True, -1  # HTTRANSPARENT
+        return super().nativeEvent(event_type, message)
+
+    def _point_from_lparam(self, lparam):
+        x = lparam & 0xFFFF
+        y = (lparam >> 16) & 0xFFFF
+        if x & 0x8000:
+            x -= 0x10000
+        if y & 0x8000:
+            y -= 0x10000
+        return QPoint(x, y)
+
+    def _is_interactive_point(self, local_pos):
+        widget = self.childAt(local_pos)
+        while widget is not None:
+            if isinstance(widget, QPushButton):
+                return True
+            widget = widget.parentWidget()
+        return False
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
