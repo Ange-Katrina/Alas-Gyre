@@ -1,88 +1,197 @@
 # Alas-Gyre
 
-Alas-Gyre 是一个用于配合 AzurLaneAutoScript WebUI 的轻量桌面极简控制工具。
+<div align="center">
 
-## 功能
+**Elegant, secure, and ultra-lightweight desktop controller for AzurLaneAutoScript (ALAS) WebUI.**
 
-- 查看多个 Alas 配置的运行状态
-- 启动 / 停止指定配置
-- 悬浮窗状态监控
-- 悬浮窗透明度调节和鼠标穿透
-- 系统托盘菜单，可快速恢复主界面、打开悬浮窗、打开 Alas 主页
-- 首次运行初始化向导，用于配置服务器地址并导出安装用 `fastapi.py`
-- 实时日志查看和配置切换
-- 导出适配后的 `fastapi.py`，用于替换到 AzurLaneAutoScript 的 `module/webui/fastapi.py`
-- 使用 `X-Alas-Gyre-Token` 保护远程 API，避免无认证控制接口暴露
+[![Python](https://img.shields.io/badge/Python-3.9+-blue.svg?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
+[![PySide6](https://img.shields.io/badge/PySide-6-green.svg?style=flat-square&logo=qt&logoColor=white)](https://pypi.org/project/PySide6/)
+[![Platform](https://img.shields.io/badge/Platform-Windows-0078d7.svg?style=flat-square&logo=windows&logoColor=white)](#)
+[![License](https://img.shields.io/badge/License-GPL--3.0-orange.svg?style=flat-square)](#)
 
-## 运行
+[🌐 English](#alas-gyre) | [🇨🇳 简体中文](#alas-gyre---简体中文)
+
+</div>
+
+---
+
+# Alas-Gyre
+
+**Alas-Gyre** is a sleek, premium, and secure desktop companion designed exclusively for [AzurLaneAutoScript (ALAS)](https://github.com/LmeSzinc/AzurLaneAutoScript). Built with **PySide6**, it offers multi-instance status monitoring and absolute background control in a beautiful Windows 11 Fluent-inspired aesthetic, fully supporting custom dark and light themes.
+
+<div align="center">
+  <img src="ui_preview.png" alt="Alas-Gyre UI Preview" width="314"/>
+  <p><em>Main Control Dashboard (Dark Mode)</em></p>
+</div>
+
+## ✨ Key Features
+
+- **Multi-Instance Dashboard**: Monitor and control multiple ALAS configuration instances (`alas`, `alas2`, etc.) simultaneously in real-time.
+- **Micro-floating Widget**: A high-performance, click-through, and translucent status widget displaying elided status strings and offering instant stop/start actions.
+- **Fluent UI / UX Design**: Fully custom vector close and minimize controls, custom HSL color-tailored stylesheets, micro-animations, and complete custom dark/light modes.
+- **First-Run Interactive Setup**: A beautiful initial wizard guiding you through connection validation and automated backend payload generation.
+- **Real-Time Log Streamer**: Instant connection to configuration logs with full trace scroll locks and dynamic log-level colored highlight bars.
+- **Token Security Guard**: Uses `X-Alas-Gyre-Token` headers for all remote requests, securely encapsulating ALAS endpoints from unauthorized local or remote access.
+- **Zero-Dependency FastAPI Export**: Export pre-compiled FastAPI payloads containing your custom secret token, ready to cover `module/webui/fastapi.py`.
+
+---
+
+## 🚀 Getting Started
+
+### Prerequisites
+- Windows 10 / 11
+- Python 3.9 or higher
+
+### Installation
+
+1. Clone or download the repository:
+   ```powershell
+   git clone https://github.com/Ange-Katrina/Alas-Gyre.git
+   cd Alas-Gyre
+   ```
+
+2. Create a virtual environment and install the required packages:
+   ```powershell
+   python -m venv .venv
+   .\.venv\Scripts\activate
+   pip install -r requirements.txt
+   ```
+
+3. Run the application:
+   ```powershell
+   python main.py
+   ```
+
+*Note: On your first run, the **Interactive Initialization Wizard** will automatically launch to guide you through configuration.*
+
+---
+
+## 🛠️ Remote Host Integration & Security
+
+Alas-Gyre communicates with the ALAS instance over HTTP using a secure customized API token.
+
+<div align="center">
+  <img src="settings_preview.png" alt="Alas-Gyre Settings Preview" width="420"/>
+  <p><em>Secure Connection Settings & Client Customization</em></p>
+</div>
+
+### 1. The Security Header
+All requests sent by Alas-Gyre are validated using the header:
+```http
+X-Alas-Gyre-Token: <YOUR_GENERATED_API_TOKEN>
+```
+
+### 2. Deploying the FastAPI Payload
+To support status calls and token validation on the ALAS server side:
+1. Click the **Export (⇪)** button on the Alas-Gyre bottom dock.
+2. Click **Export fastapi.py**. This generates a fully rendered `output/fastapi.py` injected with your unique API token.
+3. Upload and replace the existing file on your ALAS machine:
+   ```text
+   AzurLaneAutoScript/module/webui/fastapi.py
+   ```
+4. Restart the ALAS WebUI service to apply changes.
+
+---
+
+## 📦 Packaging & Distribution
+
+To compile the project into a standalone, single-executable Windows binary:
 
 ```powershell
-python -m venv .venv
-.\.venv\Scripts\activate
-pip install -r requirements.txt
-python main.py
-```
-
-首次运行且本地没有 `config.json` 时，会自动打开初始化向导。
-
-## 初始化
-
-初始化向导会引导你完成：
-
-- 设置 AzurLaneAutoScript WebUI 的 IP 地址和端口
-- 生成或填写 API Token
-- 导出 `output/fastapi.py`
-- 提示将导出的文件上传并覆盖到 `AzurLaneAutoScript/module/webui/fastapi.py`
-
-覆盖后需要重启 AzurLaneAutoScript 或 WebUI 服务，再回到工具里测试连接。
-
-## Token 与连接
-
-打开设置窗口后可以配置 IP、服务端口和 API Token。
-
-- 点击“生成”可创建一个随机 Token。
-- 保存设置后，客户端请求会自动携带 `X-Alas-Gyre-Token`。
-- “测试连接”会请求 `/api/health`，可以同时检查服务是否可访问、Token 是否正确。
-- 如果导出时 Token 为空，工具会自动生成一个 Token 并保存到本地 `config.json`。
-
-## FastAPI 文件导出
-
-软件内置了适配后的 FastAPI payload，不依赖测试用的 AzurLaneAutoScript 目录。
-
-在主界面底部点击导出按钮，打开导出窗口后点击 `导出 fastapi.py`，会生成：
-
-```text
-output/fastapi.py
-```
-
-将该文件上传并覆盖到：
-
-```text
-AzurLaneAutoScript/module/webui/fastapi.py
-```
-
-注意：导出的 `fastapi.py` 内含本机 API Token，不要公开上传。
-
-## 打包
-
-```powershell
+# Install development dependencies
 pip install -r requirements-dev.txt
+
+# Run compiler using PyInstaller
 pyinstaller Alas-Gyre.spec
 ```
 
-打包配置会包含：
+The compiled binary will be located inside the `dist/` directory.
 
-- `ui/style.qss`
-- `ui/assets/alas.ico`
-- `resources/fastapi_payload.txt`
+---
 
-## 仓库说明
+# Alas-Gyre - 简体中文
 
-以下内容不应提交到 GitHub：
+**Alas-Gyre** 是一款专为 [AzurLaneAutoScript (ALAS)](https://github.com/LmeSzinc/AzurLaneAutoScript) 设计的高颜值、轻量且高度安全的极简桌面控制面板。项目基于 **PySide6** 开发，采用现代 Windows 11 Fluent 风格设计，并完美原生适配深色/浅色视觉模式。
 
-- `config.json`
-- `output/`
-- `build/`
-- `dist/`
-- `__pycache__/`
-- 测试用的完整 `AzurLaneAutoScript/` 目录
+## ✨ 核心特性
+
+- **多配置主面板**：实时查看并一键启动/停止多个 ALAS 配置实例（如 `alas`、`alas2` 等）。
+- **极简状态悬浮窗**：支持鼠标穿透、透明度微调与精细文本滚动的桌面微型监控器。
+- **高质感 Fluent 设计**：精致的抗锯齿矢量绘制按钮、顺滑的微交互动画，并完美支持深色/浅色双模式。
+- **首航交互向导**：首次打开自动进入图形化向导，轻松录入连接配置并快速验证。
+- **实时日志查看器**：动态抓取配置输出，包含滚动锁定机制以及专属高亮色彩的日志等级侧边条。
+- **Token 安全屏障**：全面使用 `X-Alas-Gyre-Token` 安全头进行双向握手，彻底避免局域网内未授权的 API 操纵。
+- **零依赖 FastAPI 导出**：自动嵌入您本机的密钥 Token，一键生成用于覆盖 ALAS 侧的 `fastapi.py` 控制脚本。
+
+---
+
+## 🚀 快速开始
+
+### 环境准备
+- 操作系统：Windows 10 / 11
+- Python 版本：3.9 及以上
+
+### 简易安装
+
+1. 克隆或下载本项目到本地：
+   ```powershell
+   git clone https://github.com/Ange-Katrina/Alas-Gyre.git
+   cd Alas-Gyre
+   ```
+
+2. 创建虚拟环境并安装所需依赖：
+   ```powershell
+   python -m venv .venv
+   .\.venv\Scripts\activate
+   pip install -r requirements.txt
+   ```
+
+3. 启动运行：
+   ```powershell
+   python main.py
+   ```
+
+*注意：若本地没有检测到 `config.json`，软件会自动打开 **初始化向导** 引导您完成配置。*
+
+---
+
+## 🛠️ 服务端对接与安全验证
+
+Alas-Gyre 通过内置的安全加密握手协议与 ALAS 服务端交互。
+
+### 1. 认证安全头
+客户端发出的所有请求都会强制附带如下 HTTP 请求头：
+```http
+X-Alas-Gyre-Token: <您的秘钥Token>
+```
+
+### 2. 部署 `fastapi.py` 载荷文件
+为了让 ALAS 服务端能够校验上述安全头并响应控制指令：
+1. 在主界面底栏点击 **导出 (⇪)** 图标。
+2. 在弹出窗口中点击 **导出 fastapi.py**，将在本地生成内置您独立 Token 的 `output/fastapi.py` 文件。
+3. 将此文件上传并覆盖到 ALAS 服务端所在目录：
+   ```text
+   AzurLaneAutoScript/module/webui/fastapi.py
+   ```
+4. 重启 ALAS 服务端或 WebUI 进程以应用该安全通道。
+
+---
+
+## 📦 独立程序打包
+
+如果您需要打包生成无需 Python 环境的单文件可执行程序 (`.exe`)：
+
+```powershell
+# 安装开发打包依赖
+pip install -r requirements-dev.txt
+
+# 使用 spec 配置文件执行打包
+pyinstaller Alas-Gyre.spec
+```
+
+打包完成后，您可以在 `dist/` 文件夹下找到编译好的 `Alas-Gyre.exe`！
+
+---
+
+## 📄 License
+This project is open-source and released under the [GNU General Public License v3.0 (GPL-3.0)](LICENSE) terms.
