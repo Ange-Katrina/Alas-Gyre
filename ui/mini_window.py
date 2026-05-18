@@ -269,10 +269,7 @@ class MiniWindow(QWidget):
             self.rows[c] = row
 
     def _on_restore_clicked(self):
-        self.hide()
-        if self.main_card.window():
-            self.main_card.window().show()
-            self.main_card.window().activateWindow()
+        self.main_card.restore_main_window()
 
     def _on_status_all_updated(self, statuses: dict):
         for c, status in statuses.items():
