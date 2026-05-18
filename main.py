@@ -11,7 +11,7 @@ from ui.main_window import config_path, fastapi_output_path, fastapi_source_path
 from updater import cleanup_old_exe
 from ui.i18n import set_language, tr
 
-VERSION = "v1.1.0"
+VERSION = "v1.1.1"
 APP_USER_MODEL_ID = "AngeKatrina.AlasGyre"
 
 def resource_path(relative_path):
