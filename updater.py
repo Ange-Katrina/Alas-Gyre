@@ -8,7 +8,7 @@ from packaging import version
 
 
 GITHUB_REPO = "Ange-Katrina/Alas-Gyre"
-API_URL = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
+API_URL = f"https://api.github.com/repos/{GITHUB_REPO}/releases"
 RELEASE_LATEST_URL = f"https://github.com/{GITHUB_REPO}/releases/latest"
 CHECK_TIMEOUT = (4, 12)
 REQUEST_HEADERS = {
@@ -76,7 +76,11 @@ def update_result_from_release(data, current_version):
 def fetch_latest_release_by_api(current_version):
     resp = requests.get(API_URL, headers=REQUEST_HEADERS, timeout=CHECK_TIMEOUT)
     resp.raise_for_status()
-    return update_result_from_release(resp.json(), current_version)
+    releases = resp.json()
+    if not releases or not isinstance(releases, list):
+        raise ValueError("No releases found.")
+    # 第一项即为最新发布的 Release (包括 pre-release 预发布版)
+    return update_result_from_release(releases[0], current_version)
 
 
 def fetch_latest_tag_by_redirect():

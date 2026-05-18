@@ -289,6 +289,7 @@ class SettingsWindow(QDialog):
         self.card.setGraphicsEffect(shadow)
 
         self._center_on_screen()
+        QTimer.singleShot(100, self._check_for_updates)
 
     def _center_on_screen(self):
         if self.parent():
