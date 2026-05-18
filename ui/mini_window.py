@@ -339,12 +339,18 @@ class MiniWindow(QWidget):
         if (
             sys.platform == "win32"
             and self._click_through_enabled
-            and int(message.message) == 0x0084  # WM_NCHITTEST
         ):
-            point = self._point_from_lparam(int(message.lParam))
-            local_pos = self.mapFromGlobal(point)
-            if not self._is_interactive_point(local_pos):
-                return True, -1  # HTTRANSPARENT
+            try:
+                import ctypes
+                from ctypes import wintypes
+                msg = ctypes.wintypes.MSG.from_address(int(message))
+                if msg.message == 0x0084:  # WM_NCHITTEST
+                    point = self._point_from_lparam(msg.lParam)
+                    local_pos = self.mapFromGlobal(point)
+                    if not self._is_interactive_point(local_pos):
+                        return True, -1  # HTTRANSPARENT
+            except Exception as e:
+                print(f"[警告] 悬浮窗鼠标穿透 nativeEvent 处理失败: {e}")
         return super().nativeEvent(event_type, message)
 
     def _point_from_lparam(self, lparam):
