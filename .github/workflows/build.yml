@@ -2,6 +2,8 @@ name: Build and Release
 
 on:
   push:
+    branches:
+      - main
     tags:
       - 'v*'  # 版本号标记
   workflow_dispatch:
@@ -207,7 +209,7 @@ jobs:
             dist/Alas-Gyre.exe
             Alas-Gyre-macOS.zip
             Alas-Gyre-Linux.tar.gz
-          retention-days: 1
+          retention-days: 7
 
   release:
     name: Publish Release
