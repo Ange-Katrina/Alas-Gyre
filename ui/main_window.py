@@ -3,10 +3,11 @@ import os
 import json
 from PySide6.QtWidgets import (
     QApplication, QWidget, QLabel, QPushButton, QFrame,
-    QGraphicsDropShadowEffect, QVBoxLayout, QHBoxLayout, QSizePolicy, QScrollArea
+    QGraphicsDropShadowEffect, QVBoxLayout, QHBoxLayout, QSizePolicy, QScrollArea,
+    QFileDialog
 )
-from PySide6.QtCore import Qt, QRectF, QTimer, Signal, QPointF
-from PySide6.QtGui import QColor, QPainter, QPen, QFontMetrics, QPainterPath
+from PySide6.QtCore import Qt, QRectF, QTimer, Signal, QPointF, QSize
+from PySide6.QtGui import QColor, QPainter, QPen, QFontMetrics, QPainterPath, QIcon, QPixmap
 import requests
 import threading
 import time
@@ -14,6 +15,8 @@ import time
 from .api_client import api_headers
 from .window_snap import snap_to_available_screen
 from .i18n import tr
+from .config_validator import AlasConfigValidationError, validate_alas_config
+from .message_dialog import ask_confirm, show_info, show_warning
 
 VALID_STATUSES = {"idle", "running", "error", "update", "disconnected"}
 
@@ -45,6 +48,18 @@ def fastapi_source_path():
 
 def fastapi_output_path():
     return os.path.join(app_base_dir(), "output", "fastapi.py")
+
+def asset_path(*parts):
+    relative_path = os.path.join("ui", "assets", *parts)
+    candidates = [
+        os.path.join(app_base_dir(), relative_path),
+    ]
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        candidates.append(os.path.join(sys._MEIPASS, relative_path))
+    for path in candidates:
+        if os.path.exists(path):
+            return path
+    return candidates[0]
 
 class StatusIndicator(QWidget):
     """带行动效的状态指示器"""
@@ -83,9 +98,6 @@ class StatusIndicator(QWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
         
-        # 向下微调 1 像素对齐文字基线
-        p.translate(0, 1)
-
         if self._state == "idle":
             # 闲置：灰色静止空心圆环，尺寸和线宽与运行中完全统一
             pen = QPen(QColor("#6b707a"), 2.5, Qt.SolidLine, Qt.RoundCap)
@@ -187,6 +199,102 @@ class WindowButton(QWidget):
             p.drawLine(20, 10, 10, 20)
         p.end()
 
+
+def build_bottom_icon(kind, color):
+    pixmap = QPixmap(24, 24)
+    pixmap.fill(Qt.transparent)
+
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.Antialiasing)
+    painter.setPen(QPen(QColor(color), 1.7, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+    painter.setBrush(Qt.NoBrush)
+
+    cx = 12.0
+    top = 3.0
+
+    if kind == "settings":
+        painter.drawEllipse(QRectF(cx - 3.0, top + 6.0, 6.0, 6.0))
+        for angle in range(0, 360, 45):
+            import math
+            rad = math.radians(angle)
+            inner = QPointF(cx + math.cos(rad) * 6.3, top + 9.0 + math.sin(rad) * 6.3)
+            outer = QPointF(cx + math.cos(rad) * 8.3, top + 9.0 + math.sin(rad) * 8.3)
+            painter.drawLine(inner, outer)
+    elif kind == "home":
+        roof = QPainterPath()
+        roof.moveTo(QPointF(cx - 8.0, top + 10.0))
+        roof.lineTo(QPointF(cx, top + 3.0))
+        roof.lineTo(QPointF(cx + 8.0, top + 10.0))
+        painter.drawPath(roof)
+        painter.drawRoundedRect(QRectF(cx - 6.2, top + 9.5, 12.4, 9.0), 1.5, 1.5)
+    elif kind == "float":
+        painter.drawRoundedRect(QRectF(cx - 8.0, top + 5.0, 10.0, 10.0), 1.0, 1.0)
+        painter.drawRoundedRect(QRectF(cx - 2.0, top + 11.0, 10.0, 10.0), 1.0, 1.0)
+    elif kind == "log":
+        painter.drawRoundedRect(QRectF(cx - 6.5, top + 1.0, 13.0, 16.0), 1.5, 1.5)
+        painter.drawLine(QPointF(cx - 3.5, top + 6.0), QPointF(cx + 3.5, top + 6.0))
+        painter.drawLine(QPointF(cx - 3.5, top + 10.0), QPointF(cx + 3.5, top + 10.0))
+        painter.drawLine(QPointF(cx - 3.5, top + 14.0), QPointF(cx + 2.0, top + 14.0))
+    elif kind == "export":
+        painter.drawRoundedRect(QRectF(cx - 7.0, top + 9.0, 14.0, 9.0), 1.5, 1.5)
+        painter.drawLine(QPointF(cx, top + 12.0), QPointF(cx, top + 3.0))
+        painter.drawLine(QPointF(cx, top + 3.0), QPointF(cx - 4.0, top + 7.0))
+        painter.drawLine(QPointF(cx, top + 3.0), QPointF(cx + 4.0, top + 7.0))
+    elif kind == "upload":
+        cloud = QPainterPath()
+        cloud.moveTo(QPointF(cx - 8.0, top + 15.0))
+        cloud.cubicTo(QPointF(cx - 10.0, top + 12.0), QPointF(cx - 7.0, top + 9.0), QPointF(cx - 4.0, top + 10.0))
+        cloud.cubicTo(QPointF(cx - 3.0, top + 6.0), QPointF(cx + 3.0, top + 6.0), QPointF(cx + 4.0, top + 10.0))
+        cloud.cubicTo(QPointF(cx + 8.0, top + 9.0), QPointF(cx + 10.0, top + 15.0), QPointF(cx + 6.0, top + 16.0))
+        cloud.lineTo(QPointF(cx - 7.0, top + 16.0))
+        painter.drawPath(cloud)
+        painter.drawLine(QPointF(cx, top + 15.0), QPointF(cx, top + 5.0))
+        painter.drawLine(QPointF(cx, top + 5.0), QPointF(cx - 3.8, top + 8.8))
+        painter.drawLine(QPointF(cx, top + 5.0), QPointF(cx + 3.8, top + 8.8))
+
+    painter.end()
+    return QIcon(pixmap)
+
+
+def load_bottom_icon(kind, hover=False):
+    suffix = "_hover" if hover else ""
+    icon_path = asset_path("bottom_icons", f"{kind}{suffix}.png")
+    if os.path.exists(icon_path):
+        return QIcon(icon_path)
+    return build_bottom_icon(kind, "#d4d8df" if hover else "#a6abb4")
+
+
+def format_alas_config_error(code, detail=""):
+    reason = tr(f"alas_config_error_{code}", detail=detail)
+    return tr("upload_config_invalid_alas", reason=reason)
+
+
+def format_alas_config_validation_error(exc):
+    return format_alas_config_error(exc.code, exc.detail)
+
+
+class BottomIconButton(QPushButton):
+    def __init__(self, kind, parent=None):
+        super().__init__(parent)
+        self.kind = kind
+        self._normal_icon = load_bottom_icon(kind)
+        self._hover_icon = load_bottom_icon(kind, hover=True)
+        self.setFixedSize(32, 30)
+        self.setIconSize(QSize(22, 22))
+        self.setIcon(self._normal_icon)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setFocusPolicy(Qt.NoFocus)
+        self.setObjectName("lineIconBtn")
+
+    def enterEvent(self, event):
+        self.setIcon(self._hover_icon)
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        self.setIcon(self._normal_icon)
+        super().leaveEvent(event)
+
+
 class ConfigActionButton(QPushButton):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -220,6 +328,36 @@ class ConfigActionButton(QPushButton):
             painter.drawPath(path)
         painter.end()
 
+
+class ConfigDeleteButton(QPushButton):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._normal_icon = load_bottom_icon("delete")
+        self._hover_icon = load_bottom_icon("delete", hover=True)
+        disabled_path = asset_path("bottom_icons", "delete_disabled.png")
+        self._disabled_icon = QIcon(disabled_path) if os.path.exists(disabled_path) else self._normal_icon
+        self.setFixedSize(24, 32)
+        self.setIconSize(QSize(17, 17))
+        self.setIcon(self._normal_icon)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setFocusPolicy(Qt.NoFocus)
+        self.setObjectName("configDeleteBtn")
+        self.setToolTip(tr("delete_config_tip"))
+
+    def enterEvent(self, event):
+        if self.isEnabled():
+            self.setIcon(self._hover_icon)
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        self.setIcon(self._normal_icon if self.isEnabled() else self._disabled_icon)
+        super().leaveEvent(event)
+
+    def setEnabled(self, enabled):
+        super().setEnabled(enabled)
+        self.setIcon(self._normal_icon if enabled else self._disabled_icon)
+
+
 class MainConfigRow(QWidget):
     btn_enable_signal = Signal(bool)
 
@@ -236,14 +374,18 @@ class MainConfigRow(QWidget):
         layout.setSpacing(10)
 
         self.statusIndicator = StatusIndicator()
-        self.statusIndicator.setFixedSize(20, 20)
-        layout.addWidget(self.statusIndicator)
+        layout.addWidget(self.statusIndicator, alignment=Qt.AlignVCenter)
 
         self.statusLabel = QLabel()
         self.statusLabel.setObjectName("rowStatusLabel")
         self.statusLabel.setMinimumWidth(0)
+        self.statusLabel.setAlignment(Qt.AlignVCenter)
         self.statusLabel.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
-        layout.addWidget(self.statusLabel, stretch=1)
+        layout.addWidget(self.statusLabel, stretch=1, alignment=Qt.AlignVCenter)
+
+        self.deleteBtn = ConfigDeleteButton()
+        self.deleteBtn.clicked.connect(self._on_delete_clicked)
+        layout.addWidget(self.deleteBtn)
 
         self.toggleBtn = ConfigActionButton()
         self.toggleBtn.clicked.connect(self._on_toggle_clicked)
@@ -283,7 +425,34 @@ class MainConfigRow(QWidget):
         self.current_status = normalize_status(status)
         self.statusIndicator.setStatus(self.current_status)
         self.toggleBtn.set_status(self.current_status)
+        self.deleteBtn.setEnabled(self.current_status != "running" and len(self.main_card._configs) > 1)
         self._refresh_label()
+
+    def _on_delete_clicked(self):
+        if len(self.main_card._configs) <= 1:
+            show_info(
+                self,
+                tr("delete_config_title"),
+                tr("delete_config_last"),
+            )
+            return
+        if self.current_status == "running":
+            show_warning(
+                self,
+                tr("delete_config_title"),
+                tr("delete_config_running", config=self.config_name),
+            )
+            return
+
+        if ask_confirm(
+            self,
+            tr("delete_config_title"),
+            tr("delete_config_confirm", config=self.config_name),
+            tr("delete_config_action"),
+            tr("cancel"),
+            danger=True,
+        ):
+            self.main_card.delete_config(self.config_name)
 
     def _on_toggle_clicked(self):
         self.main_card.set_current_config(self.config_name)
@@ -322,6 +491,8 @@ class CardWidget(QFrame):
     status_update_signal = Signal(str)
     configs_update_signal = Signal(list)
     status_all_update_signal = Signal(dict)
+    config_delete_result_signal = Signal(bool, str, str, list, str)
+    config_upload_result_signal = Signal(dict)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -367,6 +538,8 @@ class CardWidget(QFrame):
         self.status_update_signal.connect(self._update_status_ui)
         self.configs_update_signal.connect(self._on_configs_updated)
         self.status_all_update_signal.connect(self._on_status_all_updated)
+        self.config_delete_result_signal.connect(self._on_config_delete_result)
+        self.config_upload_result_signal.connect(self._on_config_upload_result)
         
         self.poll_timer = QTimer(self)
         self.poll_timer.timeout.connect(self._start_poll_thread)
@@ -441,21 +614,19 @@ class CardWidget(QFrame):
         bot_layout.setContentsMargins(24, 2, 24, 2)
         bot_layout.setSpacing(0)
         
-        self.setIcon = QPushButton("⚙") # 设置
-        self.homeIcon = QPushButton("⌂") # 主页
-        self.floatIcon = QPushButton("⧉") # 悬浮窗
-        self.logIcon = QPushButton("🖹") # 日志
-        self.exportIcon = QPushButton("⇪") # 导出
-
-        for ic in [self.setIcon, self.homeIcon, self.floatIcon, self.logIcon, self.exportIcon]:
-            ic.setCursor(Qt.PointingHandCursor)
-            ic.setObjectName("unicodeIconBtn")
+        self.setIcon = BottomIconButton("settings") # 设置
+        self.homeIcon = BottomIconButton("home") # 主页
+        self.floatIcon = BottomIconButton("float") # 悬浮窗
+        self.logIcon = BottomIconButton("log") # 日志
+        self.exportIcon = BottomIconButton("export") # 导出
+        self.uploadIcon = BottomIconButton("upload") # 上传配置
 
         self.setIcon.setToolTip(tr("settings_btn_tip"))
         self.homeIcon.setToolTip(tr("home_btn_tip"))
         self.floatIcon.setToolTip(tr("float_btn_tip"))
         self.logIcon.setToolTip(tr("log_btn_tip"))
         self.exportIcon.setToolTip(tr("export_btn_tip"))
+        self.uploadIcon.setToolTip(tr("upload_config_tip"))
             
         bot_layout.addWidget(self.setIcon)
         bot_layout.addStretch()
@@ -466,6 +637,8 @@ class CardWidget(QFrame):
         bot_layout.addWidget(self.logIcon)
         bot_layout.addStretch()
         bot_layout.addWidget(self.exportIcon)
+        bot_layout.addStretch()
+        bot_layout.addWidget(self.uploadIcon)
 
         # 事件绑定
         self.setIcon.mousePressEvent = lambda e: self._on_icon_click("设置", self.setIcon)
@@ -473,6 +646,7 @@ class CardWidget(QFrame):
         self.floatIcon.mousePressEvent = lambda e: self._on_icon_click("最小化", self.floatIcon)
         self.logIcon.mousePressEvent = lambda e: self._on_icon_click("日志", self.logIcon)
         self.exportIcon.mousePressEvent = lambda e: self._on_icon_click("导出", self.exportIcon)
+        self.uploadIcon.mousePressEvent = lambda e: self._on_icon_click("上传配置", self.uploadIcon)
 
         main_layout.addWidget(self.bottomBg)
 
@@ -482,6 +656,7 @@ class CardWidget(QFrame):
         self.floatIcon.setToolTip(tr("float_btn_tip"))
         self.logIcon.setToolTip(tr("log_btn_tip"))
         self.exportIcon.setToolTip(tr("export_btn_tip"))
+        self.uploadIcon.setToolTip(tr("upload_config_tip"))
         self._rebuild_rows()
 
     def _save_config(self):
@@ -532,6 +707,219 @@ class CardWidget(QFrame):
             self._rebuild_rows()
         if hasattr(self, "log_dialog") and self.log_dialog.isVisible():
             self.log_dialog.set_config(self.current_config)
+
+    def delete_config(self, config_name):
+        threading.Thread(target=self._delete_config_task, args=(config_name,), daemon=True).start()
+
+    def _delete_config_task(self, config_name):
+        ip = self.config.get("ip", "127.0.0.1")
+        port = self.config.get("port", "22267")
+        try:
+            url = f"http://{ip}:{port}/api/configs"
+            resp = requests.delete(
+                url,
+                params={"config": config_name},
+                headers=api_headers(self.config),
+                timeout=5,
+            )
+            try:
+                data = resp.json()
+            except Exception:
+                data = {}
+
+            if resp.status_code == 200:
+                configs = data.get("configs", [])
+                default = data.get("default", "")
+                self.config_delete_result_signal.emit(True, config_name, "", configs, default)
+                return
+
+            message = data.get("message") or data.get("error") or resp.text
+            self.config_delete_result_signal.emit(False, config_name, message, [], "")
+        except Exception as exc:
+            self.config_delete_result_signal.emit(False, config_name, str(exc), [], "")
+
+    def _on_config_delete_result(self, success, config_name, message, configs, default_config):
+        if not success:
+            show_warning(
+                self,
+                tr("delete_config_title"),
+                tr("delete_config_failed", config=config_name, error=message),
+            )
+            return
+
+        self._statuses.pop(config_name, None)
+        self._configs = [str(config) for config in configs if str(config)] or [
+            config for config in self._configs if config != config_name
+        ]
+        if not self._configs:
+            self._configs = ["alas"]
+
+        if self.current_config == config_name:
+            self.current_config = default_config if default_config in self._configs else self._configs[0]
+            self.config["current_config"] = self.current_config
+            self._save_config()
+
+        self._rebuild_rows()
+        if hasattr(self, "mini_dialog") and self.mini_dialog.isVisible():
+            self.mini_dialog.rebuild_rows()
+        if hasattr(self, "log_dialog") and self.log_dialog.isVisible():
+            self.log_dialog.set_configs(self._configs, self.current_config)
+            self.log_dialog.set_config(self.current_config)
+
+        show_info(
+            self,
+            tr("delete_config_title"),
+            tr("delete_config_success", config=config_name),
+        )
+        self._start_poll_thread()
+
+    def choose_and_upload_config(self):
+        file_path, _ = QFileDialog.getOpenFileName(
+            self.window(),
+            tr("upload_config_title"),
+            "",
+            tr("upload_config_filter"),
+        )
+        if not file_path:
+            return
+        self.upload_config(file_path, overwrite=False)
+
+    def upload_config(self, file_path, overwrite=False):
+        try:
+            config_name = os.path.splitext(os.path.basename(file_path))[0].strip()
+            if not config_name:
+                raise ValueError(tr("upload_config_invalid_name"))
+            with open(file_path, "r", encoding="utf-8-sig") as f:
+                content = f.read()
+            config_data = json.loads(content)
+            validate_alas_config(config_data)
+        except AlasConfigValidationError as exc:
+            show_warning(
+                self,
+                tr("upload_config_title"),
+                tr(
+                    "upload_config_failed",
+                    error=format_alas_config_validation_error(exc),
+                ),
+            )
+            return
+        except Exception as exc:
+            show_warning(
+                self,
+                tr("upload_config_title"),
+                tr("upload_config_failed", error=str(exc)),
+            )
+            return
+
+        threading.Thread(
+            target=self._upload_config_task,
+            args=(file_path, config_name, content, overwrite),
+            daemon=True,
+        ).start()
+
+    def _upload_config_task(self, file_path, config_name, content, overwrite):
+        ip = self.config.get("ip", "127.0.0.1")
+        port = self.config.get("port", "22267")
+        try:
+            url = f"http://{ip}:{port}/api/configs/upload"
+            resp = requests.post(
+                url,
+                json={
+                    "name": config_name,
+                    "content": content,
+                    "overwrite": overwrite,
+                },
+                headers=api_headers(self.config),
+                timeout=8,
+            )
+            try:
+                data = resp.json()
+            except Exception:
+                data = {}
+
+            result = {
+                "ok": resp.status_code == 200,
+                "status_code": resp.status_code,
+                "config": data.get("config") or config_name,
+                "error": data.get("error", ""),
+                "reason": data.get("reason", ""),
+                "message": data.get("message") or data.get("error") or resp.text,
+                "configs": data.get("configs", []),
+                "default": data.get("default", ""),
+                "file_path": file_path,
+            }
+            self.config_upload_result_signal.emit(result)
+        except Exception as exc:
+            self.config_upload_result_signal.emit(
+                {
+                    "ok": False,
+                    "status_code": 0,
+                    "config": config_name,
+                    "error": "",
+                    "reason": "",
+                    "message": str(exc),
+                    "configs": [],
+                    "default": "",
+                    "file_path": file_path,
+                }
+            )
+
+    def _on_config_upload_result(self, result):
+        config_name = result.get("config", "")
+        message = result.get("message", "")
+        status_code = result.get("status_code", 0)
+
+        if not result.get("ok"):
+            if status_code == 409 and message == "config_exists":
+                if ask_confirm(
+                    self,
+                    tr("upload_config_title"),
+                    tr("upload_config_exists", config=config_name),
+                    tr("upload_config_overwrite"),
+                    tr("cancel"),
+                    danger=True,
+                ):
+                    self.upload_config(result.get("file_path", ""), overwrite=True)
+                return
+
+            if result.get("error") == "invalid_alas_config":
+                message = format_alas_config_error(
+                    result.get("reason", ""),
+                    result.get("message", ""),
+                )
+
+            show_warning(
+                self,
+                tr("upload_config_title"),
+                tr("upload_config_failed", error=message),
+            )
+            return
+
+        configs = [str(config) for config in result.get("configs", []) if str(config)]
+        if configs:
+            self._configs = configs
+        elif config_name and config_name not in self._configs:
+            self._configs.append(config_name)
+            self._configs.sort(key=str.lower)
+
+        if config_name:
+            self.current_config = config_name
+            self.config["current_config"] = self.current_config
+            self._save_config()
+
+        self._rebuild_rows()
+        if hasattr(self, "mini_dialog") and self.mini_dialog.isVisible():
+            self.mini_dialog.rebuild_rows()
+        if hasattr(self, "log_dialog") and self.log_dialog.isVisible():
+            self.log_dialog.set_configs(self._configs, self.current_config)
+            self.log_dialog.set_config(self.current_config)
+
+        show_info(
+            self,
+            tr("upload_config_title"),
+            tr("upload_config_success", config=config_name),
+        )
+        self._start_poll_thread()
 
     def _forward_drag_press(self, event):
         if self.window():
@@ -768,6 +1156,8 @@ class CardWidget(QFrame):
                     self.config_path,
                 )
                 self.fastapi_dialog.show()
+        elif name == "上传配置":
+            self.choose_and_upload_config()
         elif name == "最小化":
             self.show_mini_window()
 

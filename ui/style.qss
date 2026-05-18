@@ -629,6 +629,26 @@ QPushButton#configActionBtn:focus {
     outline: none;
 }
 
+QPushButton#configDeleteBtn {
+    background-color: transparent;
+    border: 1px solid transparent;
+    border-radius: 7px;
+}
+QPushButton#configDeleteBtn:hover {
+    background-color: #2f2529;
+    border: 1px solid #443039;
+}
+QPushButton#configDeleteBtn:pressed {
+    background-color: #3a252c;
+}
+QPushButton#configDeleteBtn:disabled {
+    background-color: transparent;
+    border: 1px solid transparent;
+}
+QPushButton#configDeleteBtn:focus {
+    outline: none;
+}
+
 /* 主面板行文本标签 */
 QLabel#rowStatusLabel {
     color: #d1d5db;
@@ -755,4 +775,107 @@ QLabel#miniStatusLabel {
     font-size: 13px;
     font-family: "Microsoft YaHei", "Segoe UI";
     background: transparent;
+}
+
+QPushButton#lineIconBtn {
+    background-color: transparent;
+    border: none;
+}
+QPushButton#lineIconBtn:hover {
+    background-color: transparent;
+    border: none;
+}
+QPushButton#lineIconBtn:focus {
+    outline: none;
+}
+
+QFrame#messageCard {
+    background-color: #262a31;
+    border: 1px solid #1b1e24;
+    border-radius: 8px;
+}
+
+QWidget#messageTopBg {
+    background-color: #191c21;
+    border-top-left-radius: 8px;
+    border-top-right-radius: 8px;
+    border-bottom: 1px solid #111419;
+}
+
+QWidget#messageBodyBg {
+    background-color: transparent;
+    border: none;
+    border-bottom-left-radius: 8px;
+    border-bottom-right-radius: 8px;
+}
+
+QLabel#messageTitle {
+    color: #c8ccd5;
+    font-size: 12px;
+    font-weight: normal;
+    font-family: "Microsoft YaHei", "Segoe UI";
+    background: transparent;
+}
+
+QLabel#messageText {
+    color: #e3e8ef;
+    font-size: 13px;
+    font-family: "Microsoft YaHei", "Segoe UI";
+    background: transparent;
+    line-height: 1.45;
+}
+
+QPushButton#messagePrimaryBtn {
+    background-color: #47d99a;
+    color: #0f1419;
+    border: none;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: bold;
+}
+QPushButton#messagePrimaryBtn:hover {
+    background-color: #55e3a6;
+}
+QPushButton#messagePrimaryBtn:pressed {
+    background-color: #37bf83;
+}
+QPushButton#messagePrimaryBtn:focus {
+    outline: none;
+}
+
+QPushButton#messageDangerBtn {
+    background-color: #ff6b6b;
+    color: #16191f;
+    border: none;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: bold;
+}
+QPushButton#messageDangerBtn:hover {
+    background-color: #ff7f7f;
+}
+QPushButton#messageDangerBtn:pressed {
+    background-color: #e95a5a;
+}
+QPushButton#messageDangerBtn:focus {
+    outline: none;
+}
+
+QPushButton#messageSecondaryBtn {
+    background-color: #20242c;
+    color: #aeb5c0;
+    border: 1px solid #303640;
+    border-radius: 6px;
+    font-size: 13px;
+}
+QPushButton#messageSecondaryBtn:hover {
+    background-color: #2a2f38;
+    color: #d7dce5;
+    border: 1px solid #3c4655;
+}
+QPushButton#messageSecondaryBtn:pressed {
+    background-color: #171a20;
+}
+QPushButton#messageSecondaryBtn:focus {
+    outline: none;
 }

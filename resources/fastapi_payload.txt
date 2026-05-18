@@ -3,6 +3,7 @@ Copy from pywebio.platform.fastapi, with Alas-Gyre remote API routes.
 """
 import asyncio
 from collections import deque
+import json
 import os
 import secrets
 
@@ -32,6 +33,7 @@ LOG_DIR = "log"
 LOG_TAIL_CHUNK_SIZE = 64 * 1024
 DEFAULT_LOG_LINES = 200
 MAX_LOG_LINES = 2000
+MAX_CONFIG_UPLOAD_SIZE = 2 * 1024 * 1024
 ALAS_GYRE_API_TOKEN = "__ALAS_GYRE_API_TOKEN__"
 TOKEN_PLACEHOLDER = "__" + "ALAS_GYRE_API_TOKEN" + "__"
 TOKEN_HEADER = "X-Alas-Gyre-Token"
@@ -43,6 +45,23 @@ STATE_MAP = {
     4: "update",
 }
 VALID_STATUSES = {"idle", "running", "error", "update", "disconnected"}
+INVALID_CONFIG_NAME_CHARS = set('/\\:*?"<>|')
+REQUIRED_ALAS_CONFIG_PATHS = {
+    "Alas": ("Emulator", "Error", "Optimization", "Storage"),
+    "General": ("Storage",),
+    "Restart": ("Scheduler", "Storage"),
+    "Main": ("Scheduler", "Campaign", "Fleet", "Storage"),
+    "Reward": ("Scheduler", "Reward", "Storage"),
+}
+REQUIRED_ALAS_EMULATOR_KEYS = (
+    "Serial",
+    "PackageName",
+    "ScreenshotMethod",
+    "ControlMethod",
+)
+REQUIRED_ALAS_SCHEDULER_KEYS = ("Enable", "NextRun", "Command")
+MIN_ALAS_CONFIG_SECTION_COUNT = 20
+MIN_ALAS_CONFIG_SCHEDULER_COUNT = 5
 
 
 def get_alas_root():
@@ -116,6 +135,123 @@ def validate_requested_config(request, config_name):
             status_code=404,
         )
     return None
+
+
+def normalize_config_name(config_name):
+    name = str(config_name or "").strip()
+    if name.endswith(".json"):
+        name = name[:-5]
+    if (
+        not name
+        or name in {".", ".."}
+        or os.path.basename(name) != name
+        or any(char in INVALID_CONFIG_NAME_CHARS for char in name)
+        or any(ord(char) < 32 for char in name)
+        or name.startswith("template")
+        or len(name) > 120
+    ):
+        raise ValueError("invalid_config_name")
+    return name
+
+
+def raise_invalid_alas_config(reason, detail=""):
+    if detail:
+        raise ValueError(f"invalid_alas_config:{reason}:{detail}")
+    raise ValueError(f"invalid_alas_config:{reason}")
+
+
+def require_alas_config_dict(value, reason, detail):
+    if not isinstance(value, dict):
+        raise_invalid_alas_config(reason, detail)
+    return value
+
+
+def validate_alas_config_data(config_data):
+    root = require_alas_config_dict(config_data, "root_not_object", "root")
+
+    if len(root) < MIN_ALAS_CONFIG_SECTION_COUNT:
+        raise_invalid_alas_config("too_few_sections", str(len(root)))
+
+    missing_sections = [
+        section for section in REQUIRED_ALAS_CONFIG_PATHS if section not in root
+    ]
+    if missing_sections:
+        raise_invalid_alas_config("missing_section", ", ".join(missing_sections))
+
+    for section, required_children in REQUIRED_ALAS_CONFIG_PATHS.items():
+        section_data = require_alas_config_dict(
+            root.get(section), "invalid_section", section
+        )
+        missing_children = [
+            child for child in required_children if child not in section_data
+        ]
+        if missing_children:
+            raise_invalid_alas_config(
+                "missing_group",
+                f"{section}.{', '.join(missing_children)}",
+            )
+        for child in required_children:
+            require_alas_config_dict(
+                section_data.get(child), "invalid_group", f"{section}.{child}"
+            )
+
+    emulator = root["Alas"]["Emulator"]
+    missing_emulator_keys = [
+        key for key in REQUIRED_ALAS_EMULATOR_KEYS if key not in emulator
+    ]
+    if missing_emulator_keys:
+        raise_invalid_alas_config(
+            "missing_emulator_key", ", ".join(missing_emulator_keys)
+        )
+
+    storage_errors = []
+    for section in REQUIRED_ALAS_CONFIG_PATHS:
+        storage = root[section].get("Storage")
+        if not isinstance(storage, dict) or not isinstance(storage.get("Storage"), dict):
+            storage_errors.append(section)
+    if storage_errors:
+        raise_invalid_alas_config("invalid_storage", ", ".join(storage_errors))
+
+    scheduler_count = 0
+    scheduler_errors = []
+    for section, section_data in root.items():
+        if not isinstance(section_data, dict) or "Scheduler" not in section_data:
+            continue
+        scheduler = section_data.get("Scheduler")
+        if not isinstance(scheduler, dict):
+            scheduler_errors.append(section)
+            continue
+        scheduler_count += 1
+        missing_scheduler_keys = [
+            key for key in REQUIRED_ALAS_SCHEDULER_KEYS if key not in scheduler
+        ]
+        if missing_scheduler_keys:
+            scheduler_errors.append(f"{section}.{', '.join(missing_scheduler_keys)}")
+            continue
+        if not isinstance(scheduler.get("Enable"), bool):
+            scheduler_errors.append(f"{section}.Enable")
+        if not isinstance(scheduler.get("NextRun"), str):
+            scheduler_errors.append(f"{section}.NextRun")
+        if not isinstance(scheduler.get("Command"), str) or not scheduler.get("Command"):
+            scheduler_errors.append(f"{section}.Command")
+
+    if scheduler_count < MIN_ALAS_CONFIG_SCHEDULER_COUNT:
+        raise_invalid_alas_config("too_few_schedulers", str(scheduler_count))
+    if scheduler_errors:
+        raise_invalid_alas_config(
+            "invalid_scheduler", ", ".join(scheduler_errors[:5])
+        )
+
+    return True
+
+
+def get_config_path(config_name):
+    config_name = normalize_config_name(config_name)
+    config_dir = os.path.abspath(get_data_dir(CONFIG_DIR))
+    config_path = os.path.abspath(os.path.join(config_dir, f"{config_name}.json"))
+    if os.path.commonpath([config_dir, config_path]) != config_dir:
+        raise ValueError("invalid config path")
+    return config_path
 
 
 def get_manager(config_name):
@@ -216,7 +352,7 @@ class HeaderMiddleware(BaseHTTPMiddleware):
             response = await call_next(request)
         response.headers["Cache-Control"] = "no-cache"
         response.headers["Access-Control-Allow-Origin"] = "*"
-        response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, DELETE, OPTIONS"
         response.headers["Access-Control-Allow-Headers"] = (
             "Content-Type, Authorization, X-Alas-Gyre-Token"
         )
@@ -264,6 +400,149 @@ def asgi_app(
                 "default": get_default_config(),
             }
         )
+
+    async def api_upload_config(request):
+        try:
+            body = await request.body()
+            if len(body) > MAX_CONFIG_UPLOAD_SIZE:
+                return JSONResponse({"error": "config_too_large"}, status_code=413)
+
+            payload = json.loads(body.decode("utf-8"))
+            config_name = normalize_config_name(
+                payload.get("name") or payload.get("config")
+            )
+            overwrite = bool(payload.get("overwrite", False))
+
+            content = payload.get("content")
+            if isinstance(content, str):
+                if len(content.encode("utf-8")) > MAX_CONFIG_UPLOAD_SIZE:
+                    return JSONResponse({"error": "config_too_large"}, status_code=413)
+                config_data = json.loads(content)
+            elif isinstance(content, dict):
+                config_data = content
+            else:
+                return JSONResponse({"error": "invalid_config_content"}, status_code=400)
+
+            validate_alas_config_data(config_data)
+
+            config_path = get_config_path(config_name)
+            if os.path.exists(config_path) and not overwrite:
+                return JSONResponse(
+                    {
+                        "error": "config_exists",
+                        "config": config_name,
+                        "configs": get_config_names(),
+                    },
+                    status_code=409,
+                )
+
+            os.makedirs(os.path.dirname(config_path), exist_ok=True)
+            with open(config_path, "w", encoding="utf-8", newline="\n") as f:
+                json.dump(config_data, f, indent=4, ensure_ascii=False)
+                f.write("\n")
+
+            configs = get_config_names()
+            return JSONResponse(
+                {
+                    "config": config_name,
+                    "message": "overwritten" if overwrite else "uploaded",
+                    "configs": configs,
+                    "default": get_default_config(),
+                }
+            )
+        except json.JSONDecodeError as exc:
+            return JSONResponse(
+                {"error": "invalid_json", "message": str(exc)},
+                status_code=400,
+            )
+        except ValueError as exc:
+            error_text = str(exc)
+            if error_text.startswith("invalid_alas_config:"):
+                parts = error_text.split(":", 2)
+                return JSONResponse(
+                    {
+                        "error": "invalid_alas_config",
+                        "reason": parts[1] if len(parts) > 1 else "",
+                        "message": parts[2] if len(parts) > 2 else "",
+                    },
+                    status_code=400,
+                )
+            return JSONResponse(
+                {"error": str(exc) or "invalid_config_name"},
+                status_code=400,
+            )
+        except Exception as exc:
+            return JSONResponse(
+                {"error": "upload_failed", "message": str(exc)},
+                status_code=500,
+            )
+
+    async def api_delete_config(request):
+        config_name = get_requested_config(request)
+        configs = get_config_names()
+        if config_name not in configs:
+            return JSONResponse(
+                {
+                    "error": "unknown_config",
+                    "config": config_name,
+                    "configs": configs,
+                },
+                status_code=404,
+            )
+        if len(configs) <= 1:
+            return JSONResponse(
+                {
+                    "error": "cannot_delete_last_config",
+                    "config": config_name,
+                    "configs": configs,
+                },
+                status_code=409,
+            )
+
+        try:
+            try:
+                status = get_status(config_name)
+            except Exception:
+                status = "idle"
+            if status == "running":
+                return JSONResponse(
+                    {
+                        "error": "cannot_delete_running_config",
+                        "config": config_name,
+                        "status": "running",
+                    },
+                    status_code=409,
+                )
+
+            config_path = get_config_path(config_name)
+            if not os.path.exists(config_path):
+                return JSONResponse(
+                    {
+                        "error": "config_file_not_found",
+                        "config": config_name,
+                        "configs": configs,
+                    },
+                    status_code=404,
+                )
+            os.remove(config_path)
+            configs = get_config_names()
+            return JSONResponse(
+                {
+                    "config": config_name,
+                    "message": "deleted",
+                    "configs": configs,
+                    "default": get_default_config(),
+                }
+            )
+        except Exception as exc:
+            return JSONResponse(
+                {
+                    "error": "delete_failed",
+                    "config": config_name,
+                    "message": str(exc),
+                },
+                status_code=500,
+            )
 
     async def api_get_status_all(request):
         statuses = {}
@@ -424,6 +703,8 @@ def asgi_app(
     routes.append(Route("/api/{path:path}", api_options, methods=["OPTIONS"]))
     routes.append(Route("/api/health", api_health, methods=["GET"]))
     routes.append(Route("/api/configs", api_get_configs, methods=["GET"]))
+    routes.append(Route("/api/configs/upload", api_upload_config, methods=["POST"]))
+    routes.append(Route("/api/configs", api_delete_config, methods=["DELETE"]))
     routes.append(Route("/api/status", api_get_status, methods=["GET"]))
     routes.append(Route("/api/status_all", api_get_status_all, methods=["GET"]))
     routes.append(Route("/api/start", api_post_start, methods=["POST"]))

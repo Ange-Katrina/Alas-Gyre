@@ -14,6 +14,7 @@ from .main_window import WindowButton
 
 
 CHANGELOG_PHRASE_MAP = {
+    "feat: improve update flow and config display": "功能：改进更新流程和配置显示",
     "fix: improve startup taskbar integration": "修复：改进启动任务栏集成",
     "fix: allow floating widget buttons during click-through": "修复：允许悬浮窗穿透时按钮仍可点击",
     "feat: Implement intelligent failover update download logic: official first, dual-mirror backup fallbacks": "功能：实现智能故障转移更新下载逻辑：官方优先，双镜像备份回退",
@@ -37,33 +38,37 @@ CHANGELOG_PREFIX_MAP = {
 
 def format_changelog_for_display(text):
     lines = []
+    translated_hashes = set()
     for raw_line in (text or "").splitlines():
         line = raw_line.strip()
         if not line:
             lines.append("")
             continue
 
-        if line == "## What's Changed":
+        if line.startswith("## What's Changed"):
             lines.append("## What's Changed / 发生了哪些变化？")
+            continue
+        if line.startswith("**Full Changelog**"):
+            lines.append(line.replace("**Full Changelog**", "**Full Changelog / 完整更新记录**", 1))
+            continue
+
+        commit_hash, message = split_commit_line(line)
+        if commit_hash and commit_hash in translated_hashes:
             continue
 
         lines.append(line)
         chinese = translate_changelog_line(line)
         if chinese:
             lines.append(chinese)
+            translated_hashes.add(commit_hash)
     return "\n".join(lines).strip()
 
 
 def translate_changelog_line(line):
-    normalized = line.lstrip("-* ").strip()
-    if not normalized or any("\u4e00" <= char <= "\u9fff" for char in normalized):
+    commit_hash, message = split_commit_line(line)
+    if not commit_hash or not message or contains_cjk(message):
         return ""
 
-    parts = normalized.split(" ", 1)
-    if len(parts) != 2 or not is_short_hash(parts[0]):
-        return ""
-
-    commit_hash, message = parts
     mapped = CHANGELOG_PHRASE_MAP.get(message)
     if mapped:
         return f"{commit_hash} {mapped}"
@@ -74,6 +79,18 @@ def translate_changelog_line(line):
         if message_lower.startswith(marker):
             return f"{commit_hash} {translated_prefix}：{message[len(marker):].strip()}"
     return ""
+
+
+def split_commit_line(line):
+    normalized = line.lstrip("-* ").strip()
+    parts = normalized.split(" ", 1)
+    if len(parts) != 2 or not is_short_hash(parts[0]):
+        return "", ""
+    return parts[0], parts[1]
+
+
+def contains_cjk(text):
+    return any("\u4e00" <= char <= "\u9fff" for char in text)
 
 
 def is_short_hash(value):

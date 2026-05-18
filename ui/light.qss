@@ -627,3 +627,94 @@ QLabel#miniStatusLabel {
     font-family: "Microsoft YaHei", "Segoe UI";
     background: transparent;
 }
+
+QFrame#messageCard {
+    background-color: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+}
+
+QWidget#messageTopBg {
+    background-color: #f1f5f9;
+    border-top-left-radius: 8px;
+    border-top-right-radius: 8px;
+    border-bottom: 1px solid #e2e8f0;
+}
+
+QWidget#messageBodyBg {
+    background-color: transparent;
+    border: none;
+    border-bottom-left-radius: 8px;
+    border-bottom-right-radius: 8px;
+}
+
+QLabel#messageTitle {
+    color: #334155;
+    font-size: 12px;
+    font-weight: normal;
+    font-family: "Microsoft YaHei", "Segoe UI";
+    background: transparent;
+}
+
+QLabel#messageText {
+    color: #1e293b;
+    font-size: 13px;
+    font-family: "Microsoft YaHei", "Segoe UI";
+    background: transparent;
+    line-height: 1.45;
+}
+
+QPushButton#messagePrimaryBtn {
+    background-color: #10b981;
+    color: #ffffff;
+    border: none;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: bold;
+}
+QPushButton#messagePrimaryBtn:hover {
+    background-color: #059669;
+}
+QPushButton#messagePrimaryBtn:pressed {
+    background-color: #047857;
+}
+QPushButton#messagePrimaryBtn:focus {
+    outline: none;
+}
+
+QPushButton#messageDangerBtn {
+    background-color: #ef4444;
+    color: #ffffff;
+    border: none;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: bold;
+}
+QPushButton#messageDangerBtn:hover {
+    background-color: #dc2626;
+}
+QPushButton#messageDangerBtn:pressed {
+    background-color: #b91c1c;
+}
+QPushButton#messageDangerBtn:focus {
+    outline: none;
+}
+
+QPushButton#messageSecondaryBtn {
+    background-color: #f1f5f9;
+    color: #475569;
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    font-size: 13px;
+}
+QPushButton#messageSecondaryBtn:hover {
+    background-color: #e2e8f0;
+    color: #0f172a;
+    border: 1px solid #94a3b8;
+}
+QPushButton#messageSecondaryBtn:pressed {
+    background-color: #cbd5e1;
+}
+QPushButton#messageSecondaryBtn:focus {
+    outline: none;
+}
