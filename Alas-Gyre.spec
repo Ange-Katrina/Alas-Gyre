@@ -29,9 +29,19 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    excludes=[
+        'tkinter',
+        'unittest',
+        'pytest',
+        'test',
+        'matplotlib',
+        'numpy',
+        'PIL',
+        'Pillow',
+        'pkg_resources',
+    ],
     noarchive=False,
-    optimize=0,
+    optimize=2,
 )
 pyz = PYZ(a.pure)
 
@@ -46,7 +56,15 @@ exe = EXE(
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
-    upx_exclude=[],
+    upx_exclude=[
+        'python3*.dll',
+        'python*.dll',
+        'VCRUNTIME*.dll',
+        'MSVCP*.dll',
+        'api-ms-win-*.dll',
+        'PySide6/*.pyd',
+        'shiboken6/*.pyd',
+    ],
     runtime_tmpdir=None,
     console=False,
     disable_windowed_traceback=False,
