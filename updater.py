@@ -240,7 +240,9 @@ def do_update(download_url, progress_callback, finish_callback):
             cmd = f'Start-Sleep -Milliseconds 300; $p = Get-Process -Id {pid} -ErrorAction SilentlyContinue; if ($p) {{ $p.WaitForExit() }}; Remove-Item -Path "{exe_path}" -Force -ErrorAction SilentlyContinue; Move-Item -Path "{temp_file}" -Destination "{exe_path}" -Force; Start-Process "{exe_path}"'
             subprocess.Popen(["powershell", "-NoProfile", "-WindowStyle", "Hidden", "-Command", cmd], cwd=exe_dir)
             finish_callback(True, "Update downloaded. Restarting to apply...")
-            sys.exit(0)
+            import time
+            time.sleep(0.5)
+            os._exit(0)
         else:
             os.rename(exe_path, old_file)
             os.rename(temp_file, exe_path)
@@ -248,7 +250,7 @@ def do_update(download_url, progress_callback, finish_callback):
             import time
             time.sleep(1)
             subprocess.Popen([exe_path])
-            sys.exit(0)
+            os._exit(0)
 
     except Exception as exc:
         finish_callback(False, f"Update failed: {exc}")
