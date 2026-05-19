@@ -175,6 +175,24 @@ jobs:
           pip install pyinstaller
           pip install -r requirements.txt
 
+      - name: Install UPX (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          $UPX_VERSION = "4.2.4"
+          $UPX_ZIP = "upx-${UPX_VERSION}-win64.zip"
+          Invoke-WebRequest -Uri "https://github.com/upx/upx/releases/download/v${UPX_VERSION}/${UPX_ZIP}" -OutFile "${env:RUNNER_TEMP}\${UPX_ZIP}"
+          Expand-Archive -Path "${env:RUNNER_TEMP}\${UPX_ZIP}" -DestinationPath "${env:RUNNER_TEMP}\upx"
+          Copy-Item "${env:RUNNER_TEMP}\upx\upx-${UPX_VERSION}-win64\upx.exe" -Destination "${env:RUNNER_TEMP}\upx.exe"
+          echo "${env:RUNNER_TEMP}" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Install UPX (macOS)
+        if: matrix.os == 'macos-latest'
+        run: brew install upx
+
+      - name: Install UPX (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: sudo apt-get update && sudo apt-get install -y upx-ucl
+
       - name: Build with PyInstaller
         run: |
           pyinstaller Alas-Gyre.spec --noconfirm --clean
@@ -249,6 +267,24 @@ jobs:
           pip install nuitka ordered-set
           pip install -r requirements.txt
 
+      - name: Install UPX (Windows)
+        if: matrix.platform == 'windows'
+        run: |
+          $UPX_VERSION = "4.2.4"
+          $UPX_ZIP = "upx-${UPX_VERSION}-win64.zip"
+          Invoke-WebRequest -Uri "https://github.com/upx/upx/releases/download/v${UPX_VERSION}/${UPX_ZIP}" -OutFile "${env:RUNNER_TEMP}\${UPX_ZIP}"
+          Expand-Archive -Path "${env:RUNNER_TEMP}\${UPX_ZIP}" -DestinationPath "${env:RUNNER_TEMP}\upx"
+          Copy-Item "${env:RUNNER_TEMP}\upx\upx-${UPX_VERSION}-win64\upx.exe" -Destination "${env:RUNNER_TEMP}\upx.exe"
+          echo "${env:RUNNER_TEMP}" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Install UPX (macOS)
+        if: matrix.platform == 'macos'
+        run: brew install upx
+
+      - name: Install UPX (Linux)
+        if: matrix.platform == 'linux'
+        run: sudo apt-get update && sudo apt-get install -y upx-ucl
+
       - name: Build with Nuitka
         shell: bash
         run: |
@@ -257,7 +293,9 @@ jobs:
 
           COMMON_FLAGS=(
             --onefile
+            --onefile-no-compression
             --enable-plugin=pyside6
+            --enable-plugin=upx
             --assume-yes-for-downloads
             --lto=yes
             --include-data-dir=ui=ui
