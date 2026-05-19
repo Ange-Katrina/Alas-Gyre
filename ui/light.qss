@@ -252,20 +252,20 @@ QPushButton.iconBtn:focus {
     border: none;
 }
 
-QPushButton#lineIconBtn {
+QPushButton#lineIconBtn, BottomIconButton#lineIconBtn, #lineIconBtn {
     background-color: transparent;
     border: none;
     outline: none;
 }
-QPushButton#lineIconBtn:hover {
+QPushButton#lineIconBtn:hover, BottomIconButton#lineIconBtn:hover, #lineIconBtn:hover {
     background-color: #cbd5e1;
     border: none;
 }
-QPushButton#lineIconBtn:pressed {
+QPushButton#lineIconBtn:pressed, BottomIconButton#lineIconBtn:pressed, #lineIconBtn:pressed {
     background-color: #b8c5d6;
     border: none;
 }
-QPushButton#lineIconBtn:focus {
+QPushButton#lineIconBtn:focus, BottomIconButton#lineIconBtn:focus, #lineIconBtn:focus {
     outline: none;
     border: none;
 }
