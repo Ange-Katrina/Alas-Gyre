@@ -135,7 +135,7 @@ def fetch_latest_release_by_api(current_version):
     releases = resp.json()
     if not releases or not isinstance(releases, list):
         raise ValueError("No releases found.")
-    # 第一项即为最新发布的 Release (包括 pre-release 预发布版)
+    # The first item is the latest release (including pre-releases)
     return update_result_from_release(releases[0], current_version)
 
 

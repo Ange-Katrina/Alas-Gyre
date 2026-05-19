@@ -68,14 +68,14 @@ def asset_path(*parts):
     return candidates[0]
 
 class StatusIndicator(QWidget):
-    """带行动效的状态指示器"""
+    """Animated status indicator"""
     _sync_started_at = time.monotonic()
     _active_widgets = weakref.WeakSet()
     _animation_timer = None
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedSize(16, 16)  # 加大尺寸
+        self.setFixedSize(16, 16)
         self._state = "idle"  # idle, running, error
         self_ref = weakref.ref(self)
         cls = type(self)
@@ -123,30 +123,27 @@ class StatusIndicator(QWidget):
                     self._animation_timer.stop()
             self.update()
         except RuntimeError:
-            pass  # 忽略退出时 C++ 对象已销毁的错误
+            pass
 
     def paintEvent(self, event):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
         
         if self._state == "idle":
-            # 闲置：灰色静止空心圆环，尺寸和线宽与运行中完全统一
             pen = QPen(QColor("#6b707a"), 2.5, Qt.SolidLine, Qt.RoundCap)
             p.setPen(pen)
             p.setBrush(Qt.NoBrush)
             p.drawEllipse(2, 2, 12, 12)
             
         elif self._state == "running":
-            # 运行中：绿色旋转圆弧
             pen = QPen(QColor(66, 211, 146), 2.5, Qt.SolidLine, Qt.RoundCap)
             p.setPen(pen)
             p.setBrush(Qt.NoBrush)
-            # drawArc: x, y, w, h, startAngle, spanAngle (以 1/16 度为单位)
+            # drawArc: x, y, w, h, startAngle, spanAngle (in 1/16ths of a degree)
             angle = self._synced_angle(-320)
             p.drawArc(2, 2, 12, 12, int(angle * 16), 270 * 16)
 
         elif self._state == "update":
-            # 更新中：蓝色旋转圆弧
             pen = QPen(QColor(96, 165, 250), 2.5, Qt.SolidLine, Qt.RoundCap)
             p.setPen(pen)
             p.setBrush(Qt.NoBrush)
@@ -154,27 +151,25 @@ class StatusIndicator(QWidget):
             p.drawArc(2, 2, 12, 12, int(angle * 16), 270 * 16)
             
         elif self._state == "error":
-            # 错误：亮金黄色球从小到大，最小透明到最大亮黄色
             scale = self._synced_angle(600) / 360.0
-            size = 4 + 10 * scale # 4 ~ 14 之间变化
+            size = 4 + 10 * scale # Scales between 4 and 14
             offset = (16 - size) / 2
             
             alpha = int(255 * scale)
-            color = QColor(255, 193, 7, alpha) # 亮金黄色 (FFC107)
+            color = QColor(255, 193, 7, alpha)
             
             p.setPen(Qt.NoPen)
             p.setBrush(color)
             p.drawEllipse(QRectF(offset, offset, size, size))
             
         elif self._state == "disconnected":
-            # 断开：红色呼吸动效
             angle = self._synced_angle(160)
             scale = (math.sin(math.radians(angle)) + 1) / 2 # 0.0 ~ 1.0
-            size = 8 + 4 * scale # 8 ~ 12 之间变化
+            size = 8 + 4 * scale # Scales between 8 and 12
             offset = (16 - size) / 2
             
             p.setPen(Qt.NoPen)
-            p.setBrush(QColor(245, 108, 108)) # 红色
+            p.setBrush(QColor(245, 108, 108)) # Red
             p.drawEllipse(QRectF(offset, offset, size, size))
             
         p.end()
@@ -199,7 +194,6 @@ class WindowButton(QWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
 
-        # 获取主题
         theme = "dark"
         curr = self
         while curr:
@@ -288,9 +282,9 @@ def load_bottom_icon(kind, hover=False):
     if cache_key in _BOTTOM_ICON_CACHE:
         return _BOTTOM_ICON_CACHE[cache_key]
 
-    # 底部导航栏的原版普通态 PNG 本身就带有完美的透明通道，且非常美观。
-    # 悬浮态图片（_hover.png）被错误填充了黑底，因此我们对于导航栏图标，在悬浮时同样加载带透明的原版 PNG，
-    # 悬浮底色高亮完全由 QSS 样式表透明承载，从而完美保持原版图标质感并彻底消除黑底。
+    # The original normal state PNGs have perfect alpha channels.
+    # The _hover.png assets have defective black backgrounds. We use the normal PNG for hover as well.
+    # Hover highlighting is fully handled by QSS/opacity to eliminate the black background issue.
     if kind in {"settings", "home", "float", "log", "export", "screenshot"}:
         icon_path = asset_path("bottom_icons", f"{kind}.png")
     else:
@@ -568,18 +562,18 @@ class MainConfigRow(QWidget):
                     if self.main_card.current_config == self.config_name:
                         self.main_card.status_update_signal.emit(status)
                 else:
-                    print(f"[错误] {action} 请求失败，HTTP 状态码: {resp.status_code}")
+                    print(f"[Error] {action} request failed, HTTP status code: {resp.status_code}")
                 time.sleep(0.5)
                 self.main_card._start_poll_thread()
             except Exception as e:
-                print(f"[错误] 发送控制命令失败: {e}")
+                print(f"[Error] Failed to send control command: {e}")
             finally:
                 self.btn_enable_signal.emit(True)
 
         threading.Thread(target=send_req, daemon=True).start()
 
 class CardWidget(QFrame):
-    """主卡片"""
+    """Main card"""
     status_update_signal = Signal(str)
     configs_update_signal = Signal(list)
     status_all_update_signal = Signal(dict)
@@ -610,10 +604,10 @@ class CardWidget(QFrame):
                 if "setup_completed" not in loaded_config:
                     self.config["setup_completed"] = True
             except Exception as e:
-                print(f"[警告] 读取 {self.config_path} 失败: {e}")
+                print(f"[Warning] Failed to read {self.config_path}: {e}")
 
         self._status = "idle" # idle, running, error, disconnected
-        self._configs = ["alas"] # 默认配置，稍后会动态刷新
+        self._configs = ["alas"]
         self.current_config = self.config.get("current_config", "alas")
         self._configs[0] = self.current_config
         self._configs_fetching = False
@@ -635,9 +629,8 @@ class CardWidget(QFrame):
         
         self.poll_timer = QTimer(self)
         self.poll_timer.timeout.connect(self._start_poll_thread)
-        self.poll_timer.start(3000) # 每3秒心跳一次
+        self.poll_timer.start(3000)
         
-        # 启动时立刻执行一次，避免3秒钟的假死等待感
         from PySide6.QtCore import QTimer as CoreQTimer
         CoreQTimer.singleShot(50, self._start_poll_thread)
 
@@ -706,12 +699,12 @@ class CardWidget(QFrame):
         bot_layout.setContentsMargins(24, 0, 24, 0)
         bot_layout.setSpacing(0)
         
-        self.setIcon = BottomIconButton("settings") # 设置
-        self.homeIcon = BottomIconButton("home") # 主页
-        self.floatIcon = BottomIconButton("float") # 悬浮窗
-        self.logIcon = BottomIconButton("log") # 日志
-        self.exportIcon = BottomIconButton("export") # 导出
-        self.screenshotIcon = BottomIconButton("screenshot") # 错误截图
+        self.setIcon = BottomIconButton("settings")
+        self.homeIcon = BottomIconButton("home")
+        self.floatIcon = BottomIconButton("float")
+        self.logIcon = BottomIconButton("log")
+        self.exportIcon = BottomIconButton("export")
+        self.screenshotIcon = BottomIconButton("screenshot")
 
         self.setIcon.setToolTip(tr("settings_btn_tip"))
         self.homeIcon.setToolTip(tr("home_btn_tip"))
@@ -732,13 +725,12 @@ class CardWidget(QFrame):
         bot_layout.addStretch()
         bot_layout.addWidget(self.screenshotIcon)
 
-        # 事件绑定
-        self.setIcon.mousePressEvent = lambda e: self._on_icon_click("设置", self.setIcon)
-        self.homeIcon.mousePressEvent = lambda e: self._on_icon_click("主页", self.homeIcon)
-        self.floatIcon.mousePressEvent = lambda e: self._on_icon_click("最小化", self.floatIcon)
-        self.logIcon.mousePressEvent = lambda e: self._on_icon_click("日志", self.logIcon)
-        self.exportIcon.mousePressEvent = lambda e: self._on_icon_click("导出", self.exportIcon)
-        self.screenshotIcon.mousePressEvent = lambda e: self._on_icon_click("错误截图", self.screenshotIcon)
+        self.setIcon.mousePressEvent = lambda e: self._on_icon_click("settings", self.setIcon)
+        self.homeIcon.mousePressEvent = lambda e: self._on_icon_click("home", self.homeIcon)
+        self.floatIcon.mousePressEvent = lambda e: self._on_icon_click("minimize", self.floatIcon)
+        self.logIcon.mousePressEvent = lambda e: self._on_icon_click("log", self.logIcon)
+        self.exportIcon.mousePressEvent = lambda e: self._on_icon_click("export", self.exportIcon)
+        self.screenshotIcon.mousePressEvent = lambda e: self._on_icon_click("error_screenshot", self.screenshotIcon)
 
         main_layout.addWidget(self.bottomBg)
 
@@ -757,7 +749,7 @@ class CardWidget(QFrame):
                 json.dump(self.config, f, indent=4, ensure_ascii=False)
             return True
         except Exception as e:
-            print(f"[错误] 写入 {self.config_path} 失败: {e}")
+            print(f"[Error] Failed to write {self.config_path}: {e}")
             return False
 
     def _sync_window_size(self):
@@ -896,10 +888,9 @@ class CardWidget(QFrame):
         self._status = status
         if self.current_config in self.rows:
             self.rows[self.current_config].update_status(status)
-        print(f"[日志] 状态同步 → {status} ({self.current_config})")
+        print(f"[Log] Status sync -> {status} ({self.current_config})")
 
     def _start_poll_thread(self):
-        # 避免心跳慢或网络卡顿时不断堆积轮询线程。
         start_fetch = False
         start_poll = False
         with self._poll_lock:
@@ -959,12 +950,10 @@ class CardWidget(QFrame):
 
         self._rebuild_rows()
 
-        # 强制下一次 update_status 能够生效，以便更新文字前缀。
         old_status = self._status
         self._status = None
         self._update_status_ui(old_status or "idle")
 
-        # 广播给迷你悬浮窗和日志窗口。
         if hasattr(self, "mini_dialog") and self.mini_dialog.isVisible():
             self.mini_dialog.rebuild_rows()
         if hasattr(self, "log_dialog") and self.log_dialog.isVisible():
@@ -1008,7 +997,6 @@ class CardWidget(QFrame):
                 current_status = statuses.get(self.current_config, "idle")
                 self.status_update_signal.emit(current_status)
             elif resp.status_code == 404:
-                # 兼容没有 /api/status_all 的服务端：逐个配置读取状态。
                 statuses = {}
                 for config_name in self._configs:
                     try:
@@ -1057,12 +1045,11 @@ class CardWidget(QFrame):
         self.mini_dialog.show()
 
     def _on_icon_click(self, name, widget):
-        print(f"[日志] 点击图标 → {name}")
-        if name == "关闭":
+        print(f"[Log] Icon clicked -> {name}")
+        if name == "close":
             QApplication.quit()
-        elif name == "设置":
+        elif name == "settings":
             from .settings_window import SettingsWindow
-            # 传入 self.config 以便在设置窗口中读取和保存
             dialog = SettingsWindow(self.window(), self.config, self._configs, self.current_config)
             if dialog.exec():
                 try:
@@ -1071,12 +1058,10 @@ class CardWidget(QFrame):
 
                     with open(self.config_path, "w", encoding="utf-8") as f:
                         json.dump(self.config, f, indent=4, ensure_ascii=False)
-                    print(f"[日志] 配置已成功持久化到 {self.config_path}")
+                    print(f"[Log] Config successfully persisted to {self.config_path}")
 
-                    # 动态更新主界面翻译
                     self.retranslate_ui()
 
-                    # 动态更新系统托盘菜单翻译
                     app = QApplication.instance()
                     if hasattr(app, "_alas_tray"):
                         tray = app._alas_tray
@@ -1089,7 +1074,6 @@ class CardWidget(QFrame):
                             actions[5].setText(tr("export_btn_tip"))
                             actions[7].setText(tr("quit"))
 
-                    # 动态应用主题
                     from .theme import apply_theme
                     apply_theme(app, self.config.get("theme", "dark"))
                     
@@ -1098,15 +1082,14 @@ class CardWidget(QFrame):
                     if hasattr(self, "mini_dialog"):
                         self.mini_dialog.apply_window_settings()
                 except Exception as e:
-                    print(f"[错误] 写入 {self.config_path} 失败: {e}")
+                    print(f"[Error] Failed to write {self.config_path}: {e}")
             dialog.deleteLater()
-        elif name == "主页":
+        elif name == "home":
             import webbrowser
-            # 根据设置中的 IP 和端口组合 URL 并打开默认浏览器
             url = f"http://{self.config['ip']}:{self.config['port']}"
-            print(f"[日志] 打开主页 → {url}")
+            print(f"[Log] Opening home page -> {url}")
             webbrowser.open(url)
-        elif name == "日志":
+        elif name == "log":
             from .log_window import LogWindow
             dialog = getattr(self, "log_dialog", None)
             if dialog is not None:
@@ -1121,7 +1104,7 @@ class CardWidget(QFrame):
             if dialog is None:
                 self.log_dialog = LogWindow(self.window(), self.config, self.current_config, self._configs)
                 self.log_dialog.show()
-        elif name == "导出":
+        elif name == "export":
             from .fastapi_export_window import FastapiExportWindow
             dialog = getattr(self, "fastapi_dialog", None)
             if dialog is not None:
@@ -1140,7 +1123,7 @@ class CardWidget(QFrame):
                     self.config_path,
                 )
                 self.fastapi_dialog.show()
-        elif name == "错误截图":
+        elif name == "error_screenshot":
             from .error_screenshot_window import ErrorScreenshotWindow
             dialog = getattr(self, "screenshot_dialog", None)
             if dialog is not None:
@@ -1154,7 +1137,7 @@ class CardWidget(QFrame):
             if dialog is None:
                 self.screenshot_dialog = ErrorScreenshotWindow(self.window(), self.config)
                 self.screenshot_dialog.show()
-        elif name == "最小化":
+        elif name == "minimize":
             self.show_mini_window()
 
 class AlasConsole(QWidget):
@@ -1170,12 +1153,10 @@ class AlasConsole(QWidget):
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(10, 10, 10, 10)
         
-        # 核心卡片区域
         self.card = CardWidget(self)
         self.apply_always_on_top(self.card.config.get("always_on_top", False), show_after=False)
         main_layout.addWidget(self.card, alignment=Qt.AlignTop)
         
-        # 阴影
         shadow = QGraphicsDropShadowEffect()
         shadow.setBlurRadius(18)
         shadow.setOffset(0, 5)
@@ -1211,7 +1192,7 @@ class AlasConsole(QWidget):
             return
         if not result.get("has_update"):
             if result.get("error"):
-                print(f"[更新检查] 自动检查失败: {result.get('error')}")
+                print(f"[Update Check] Auto check failed: {result.get('error')}")
             return
 
         self._update_prompt_shown = True
