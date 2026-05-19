@@ -226,40 +226,72 @@ def do_update(download_url, progress_callback, finish_callback):
                     if progress_callback and total_length:
                         progress_callback(int(downloaded * 100 / int(total_length)))
 
-        old_file = exe_path + ".old"
+        dir_name = os.path.dirname(exe_path)
 
-        # Try to clean up the old .old backup file, with retries to handle OS locks or antivirus scanning delays
-        for _ in range(5):
-            try:
-                if os.path.exists(old_file):
-                    os.remove(old_file)
-                break
-            except Exception:
-                import time
-                time.sleep(0.1)
+        if sys.platform == "win32":
+            bat_path = os.path.join(dir_name, "update.bat")
+            bat_content = f"""@echo off
+set PID={os.getpid()}
+set TEMP_FILE={temp_file}
+set EXE_PATH={exe_path}
 
-        # Perform high-reliability native inplace replacement with retries to handle file locks
-        replace_success = False
-        last_error = None
-        for _ in range(5):
-            try:
-                os.replace(exe_path, old_file)
-                os.replace(temp_file, exe_path)
-                replace_success = True
-                break
-            except Exception as e:
-                last_error = e
-                import time
-                time.sleep(0.1)
+:wait_loop
+tasklist /FI "PID eq %PID%" 2>NUL | find /I "%PID%" >NUL
+if %ERRORLEVEL%==0 (
+    timeout /t 1 /nobreak >nul
+    goto wait_loop
+)
 
-        if not replace_success:
-            raise RuntimeError(f"Failed to replace executable, the file might be locked by another process: {last_error}")
+:replace
+copy /Y "%TEMP_FILE%" "%EXE_PATH%" >nul
+if not %ERRORLEVEL%==0 (
+    timeout /t 1 /nobreak >nul
+    goto replace
+)
 
-        # Notify update finished, spawn the new executable, and exit the current process
-        finish_callback(True, "Update complete. Restarting to apply...")
-        import time
-        time.sleep(0.5)
-        subprocess.Popen([exe_path])
+del /Q "%TEMP_FILE%" >nul
+
+start "" "%EXE_PATH%"
+del /Q "%~f0" >nul
+"""
+            with open(bat_path, "w", encoding="ansi") as f:
+                f.write(bat_content)
+
+            finish_callback(True, "Update downloaded. Restarting via update helper...")
+            import time
+            time.sleep(0.5)
+
+            subprocess.Popen(
+                ["cmd.exe", "/c", bat_path],
+                creationflags=subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS
+            )
+        else:
+            sh_path = os.path.join(dir_name, "update.sh")
+            sh_content = f"""#!/bin/sh
+PID={os.getpid()}
+TEMP_FILE="{temp_file}"
+EXE_PATH="{exe_path}"
+
+while kill -0 $PID 2>/dev/null; do
+    sleep 1
+done
+
+cp -f "$TEMP_FILE" "$EXE_PATH"
+rm -f "$TEMP_FILE"
+chmod +x "$EXE_PATH"
+"$EXE_PATH" &
+rm -f "$0"
+"""
+            with open(sh_path, "w", encoding="utf-8") as f:
+                f.write(sh_content)
+            os.chmod(sh_path, 0o755)
+
+            finish_callback(True, "Update downloaded. Restarting via update helper...")
+            import time
+            time.sleep(0.5)
+
+            subprocess.Popen([sh_path], start_new_session=True)
+
         os._exit(0)
 
     except Exception as exc:
@@ -269,9 +301,16 @@ def do_update(download_url, progress_callback, finish_callback):
 def cleanup_old_exe():
     exe_path = get_current_exe_path()
     if exe_path:
-        old_file = exe_path + ".old"
-        if os.path.exists(old_file):
-            try:
-                os.remove(old_file)
-            except Exception:
-                pass
+        for ext in (".old", ".new", ".bat", ".sh"):
+            file_path = exe_path + ext
+            if os.path.exists(file_path):
+                try:
+                    os.remove(file_path)
+                except Exception:
+                    pass
+            flat_path = os.path.join(os.path.dirname(exe_path), "update" + ext)
+            if os.path.exists(flat_path):
+                try:
+                    os.remove(flat_path)
+                except Exception:
+                    pass
