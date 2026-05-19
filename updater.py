@@ -227,21 +227,35 @@ def do_update(download_url, progress_callback, finish_callback):
                         progress_callback(int(downloaded * 100 / int(total_length)))
 
         old_file = exe_path + ".old"
-        if os.path.exists(old_file):
+
+        # 尝试多次清理旧的 .old 备份文件，防止操作系统锁定或杀软扫描导致的延迟释放
+        for _ in range(5):
             try:
-                os.remove(old_file)
+                if os.path.exists(old_file):
+                    os.remove(old_file)
+                break
             except Exception:
-                pass
+                import time
+                time.sleep(0.1)
 
-        try:
-            if os.path.exists(old_file):
-                os.remove(old_file)
-        except Exception:
-            pass
+        # 执行高可靠的原地替换，带有 5 次微秒级重试机制以规避偶发的文件占用锁冲突
+        replace_success = False
+        last_error = None
+        for _ in range(5):
+            try:
+                os.replace(exe_path, old_file)
+                os.replace(temp_file, exe_path)
+                replace_success = True
+                break
+            except Exception as e:
+                last_error = e
+                import time
+                time.sleep(0.1)
 
-        os.replace(exe_path, old_file)
-        os.replace(temp_file, exe_path)
-        
+        if not replace_success:
+            raise RuntimeError(f"无法替换可执行文件，文件可能被系统或其他进程锁定: {last_error}")
+
+        # 通知界面更新完成，并无缝拉起全新版本进程，完美终止当前进程
         finish_callback(True, "Update complete. Restarting to apply...")
         import time
         time.sleep(0.5)
