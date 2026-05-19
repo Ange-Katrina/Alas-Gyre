@@ -288,12 +288,16 @@ def load_bottom_icon(kind, hover=False):
     if cache_key in _BOTTOM_ICON_CACHE:
         return _BOTTOM_ICON_CACHE[cache_key]
 
-    suffix = "_hover" if hover else ""
-    icon_path = asset_path("bottom_icons", f"{kind}{suffix}.png")
-    
+    # 底部导航栏的原版普通态 PNG 本身就带有完美的透明通道，且非常美观。
+    # 悬浮态图片（_hover.png）被错误填充了黑底，因此我们对于导航栏图标，在悬浮时同样加载带透明的原版 PNG，
+    # 悬浮底色高亮完全由 QSS 样式表透明承载，从而完美保持原版图标质感并彻底消除黑底。
     if kind in {"settings", "home", "float", "log", "export", "screenshot"}:
-        icon = build_bottom_icon(kind, "#d4d8df" if hover else "#a6abb4")
-    elif os.path.exists(icon_path):
+        icon_path = asset_path("bottom_icons", f"{kind}.png")
+    else:
+        suffix = "_hover" if hover else ""
+        icon_path = asset_path("bottom_icons", f"{kind}{suffix}.png")
+        
+    if os.path.exists(icon_path):
         icon = QIcon(icon_path)
     else:
         icon = build_bottom_icon(kind, "#d4d8df" if hover else "#a6abb4")
