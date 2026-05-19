@@ -268,16 +268,22 @@ QComboBox QAbstractItemView {
 }
 
 /* 底部图标按钮 */
-QPushButton.iconBtn {
+QPushButton.iconBtn, QPushButton#lineIconBtn {
     background-color: transparent;
     border: none;
+    outline: none;
 }
-QPushButton.iconBtn:hover {
-    background-color: rgba(255, 255, 255, 10);
+QPushButton.iconBtn:hover, QPushButton#lineIconBtn:hover {
+    background-color: rgba(255, 255, 255, 12);
     border: none;
 }
-QPushButton.iconBtn:focus {
+QPushButton#lineIconBtn:pressed {
+    background-color: rgba(255, 255, 255, 22);
+    border: none;
+}
+QPushButton.iconBtn:focus, QPushButton#lineIconBtn:focus {
     outline: none;
+    border: none;
 }
 
 /* Unicode 文本图标按钮 */
