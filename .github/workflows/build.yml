@@ -179,18 +179,23 @@ jobs:
         run: |
           pyinstaller Alas-Gyre.spec --noconfirm --clean
 
+      - name: Rename Windows exe
+        if: matrix.os == 'windows-latest'
+        run: |
+          mv dist/Alas-Gyre.exe dist/Alas-Gyre-PyInstaller.exe
+
       - name: Package macOS bundle
         if: matrix.os == 'macos-latest'
         run: |
           cd dist
-          zip -r ../Alas-Gyre-macOS.zip Alas-Gyre.app Alas-Gyre
+          zip -r ../Alas-Gyre-macOS-PyInstaller.zip Alas-Gyre.app Alas-Gyre
           cd ..
 
       - name: Package Linux binary
         if: matrix.os == 'ubuntu-latest'
         run: |
           cd dist
-          tar -czf ../Alas-Gyre-Linux.tar.gz Alas-Gyre
+          tar -czf ../Alas-Gyre-Linux-PyInstaller.tar.gz Alas-Gyre
           cd ..
 
       - name: Upload PyInstaller artifact
@@ -198,15 +203,31 @@ jobs:
         with:
           name: ${{ matrix.artifact_name }}-${{ needs.meta.outputs.tag }}
           path: |
-            dist/Alas-Gyre.exe
-            Alas-Gyre-macOS.zip
-            Alas-Gyre-Linux.tar.gz
+            dist/Alas-Gyre-PyInstaller.exe
+            Alas-Gyre-macOS-PyInstaller.zip
+            Alas-Gyre-Linux-PyInstaller.tar.gz
           retention-days: 7
 
   build-nuitka:
-    name: Build with Nuitka (Windows)
+    name: Build Nuitka on ${{ matrix.os }}
     needs: meta
-    runs-on: windows-latest
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            artifact_name: Alas-Gyre-Windows-Nuitka
+            output_name: Alas-Gyre-Nuitka.exe
+            platform: windows
+          - os: macos-latest
+            artifact_name: Alas-Gyre-macOS-Nuitka
+            output_name: Alas-Gyre-macOS-Nuitka
+            platform: macos
+          - os: ubuntu-latest
+            artifact_name: Alas-Gyre-Linux-Nuitka
+            output_name: Alas-Gyre-Linux-Nuitka
+            platform: linux
     steps:
       - name: Download updated code
         uses: actions/download-artifact@v4
@@ -229,25 +250,70 @@ jobs:
           pip install -r requirements.txt
 
       - name: Build with Nuitka
+        shell: bash
         run: |
-          python -m nuitka --onefile `
-            --enable-plugin=pyside6 `
-            --assume-yes-for-downloads `
-            --lto=yes `
-            --windows-console-mode=disable `
-            --windows-icon-from-ico=ui/assets/alas.ico `
-            --include-data-dir=ui=ui `
-            --include-data-files=resources/fastapi_payload.txt=resources/fastapi_payload.txt `
-            --output-filename=Alas-Gyre-Nuitka.exe `
-            --noinclude-unittest-mode=nofollow `
-            --remove-output `
-            main.py
+          PLATFORM="${{ matrix.platform }}"
+          OUTPUT_NAME="${{ matrix.output_name }}"
+
+          COMMON_FLAGS=(
+            --onefile
+            --enable-plugin=pyside6
+            --assume-yes-for-downloads
+            --lto=yes
+            --include-data-dir=ui=ui
+            --include-data-files=resources/fastapi_payload.txt=resources/fastapi_payload.txt
+            --noinclude-unittest-mode=nofollow
+            --remove-output
+          )
+
+          if [ "$PLATFORM" = "windows" ]; then
+            python -m nuitka \
+              "${COMMON_FLAGS[@]}" \
+              --windows-console-mode=disable \
+              --windows-icon-from-ico=ui/assets/alas.ico \
+              --output-filename="${OUTPUT_NAME}" \
+              main.py
+          elif [ "$PLATFORM" = "macos" ]; then
+            python -m nuitka \
+              "${COMMON_FLAGS[@]}" \
+              --macos-create-app-bundle \
+              --output-filename="${OUTPUT_NAME}" \
+              main.py
+          elif [ "$PLATFORM" = "linux" ]; then
+            python -m nuitka \
+              "${COMMON_FLAGS[@]}" \
+              --output-filename="${OUTPUT_NAME}" \
+              main.py
+          fi
+
+      - name: Package macOS Nuitka binary
+        if: matrix.platform == 'macos'
+        shell: bash
+        run: |
+          if [ -d "${OUTPUT_NAME}.app" ]; then
+            zip -r "${OUTPUT_NAME}.zip" "${OUTPUT_NAME}.app" "${OUTPUT_NAME}"
+          else
+            zip "${OUTPUT_NAME}.zip" "${OUTPUT_NAME}"
+          fi
+        env:
+          OUTPUT_NAME: ${{ matrix.output_name }}
+
+      - name: Package Linux Nuitka binary
+        if: matrix.platform == 'linux'
+        shell: bash
+        run: |
+          tar -czf "${OUTPUT_NAME}.tar.gz" "${OUTPUT_NAME}"
+        env:
+          OUTPUT_NAME: ${{ matrix.output_name }}
 
       - name: Upload Nuitka artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Alas-Gyre-Windows-Nuitka-${{ needs.meta.outputs.tag }}
-          path: Alas-Gyre-Nuitka.exe
+          name: ${{ matrix.artifact_name }}-${{ needs.meta.outputs.tag }}
+          path: |
+            ${{ matrix.output_name }}
+            ${{ matrix.output_name }}.zip
+            ${{ matrix.output_name }}.tar.gz
           retention-days: 7
 
   release:
@@ -264,10 +330,12 @@ jobs:
       - name: Clean up files
         run: |
           mkdir -p release
-          find assets/ -name "Alas-Gyre.exe" -exec cp {} release/ \;
-          find assets/ -name "Alas-Gyre-macOS.zip" -exec cp {} release/ \;
-          find assets/ -name "Alas-Gyre-Linux.tar.gz" -exec cp {} release/ \;
+          find assets/ -name "Alas-Gyre-PyInstaller.exe" -exec cp {} release/ \;
+          find assets/ -name "Alas-Gyre-macOS-PyInstaller.zip" -exec cp {} release/ \;
+          find assets/ -name "Alas-Gyre-Linux-PyInstaller.tar.gz" -exec cp {} release/ \;
           find assets/ -name "Alas-Gyre-Nuitka.exe" -exec cp {} release/ \;
+          find assets/ -name "Alas-Gyre-macOS-Nuitka.zip" -exec cp {} release/ \;
+          find assets/ -name "Alas-Gyre-Linux-Nuitka.tar.gz" -exec cp {} release/ \;
           find assets/ -name "CHANGELOG.md" -exec cp {} release/ \;
         shell: bash
 
@@ -278,8 +346,10 @@ jobs:
           name: ${{ needs.meta.outputs.tag }}
           body_path: release/CHANGELOG.md
           files: |
-            release/Alas-Gyre.exe
-            release/Alas-Gyre-macOS.zip
-            release/Alas-Gyre-Linux.tar.gz
+            release/Alas-Gyre-PyInstaller.exe
+            release/Alas-Gyre-macOS-PyInstaller.zip
+            release/Alas-Gyre-Linux-PyInstaller.tar.gz
             release/Alas-Gyre-Nuitka.exe
+            release/Alas-Gyre-macOS-Nuitka.zip
+            release/Alas-Gyre-Linux-Nuitka.tar.gz
           prerelease: ${{ needs.meta.outputs.prerelease != 'false' }}
