@@ -177,7 +177,7 @@ jobs:
 
       - name: Build with PyInstaller
         run: |
-          pyinstaller Alas-Gyre.spec --noconfirm
+          pyinstaller Alas-Gyre.spec --noconfirm --clean
 
       - name: Package macOS bundle
         if: matrix.os == 'macos-latest'
@@ -203,9 +203,56 @@ jobs:
             Alas-Gyre-Linux.tar.gz
           retention-days: 7
 
+  build-nuitka:
+    name: Build with Nuitka (Windows)
+    needs: meta
+    runs-on: windows-latest
+    steps:
+      - name: Download updated code
+        uses: actions/download-artifact@v4
+        with:
+          name: updated-code
+          path: .
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          architecture: 'x64'
+          cache: 'pip'
+          cache-dependency-path: 'requirements.txt'
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install nuitka ordered-set
+          pip install -r requirements.txt
+
+      - name: Build with Nuitka
+        run: |
+          python -m nuitka --onefile `
+            --enable-plugin=pyside6 `
+            --assume-yes-for-downloads `
+            --lto=yes `
+            --windows-console-mode=disable `
+            --windows-icon-from-ico=ui/assets/alas.ico `
+            --include-data-dir=ui=ui `
+            --include-data-files=resources/fastapi_payload.txt=resources/fastapi_payload.txt `
+            --output-filename=Alas-Gyre-Nuitka.exe `
+            --noinclude-unittest-mode=nofollow `
+            --remove-output `
+            main.py
+
+      - name: Upload Nuitka artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Alas-Gyre-Windows-Nuitka-${{ needs.meta.outputs.tag }}
+          path: Alas-Gyre-Nuitka.exe
+          retention-days: 7
+
   release:
     name: Publish Release
-    needs: [meta, build-pyinstaller]
+    needs: [meta, build-pyinstaller, build-nuitka]
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     steps:
@@ -217,14 +264,10 @@ jobs:
       - name: Clean up files
         run: |
           mkdir -p release
-          # Copy Windows exe
           find assets/ -name "Alas-Gyre.exe" -exec cp {} release/ \;
-          # Copy macOS zip
           find assets/ -name "Alas-Gyre-macOS.zip" -exec cp {} release/ \;
-          # Copy Linux tar.gz
           find assets/ -name "Alas-Gyre-Linux.tar.gz" -exec cp {} release/ \;
-          
-          # Copy CHANGELOG.md (only for body_path description)
+          find assets/ -name "Alas-Gyre-Nuitka.exe" -exec cp {} release/ \;
           find assets/ -name "CHANGELOG.md" -exec cp {} release/ \;
         shell: bash
 
@@ -238,4 +281,5 @@ jobs:
             release/Alas-Gyre.exe
             release/Alas-Gyre-macOS.zip
             release/Alas-Gyre-Linux.tar.gz
+            release/Alas-Gyre-Nuitka.exe
           prerelease: ${{ needs.meta.outputs.prerelease != 'false' }}
