@@ -1,5 +1,5 @@
 /* 主卡片 */
-QFrame#card, QFrame#settingsCard, QFrame#logCard, QFrame#fastapiCard, QFrame#initCard, QFrame#updateCard {
+QFrame#card, QFrame#settingsCard, QFrame#logCard, QFrame#screenshotCard, QFrame#fastapiCard, QFrame#initCard, QFrame#updateCard {
     background-color: #262a31;
     border: 1px solid #1b1e24;
     border-radius: 8px;
@@ -76,7 +76,7 @@ QWidget#topBg {
     border-bottom: 1px solid #171a20;
 }
 
-QWidget#settingsTopBg, QWidget#logTopBg, QWidget#fastapiTopBg, QWidget#initTopBg, QWidget#updateTopBg {
+QWidget#settingsTopBg, QWidget#logTopBg, QWidget#screenshotTopBg, QWidget#fastapiTopBg, QWidget#initTopBg, QWidget#updateTopBg {
     background-color: #191c21;
     border-top-left-radius: 8px;
     border-top-right-radius: 8px;
@@ -84,7 +84,7 @@ QWidget#settingsTopBg, QWidget#logTopBg, QWidget#fastapiTopBg, QWidget#initTopBg
 }
 
 /* 中下区域背景 */
-QWidget#midBg, QWidget#settingsFormBg, QWidget#fastapiBodyBg, QWidget#initBodyBg, QWidget#updateBodyBg {
+QWidget#midBg, QWidget#settingsFormBg, QWidget#screenshotBodyBg, QWidget#fastapiBodyBg, QWidget#initBodyBg, QWidget#updateBodyBg {
     background-color: transparent;
     border: none;
     border-bottom-left-radius: 8px;
@@ -110,7 +110,7 @@ QLabel#sectionTitle, QLabel#settingsTitle {
     background: transparent;
 }
 
-QLabel#settingsTitle, QLabel#logTitle, QLabel#fastapiTitle, QLabel#initTitle, QLabel#updateTitle {
+QLabel#settingsTitle, QLabel#logTitle, QLabel#screenshotTitle, QLabel#fastapiTitle, QLabel#initTitle, QLabel#updateTitle {
     color: #c8ccd5;
     font-size: 12px;
     font-weight: normal;
@@ -658,7 +658,7 @@ QLabel#rowStatusLabel {
 }
 
 /* 日志窗口下拉框与文本面板 */
-QComboBox#logConfigCombo {
+QComboBox#logConfigCombo, QComboBox#screenshotCombo {
     background-color: #171a20;
     border: 1px solid #2f3540;
     border-radius: 5px;
@@ -667,25 +667,25 @@ QComboBox#logConfigCombo {
     font-size: 13px;
     font-family: "Microsoft YaHei", "Segoe UI";
 }
-QComboBox#logConfigCombo:hover {
+QComboBox#logConfigCombo:hover, QComboBox#screenshotCombo:hover {
     background-color: #1a1e25;
     border: 1px solid #3b4350;
 }
-QComboBox#logConfigCombo:focus {
+QComboBox#logConfigCombo:focus, QComboBox#screenshotCombo:focus {
     outline: none;
 }
-QComboBox#logConfigCombo::drop-down {
+QComboBox#logConfigCombo::drop-down, QComboBox#screenshotCombo::drop-down {
     subcontrol-origin: padding;
     subcontrol-position: top right;
     border: none;
     width: 20px;
 }
-QComboBox#logConfigCombo::down-arrow {
+QComboBox#logConfigCombo::down-arrow, QComboBox#screenshotCombo::down-arrow {
     image: none;
     width: 0px;
     height: 0px;
 }
-QComboBox#logConfigCombo QAbstractItemView {
+QComboBox#logConfigCombo QAbstractItemView, QComboBox#screenshotCombo QAbstractItemView {
     background-color: #1f2228;
     color: #e6e6e6;
     border: 1px solid #30343f;
@@ -694,6 +694,58 @@ QComboBox#logConfigCombo QAbstractItemView {
     outline: none;
     padding: 4px;
     font-size: 13px;
+}
+
+QLabel#screenshotFieldLabel {
+    color: #8b8f99;
+    font-size: 12px;
+    font-family: "Microsoft YaHei", "Segoe UI";
+    background: transparent;
+}
+
+QLabel#screenshotStatusLabel {
+    color: #9ca3af;
+    font-size: 12px;
+    font-family: "Microsoft YaHei", "Segoe UI";
+    background: transparent;
+}
+
+QFrame#screenshotImagePanel {
+    background-color: #171a20;
+    border: 1px solid #2f3540;
+    border-radius: 8px;
+}
+
+QLabel#screenshotImageLabel {
+    color: #9ca3af;
+    background: transparent;
+    font-size: 13px;
+    font-family: "Microsoft YaHei", "Segoe UI";
+}
+
+QPushButton#screenshotRefreshBtn {
+    background-color: #2b313b;
+    color: #cfd3dc;
+    border: 1px solid #3a414d;
+    border-radius: 5px;
+    font-size: 12px;
+    font-family: "Microsoft YaHei", "Segoe UI";
+}
+QPushButton#screenshotRefreshBtn:hover {
+    background-color: #343b47;
+    color: #ffffff;
+    border: 1px solid #4b5563;
+}
+QPushButton#screenshotRefreshBtn:pressed {
+    background-color: #20252e;
+}
+QPushButton#screenshotRefreshBtn:disabled {
+    color: #6b7280;
+    background-color: #202329;
+    border: 1px solid #2b3039;
+}
+QPushButton#screenshotRefreshBtn:focus {
+    outline: none;
 }
 
 QTextEdit#logTextPanel {

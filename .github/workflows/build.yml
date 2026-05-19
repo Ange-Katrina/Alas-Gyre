@@ -73,7 +73,7 @@ jobs:
               if len(parts) != 2:
                   return line
               commit_hash, message = parts
-              
+
               # Match conventional commit format
               match = re.match(r"^([a-zA-Z]+)(\(.+?\))?:\s*(.+)$", message)
               if match:
@@ -82,7 +82,7 @@ jobs:
                   rest = match.group(3)
                   if prefix in PREFIX_MAP:
                       return f"{commit_hash} [{PREFIX_MAP[prefix]}]{scope} {rest}"
-              
+
               return line
 
           commits_file = sys.argv[1]
@@ -105,7 +105,7 @@ jobs:
                   "",
                   f"**Full Changelog / 完整更新记录**: https://github.com/{os.environ.get('GITHUB_REPOSITORY', 'Ange-Katrina/Alas-Gyre')}/compare/{previous_tag}...{current_tag}",
               ])
-          
+
           with open("CHANGELOG.md", "w", encoding="utf-8", newline="\n") as f:
               f.write("\n".join(output).rstrip() + "\n")
           PY
@@ -139,7 +139,7 @@ jobs:
           retention-days: 1
 
   build-pyinstaller:
-    name: Build on ${{ matrix.os }}
+    name: Build PyInstaller on ${{ matrix.os }}
     needs: meta
     runs-on: ${{ matrix.os }}
     strategy:
@@ -147,7 +147,7 @@ jobs:
       matrix:
         include:
           - os: windows-latest
-            artifact_name: Alas-Gyre-Windows
+            artifact_name: Alas-Gyre-Windows-PyInstaller
           - os: macos-latest
             artifact_name: Alas-Gyre-macOS
           - os: ubuntu-latest
@@ -173,45 +173,39 @@ jobs:
           pip install pyinstaller
           pip install -r requirements.txt
 
-      - name: Install UPX (Windows)
+      - name: Install UPX
         if: matrix.os == 'windows-latest'
+        shell: pwsh
         run: |
-          $UPX_VERSION = "4.2.4"
-          $UPX_ZIP = "upx-${UPX_VERSION}-win64.zip"
-          Invoke-WebRequest -Uri "https://github.com/upx/upx/releases/download/v${UPX_VERSION}/${UPX_ZIP}" -OutFile "${env:RUNNER_TEMP}\${UPX_ZIP}"
-          Expand-Archive -Path "${env:RUNNER_TEMP}\${UPX_ZIP}" -DestinationPath "${env:RUNNER_TEMP}\upx"
-          Copy-Item "${env:RUNNER_TEMP}\upx\upx-${UPX_VERSION}-win64\upx.exe" -Destination "${env:RUNNER_TEMP}\upx.exe"
-          echo "${env:RUNNER_TEMP}" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-
-      - name: Install UPX (macOS)
-        if: matrix.os == 'macos-latest'
-        run: brew install upx
-
-      - name: Install UPX (Linux)
-        if: matrix.os == 'ubuntu-latest'
-        run: sudo apt-get update && sudo apt-get install -y upx-ucl
+          $version = "5.1.1"
+          $url = "https://github.com/upx/upx/releases/download/v$version/upx-$version-win64.zip"
+          New-Item -ItemType Directory -Force -Path tools | Out-Null
+          Invoke-WebRequest -Uri $url -OutFile "tools/upx-$version-win64.zip"
+          Expand-Archive -LiteralPath "tools/upx-$version-win64.zip" -DestinationPath tools -Force
+          & "tools/upx-$version-win64/upx.exe" --version
 
       - name: Build with PyInstaller
         run: |
-          pyinstaller Alas-Gyre.spec --noconfirm --clean
+          pyinstaller Alas-Gyre.spec --noconfirm
 
-      - name: Rename Windows exe
+      - name: Add explicit PyInstaller Windows asset
         if: matrix.os == 'windows-latest'
+        shell: pwsh
         run: |
-          mv dist/Alas-Gyre.exe dist/Alas-Gyre-PyInstaller.exe
+          Copy-Item -LiteralPath "dist/Alas-Gyre.exe" -Destination "dist/Alas-Gyre-PyInstaller.exe" -Force
 
       - name: Package macOS bundle
         if: matrix.os == 'macos-latest'
         run: |
           cd dist
-          zip -r ../Alas-Gyre-macOS-PyInstaller.zip Alas-Gyre.app Alas-Gyre
+          zip -r ../Alas-Gyre-macOS.zip Alas-Gyre.app Alas-Gyre
           cd ..
 
       - name: Package Linux binary
         if: matrix.os == 'ubuntu-latest'
         run: |
           cd dist
-          tar -czf ../Alas-Gyre-Linux-PyInstaller.tar.gz Alas-Gyre
+          tar -czf ../Alas-Gyre-Linux.tar.gz Alas-Gyre
           cd ..
 
       - name: Upload PyInstaller artifact
@@ -219,31 +213,16 @@ jobs:
         with:
           name: ${{ matrix.artifact_name }}-${{ needs.meta.outputs.tag }}
           path: |
+            dist/Alas-Gyre.exe
             dist/Alas-Gyre-PyInstaller.exe
-            Alas-Gyre-macOS-PyInstaller.zip
-            Alas-Gyre-Linux-PyInstaller.tar.gz
+            Alas-Gyre-macOS.zip
+            Alas-Gyre-Linux.tar.gz
           retention-days: 7
 
   build-nuitka:
-    name: Build Nuitka on ${{ matrix.os }}
+    name: Build Nuitka on Windows
     needs: meta
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: windows-latest
-            artifact_name: Alas-Gyre-Windows-Nuitka
-            output_name: Alas-Gyre-Nuitka.exe
-            platform: windows
-          - os: macos-latest
-            artifact_name: Alas-Gyre-macOS-Nuitka
-            output_name: Alas-Gyre-macOS-Nuitka
-            platform: macos
-          - os: ubuntu-latest
-            artifact_name: Alas-Gyre-Linux-Nuitka
-            output_name: Alas-Gyre-Linux-Nuitka
-            platform: linux
+    runs-on: windows-latest
     steps:
       - name: Download updated code
         uses: actions/download-artifact@v4
@@ -259,97 +238,62 @@ jobs:
           cache: 'pip'
           cache-dependency-path: 'requirements.txt'
 
+      - name: Configure Nuitka build flavor
+        shell: pwsh
+        run: |
+          $content = "BUILD_FLAVOR = `"nuitka`"`n"
+          [System.IO.File]::WriteAllText((Join-Path $PWD "build_info.py"), $content, [System.Text.UTF8Encoding]::new($false))
+
       - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install nuitka ordered-set
+          pip install nuitka ordered-set zstandard
           pip install -r requirements.txt
 
-      - name: Install UPX (Windows)
-        if: matrix.platform == 'windows'
+      - name: Install UPX
+        shell: pwsh
         run: |
-          $UPX_VERSION = "4.2.4"
-          $UPX_ZIP = "upx-${UPX_VERSION}-win64.zip"
-          Invoke-WebRequest -Uri "https://github.com/upx/upx/releases/download/v${UPX_VERSION}/${UPX_ZIP}" -OutFile "${env:RUNNER_TEMP}\${UPX_ZIP}"
-          Expand-Archive -Path "${env:RUNNER_TEMP}\${UPX_ZIP}" -DestinationPath "${env:RUNNER_TEMP}\upx"
-          Copy-Item "${env:RUNNER_TEMP}\upx\upx-${UPX_VERSION}-win64\upx.exe" -Destination "${env:RUNNER_TEMP}\upx.exe"
-          echo "${env:RUNNER_TEMP}" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-
-      - name: Install UPX (macOS)
-        if: matrix.platform == 'macos'
-        run: brew install upx
-
-      - name: Install UPX (Linux)
-        if: matrix.platform == 'linux'
-        run: sudo apt-get update && sudo apt-get install -y upx-ucl
+          $version = "5.1.1"
+          $url = "https://github.com/upx/upx/releases/download/v$version/upx-$version-win64.zip"
+          New-Item -ItemType Directory -Force -Path tools | Out-Null
+          Invoke-WebRequest -Uri $url -OutFile "tools/upx-$version-win64.zip"
+          Expand-Archive -LiteralPath "tools/upx-$version-win64.zip" -DestinationPath tools -Force
+          & "tools/upx-$version-win64/upx.exe" --version
 
       - name: Build with Nuitka
-        shell: bash
+        shell: pwsh
         run: |
-          PLATFORM="${{ matrix.platform }}"
-          OUTPUT_NAME="${{ matrix.output_name }}"
+          python -m nuitka `
+            --onefile `
+            --enable-plugin=pyside6 `
+            --assume-yes-for-downloads `
+            --remove-output `
+            --windows-console-mode=disable `
+            --windows-icon-from-ico=ui/assets/alas.ico `
+            --include-data-files=ui/style.qss=ui/style.qss `
+            --include-data-files=ui/light.qss=ui/light.qss `
+            --include-data-dir=ui/assets=ui/assets `
+            --include-data-files=resources/fastapi_payload.txt=resources/fastapi_payload.txt `
+            --output-filename=Alas-Gyre-Nuitka.exe `
+            main.py
 
-          COMMON_FLAGS=(
-            --onefile
-            --onefile-no-compression
-            --enable-plugin=pyside6
-            --enable-plugin=upx
-            --assume-yes-for-downloads
-            --lto=yes
-            --include-data-dir=ui=ui
-            --include-data-files=resources/fastapi_payload.txt=resources/fastapi_payload.txt
-            --noinclude-unittest-mode=nofollow
-            --remove-output
-          )
-
-          if [ "$PLATFORM" = "windows" ]; then
-            python -m nuitka \
-              "${COMMON_FLAGS[@]}" \
-              --windows-console-mode=disable \
-              --windows-icon-from-ico=ui/assets/alas.ico \
-              --output-filename="${OUTPUT_NAME}" \
-              main.py
-          elif [ "$PLATFORM" = "macos" ]; then
-            python -m nuitka \
-              "${COMMON_FLAGS[@]}" \
-              --macos-create-app-bundle \
-              --output-filename="${OUTPUT_NAME}" \
-              main.py
-          elif [ "$PLATFORM" = "linux" ]; then
-            python -m nuitka \
-              "${COMMON_FLAGS[@]}" \
-              --output-filename="${OUTPUT_NAME}" \
-              main.py
-          fi
-
-      - name: Package macOS Nuitka binary
-        if: matrix.platform == 'macos'
-        shell: bash
+      - name: Compress Nuitka exe with UPX
+        shell: pwsh
         run: |
-          if [ -d "${OUTPUT_NAME}.app" ]; then
-            zip -r "${OUTPUT_NAME}.zip" "${OUTPUT_NAME}.app" "${OUTPUT_NAME}"
-          else
-            zip "${OUTPUT_NAME}.zip" "${OUTPUT_NAME}"
-          fi
-        env:
-          OUTPUT_NAME: ${{ matrix.output_name }}
-
-      - name: Package Linux Nuitka binary
-        if: matrix.platform == 'linux'
-        shell: bash
-        run: |
-          tar -czf "${OUTPUT_NAME}.tar.gz" "${OUTPUT_NAME}"
-        env:
-          OUTPUT_NAME: ${{ matrix.output_name }}
+          $upx = "tools/upx-5.1.1-win64/upx.exe"
+          if (Test-Path -LiteralPath $upx) {
+            & $upx --best --lzma "Alas-Gyre-Nuitka.exe"
+            if ($LASTEXITCODE -ne 0) {
+              Write-Warning "UPX compression failed; keeping original Nuitka exe."
+              exit 0
+            }
+          }
 
       - name: Upload Nuitka artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact_name }}-${{ needs.meta.outputs.tag }}
-          path: |
-            ${{ matrix.output_name }}
-            ${{ matrix.output_name }}.zip
-            ${{ matrix.output_name }}.tar.gz
+          name: Alas-Gyre-Windows-Nuitka-${{ needs.meta.outputs.tag }}
+          path: Alas-Gyre-Nuitka.exe
           retention-days: 7
 
   release:
@@ -366,13 +310,18 @@ jobs:
       - name: Clean up files
         run: |
           mkdir -p release
+          # Copy Windows exe files
+          find assets/ -name "Alas-Gyre.exe" -exec cp {} release/ \;
           find assets/ -name "Alas-Gyre-PyInstaller.exe" -exec cp {} release/ \;
-          find assets/ -name "Alas-Gyre-macOS-PyInstaller.zip" -exec cp {} release/ \;
-          find assets/ -name "Alas-Gyre-Linux-PyInstaller.tar.gz" -exec cp {} release/ \;
           find assets/ -name "Alas-Gyre-Nuitka.exe" -exec cp {} release/ \;
-          find assets/ -name "Alas-Gyre-macOS-Nuitka.zip" -exec cp {} release/ \;
-          find assets/ -name "Alas-Gyre-Linux-Nuitka.tar.gz" -exec cp {} release/ \;
+
+          # Copy macOS zip and Linux tar.gz
+          find assets/ -name "Alas-Gyre-macOS.zip" -exec cp {} release/ \;
+          find assets/ -name "Alas-Gyre-Linux.tar.gz" -exec cp {} release/ \;
+
+          # Copy CHANGELOG.md (only for body_path description)
           find assets/ -name "CHANGELOG.md" -exec cp {} release/ \;
+          ls -la release
         shell: bash
 
       - name: Publish release to GitHub
@@ -382,10 +331,9 @@ jobs:
           name: ${{ needs.meta.outputs.tag }}
           body_path: release/CHANGELOG.md
           files: |
+            release/Alas-Gyre.exe
             release/Alas-Gyre-PyInstaller.exe
-            release/Alas-Gyre-macOS-PyInstaller.zip
-            release/Alas-Gyre-Linux-PyInstaller.tar.gz
             release/Alas-Gyre-Nuitka.exe
-            release/Alas-Gyre-macOS-Nuitka.zip
-            release/Alas-Gyre-Linux-Nuitka.tar.gz
+            release/Alas-Gyre-macOS.zip
+            release/Alas-Gyre-Linux.tar.gz
           prerelease: ${{ needs.meta.outputs.prerelease != 'false' }}

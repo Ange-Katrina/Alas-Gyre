@@ -3,8 +3,10 @@ import subprocess
 import sys
 from urllib.parse import quote
 
-import requests
-from packaging import version
+try:
+    from build_info import BUILD_FLAVOR
+except Exception:
+    BUILD_FLAVOR = "pyinstaller"
 
 
 GITHUB_REPO = "Ange-Katrina/Alas-Gyre"
@@ -15,12 +17,37 @@ REQUEST_HEADERS = {
     "Accept": "application/vnd.github+json",
     "User-Agent": "Alas-Gyre-Updater",
 }
+VALID_BUILD_FLAVORS = {"pyinstaller", "nuitka"}
+PYINSTALLER_ASSET_NAMES = ("alas-gyre-pyinstaller.exe", "alas-gyre.exe")
+NUITKA_ASSET_NAMES = ("alas-gyre-nuitka.exe",)
+
+
+def _requests():
+    import requests
+    return requests
 
 
 def get_current_exe_path():
     if getattr(sys, "frozen", False):
         return sys.executable
     return None
+
+
+def normalize_build_flavor(flavor):
+    flavor = str(flavor or "").strip().lower()
+    return flavor if flavor in VALID_BUILD_FLAVORS else "pyinstaller"
+
+
+def get_build_flavor():
+    configured_flavor = normalize_build_flavor(BUILD_FLAVOR)
+    exe_path = get_current_exe_path()
+    if exe_path:
+        exe_name = os.path.basename(exe_path).lower()
+        if "nuitka" in exe_name:
+            return "nuitka"
+        if "pyinstaller" in exe_name:
+            return "pyinstaller"
+    return configured_flavor
 
 
 def normalize_version_tag(tag):
@@ -31,6 +58,8 @@ def normalize_version_tag(tag):
 
 
 def parse_version_tag(tag):
+    from packaging import version
+
     return version.parse(normalize_version_tag(tag).lstrip("v"))
 
 
@@ -41,11 +70,36 @@ def is_newer_version(latest_version, current_version):
         return False
 
 
-def find_exe_asset(assets):
+def find_exe_asset(assets, build_flavor=None):
+    build_flavor = normalize_build_flavor(build_flavor or get_build_flavor())
+    exe_assets = []
     for asset in assets or []:
         name = asset.get("name", "")
         if name.lower().endswith(".exe"):
+            exe_assets.append(asset)
+
+    if not exe_assets:
+        return None
+
+    preferred_names = (
+        NUITKA_ASSET_NAMES if build_flavor == "nuitka" else PYINSTALLER_ASSET_NAMES
+    )
+    for preferred_name in preferred_names:
+        for asset in exe_assets:
+            if asset.get("name", "").lower() == preferred_name:
+                return asset.get("browser_download_url")
+
+    for asset in exe_assets:
+        name = asset.get("name", "").lower()
+        if build_flavor == "nuitka" and "nuitka" in name:
             return asset.get("browser_download_url")
+        if (
+            build_flavor == "pyinstaller"
+            and "nuitka" not in name
+            and "pyinstaller" not in name
+        ):
+            return asset.get("browser_download_url")
+
     return None
 
 
@@ -57,12 +111,13 @@ def update_result_from_release(data, current_version):
     if not is_newer_version(latest_version, current_version):
         return {"has_update": False, "version": latest_version}
 
-    download_url = find_exe_asset(data.get("assets", []))
+    build_flavor = get_build_flavor()
+    download_url = find_exe_asset(data.get("assets", []), build_flavor)
     if not download_url:
         return {
             "has_update": False,
             "version": latest_version,
-            "error": "missing exe asset",
+            "error": f"missing {build_flavor} exe asset",
         }
 
     return {
@@ -70,11 +125,12 @@ def update_result_from_release(data, current_version):
         "version": latest_version,
         "url": download_url,
         "changelog": data.get("body", ""),
+        "build_flavor": build_flavor,
     }
 
 
 def fetch_latest_release_by_api(current_version):
-    resp = requests.get(API_URL, headers=REQUEST_HEADERS, timeout=CHECK_TIMEOUT)
+    resp = _requests().get(API_URL, headers=REQUEST_HEADERS, timeout=CHECK_TIMEOUT)
     resp.raise_for_status()
     releases = resp.json()
     if not releases or not isinstance(releases, list):
@@ -84,7 +140,7 @@ def fetch_latest_release_by_api(current_version):
 
 
 def fetch_latest_tag_by_redirect():
-    resp = requests.get(
+    resp = _requests().get(
         RELEASE_LATEST_URL,
         headers=REQUEST_HEADERS,
         timeout=CHECK_TIMEOUT,
@@ -103,7 +159,7 @@ def fetch_latest_tag_by_redirect():
 
 def fetch_release_by_tag(tag, current_version):
     url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/tags/{quote(tag, safe='')}"
-    resp = requests.get(url, headers=REQUEST_HEADERS, timeout=CHECK_TIMEOUT)
+    resp = _requests().get(url, headers=REQUEST_HEADERS, timeout=CHECK_TIMEOUT)
     resp.raise_for_status()
     return update_result_from_release(resp.json(), current_version)
 
@@ -141,19 +197,19 @@ def do_update(download_url, progress_callback, finish_callback):
         resp = None
         try:
             print(f"[update] downloading from GitHub: {download_url}")
-            resp = requests.get(download_url, stream=True, timeout=3.5)
+            resp = _requests().get(download_url, stream=True, timeout=3.5)
             resp.raise_for_status()
         except Exception as exc:
             if download_url.startswith("https://github.com/"):
                 print(f"[update] GitHub download failed ({exc}); trying mirror.")
                 try:
                     mirror_url = f"https://mirror.ghproxy.com/{download_url}"
-                    resp = requests.get(mirror_url, stream=True, timeout=15)
+                    resp = _requests().get(mirror_url, stream=True, timeout=15)
                     resp.raise_for_status()
                 except Exception as mirror_exc:
                     print(f"[update] primary mirror failed ({mirror_exc}); trying backup mirror.")
                     backup_mirror_url = f"https://ghproxy.net/{download_url}"
-                    resp = requests.get(backup_mirror_url, stream=True, timeout=15)
+                    resp = _requests().get(backup_mirror_url, stream=True, timeout=15)
                     resp.raise_for_status()
             else:
                 raise exc

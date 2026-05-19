@@ -1,24 +1,30 @@
 import sys
 import os
 import json
+import math
+import weakref
 from PySide6.QtWidgets import (
     QApplication, QWidget, QLabel, QPushButton, QFrame,
-    QGraphicsDropShadowEffect, QVBoxLayout, QHBoxLayout, QSizePolicy, QScrollArea,
-    QFileDialog
+    QGraphicsDropShadowEffect, QVBoxLayout, QHBoxLayout, QSizePolicy, QScrollArea
 )
 from PySide6.QtCore import Qt, QRectF, QTimer, Signal, QPointF, QSize
 from PySide6.QtGui import QColor, QPainter, QPen, QFontMetrics, QPainterPath, QIcon, QPixmap
-import requests
 import threading
 import time
 
 from .api_client import api_headers
 from .window_snap import snap_to_available_screen
 from .i18n import tr
-from .config_validator import AlasConfigValidationError, validate_alas_config
 from .message_dialog import ask_confirm, show_info, show_warning
 
 VALID_STATUSES = {"idle", "running", "error", "update", "disconnected"}
+ANIMATED_STATUSES = {"running", "error", "update", "disconnected"}
+_BOTTOM_ICON_CACHE = {}
+
+
+def _requests():
+    import requests
+    return requests
 
 def normalize_status(status):
     return status if status in VALID_STATUSES else "idle"
@@ -64,15 +70,36 @@ def asset_path(*parts):
 class StatusIndicator(QWidget):
     """带行动效的状态指示器"""
     _sync_started_at = time.monotonic()
+    _active_widgets = weakref.WeakSet()
+    _animation_timer = None
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setFixedSize(16, 16)  # 加大尺寸
-        self._state = "idle" # idle, running, error
-        
-        self.timer = QTimer(self)
-        self.timer.timeout.connect(self._update_animation)
-        self.timer.setInterval(25) # 40 fps 平滑动画
+        self._state = "idle"  # idle, running, error
+        self_ref = weakref.ref(self)
+        cls = type(self)
+        self.destroyed.connect(lambda: cls._active_widgets.discard(self_ref()))
+
+    @classmethod
+    def _ensure_animation_timer(cls):
+        if cls._animation_timer is not None:
+            return cls._animation_timer
+        cls._animation_timer = QTimer(QApplication.instance())
+        cls._animation_timer.setInterval(50)
+        cls._animation_timer.timeout.connect(cls._update_active_animations)
+        return cls._animation_timer
+
+    @classmethod
+    def _update_active_animations(cls):
+        for widget in list(cls._active_widgets):
+            try:
+                if widget.isVisible():
+                    widget.update()
+            except RuntimeError:
+                cls._active_widgets.discard(widget)
+        if not cls._active_widgets and cls._animation_timer:
+            cls._animation_timer.stop()
 
     @classmethod
     def _synced_angle(cls, degrees_per_second):
@@ -80,19 +107,23 @@ class StatusIndicator(QWidget):
         return (elapsed * degrees_per_second) % 360
 
     def setStatus(self, state):
+        state = normalize_status(state)
+        if self._state == state:
+            return
         self._state = state
         try:
-            if state in ["running", "error", "update", "disconnected"]:
-                if not self.timer.isActive():
-                    self.timer.start()
+            if state in ANIMATED_STATUSES:
+                self._active_widgets.add(self)
+                timer = self._ensure_animation_timer()
+                if not timer.isActive():
+                    timer.start()
             else:
-                self.timer.stop()
+                self._active_widgets.discard(self)
+                if not self._active_widgets and self._animation_timer:
+                    self._animation_timer.stop()
             self.update()
         except RuntimeError:
-            pass # 忽略退出时 C++ 对象已销毁的错误
-
-    def _update_animation(self):
-        self.update()
+            pass  # 忽略退出时 C++ 对象已销毁的错误
 
     def paintEvent(self, event):
         p = QPainter(self)
@@ -137,7 +168,6 @@ class StatusIndicator(QWidget):
             
         elif self._state == "disconnected":
             # 断开：红色呼吸动效
-            import math
             angle = self._synced_angle(160)
             scale = (math.sin(math.radians(angle)) + 1) / 2 # 0.0 ~ 1.0
             size = 8 + 4 * scale # 8 ~ 12 之间变化
@@ -215,7 +245,6 @@ def build_bottom_icon(kind, color):
     if kind == "settings":
         painter.drawEllipse(QRectF(cx - 3.0, top + 6.0, 6.0, 6.0))
         for angle in range(0, 360, 45):
-            import math
             rad = math.radians(angle)
             inner = QPointF(cx + math.cos(rad) * 6.3, top + 9.0 + math.sin(rad) * 6.3)
             outer = QPointF(cx + math.cos(rad) * 8.3, top + 9.0 + math.sin(rad) * 8.3)
@@ -240,37 +269,33 @@ def build_bottom_icon(kind, color):
         painter.drawLine(QPointF(cx, top + 12.0), QPointF(cx, top + 3.0))
         painter.drawLine(QPointF(cx, top + 3.0), QPointF(cx - 4.0, top + 7.0))
         painter.drawLine(QPointF(cx, top + 3.0), QPointF(cx + 4.0, top + 7.0))
-    elif kind == "upload":
-        cloud = QPainterPath()
-        cloud.moveTo(QPointF(cx - 8.0, top + 15.0))
-        cloud.cubicTo(QPointF(cx - 10.0, top + 12.0), QPointF(cx - 7.0, top + 9.0), QPointF(cx - 4.0, top + 10.0))
-        cloud.cubicTo(QPointF(cx - 3.0, top + 6.0), QPointF(cx + 3.0, top + 6.0), QPointF(cx + 4.0, top + 10.0))
-        cloud.cubicTo(QPointF(cx + 8.0, top + 9.0), QPointF(cx + 10.0, top + 15.0), QPointF(cx + 6.0, top + 16.0))
-        cloud.lineTo(QPointF(cx - 7.0, top + 16.0))
-        painter.drawPath(cloud)
-        painter.drawLine(QPointF(cx, top + 15.0), QPointF(cx, top + 5.0))
-        painter.drawLine(QPointF(cx, top + 5.0), QPointF(cx - 3.8, top + 8.8))
-        painter.drawLine(QPointF(cx, top + 5.0), QPointF(cx + 3.8, top + 8.8))
-
+    elif kind == "screenshot":
+        painter.drawRoundedRect(QRectF(cx - 8.0, top + 4.0, 16.0, 13.0), 2.0, 2.0)
+        painter.drawEllipse(QRectF(cx + 2.5, top + 6.0, 2.5, 2.5))
+        image_path = QPainterPath()
+        image_path.moveTo(QPointF(cx - 6.0, top + 15.0))
+        image_path.lineTo(QPointF(cx - 1.5, top + 10.5))
+        image_path.lineTo(QPointF(cx + 1.5, top + 13.0))
+        image_path.lineTo(QPointF(cx + 5.5, top + 9.0))
+        image_path.lineTo(QPointF(cx + 8.0, top + 11.5))
+        painter.drawPath(image_path)
     painter.end()
     return QIcon(pixmap)
 
 
 def load_bottom_icon(kind, hover=False):
+    cache_key = (kind, hover)
+    if cache_key in _BOTTOM_ICON_CACHE:
+        return _BOTTOM_ICON_CACHE[cache_key]
+
     suffix = "_hover" if hover else ""
     icon_path = asset_path("bottom_icons", f"{kind}{suffix}.png")
     if os.path.exists(icon_path):
-        return QIcon(icon_path)
-    return build_bottom_icon(kind, "#d4d8df" if hover else "#a6abb4")
-
-
-def format_alas_config_error(code, detail=""):
-    reason = tr(f"alas_config_error_{code}", detail=detail)
-    return tr("upload_config_invalid_alas", reason=reason)
-
-
-def format_alas_config_validation_error(exc):
-    return format_alas_config_error(exc.code, exc.detail)
+        icon = QIcon(icon_path)
+    else:
+        icon = build_bottom_icon(kind, "#d4d8df" if hover else "#a6abb4")
+    _BOTTOM_ICON_CACHE[cache_key] = icon
+    return icon
 
 
 class BottomIconButton(QPushButton):
@@ -305,7 +330,10 @@ class ConfigActionButton(QPushButton):
         self.setObjectName("configActionBtn")
 
     def set_status(self, status):
-        self._status = normalize_status(status)
+        status = normalize_status(status)
+        if self._status == status:
+            return
+        self._status = status
         self.update()
 
     def paintEvent(self, event):
@@ -365,7 +393,7 @@ class MainConfigRow(QWidget):
         super().__init__(parent)
         self.config_name = config_name
         self.main_card = main_card
-        self.current_status = "idle"
+        self.current_status = None
         self.setFixedHeight(36)
         self.setCursor(Qt.PointingHandCursor)
 
@@ -422,10 +450,17 @@ class MainConfigRow(QWidget):
         self.statusLabel.setText(metrics.elidedText(full_text, Qt.ElideRight, width))
 
     def update_status(self, status):
-        self.current_status = normalize_status(status)
+        status = normalize_status(status)
+        delete_enabled = status != "running" and len(self.main_card._configs) > 1
+        if self.current_status == status:
+            if self.deleteBtn.isEnabled() != delete_enabled:
+                self.deleteBtn.setEnabled(delete_enabled)
+            return
+
+        self.current_status = status
         self.statusIndicator.setStatus(self.current_status)
         self.toggleBtn.set_status(self.current_status)
-        self.deleteBtn.setEnabled(self.current_status != "running" and len(self.main_card._configs) > 1)
+        self.deleteBtn.setEnabled(delete_enabled)
         self._refresh_label()
 
     def _on_delete_clicked(self):
@@ -464,7 +499,7 @@ class MainConfigRow(QWidget):
             port = self.main_card.config.get("port", "22267")
             try:
                 url = f"http://{ip}:{port}/api/{action}"
-                resp = requests.post(
+                resp = _requests().post(
                     url,
                     params={"config": self.config_name},
                     headers=api_headers(self.main_card.config),
@@ -492,7 +527,6 @@ class CardWidget(QFrame):
     configs_update_signal = Signal(list)
     status_all_update_signal = Signal(dict)
     config_delete_result_signal = Signal(bool, str, str, list, str)
-    config_upload_result_signal = Signal(dict)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -528,6 +562,8 @@ class CardWidget(QFrame):
         self._configs_fetching = False
         self._configs_last_fetch_at = 0.0
         self._configs_fetch_interval = 15.0
+        self._polling_status = False
+        self._poll_lock = threading.Lock()
         self._statuses = {}
         self.rows = {}
         
@@ -539,7 +575,6 @@ class CardWidget(QFrame):
         self.configs_update_signal.connect(self._on_configs_updated)
         self.status_all_update_signal.connect(self._on_status_all_updated)
         self.config_delete_result_signal.connect(self._on_config_delete_result)
-        self.config_upload_result_signal.connect(self._on_config_upload_result)
         
         self.poll_timer = QTimer(self)
         self.poll_timer.timeout.connect(self._start_poll_thread)
@@ -619,14 +654,14 @@ class CardWidget(QFrame):
         self.floatIcon = BottomIconButton("float") # 悬浮窗
         self.logIcon = BottomIconButton("log") # 日志
         self.exportIcon = BottomIconButton("export") # 导出
-        self.uploadIcon = BottomIconButton("upload") # 上传配置
+        self.screenshotIcon = BottomIconButton("screenshot") # 错误截图
 
         self.setIcon.setToolTip(tr("settings_btn_tip"))
         self.homeIcon.setToolTip(tr("home_btn_tip"))
         self.floatIcon.setToolTip(tr("float_btn_tip"))
         self.logIcon.setToolTip(tr("log_btn_tip"))
         self.exportIcon.setToolTip(tr("export_btn_tip"))
-        self.uploadIcon.setToolTip(tr("upload_config_tip"))
+        self.screenshotIcon.setToolTip(tr("screenshot_btn_tip"))
             
         bot_layout.addWidget(self.setIcon)
         bot_layout.addStretch()
@@ -638,7 +673,7 @@ class CardWidget(QFrame):
         bot_layout.addStretch()
         bot_layout.addWidget(self.exportIcon)
         bot_layout.addStretch()
-        bot_layout.addWidget(self.uploadIcon)
+        bot_layout.addWidget(self.screenshotIcon)
 
         # 事件绑定
         self.setIcon.mousePressEvent = lambda e: self._on_icon_click("设置", self.setIcon)
@@ -646,7 +681,7 @@ class CardWidget(QFrame):
         self.floatIcon.mousePressEvent = lambda e: self._on_icon_click("最小化", self.floatIcon)
         self.logIcon.mousePressEvent = lambda e: self._on_icon_click("日志", self.logIcon)
         self.exportIcon.mousePressEvent = lambda e: self._on_icon_click("导出", self.exportIcon)
-        self.uploadIcon.mousePressEvent = lambda e: self._on_icon_click("上传配置", self.uploadIcon)
+        self.screenshotIcon.mousePressEvent = lambda e: self._on_icon_click("错误截图", self.screenshotIcon)
 
         main_layout.addWidget(self.bottomBg)
 
@@ -656,7 +691,7 @@ class CardWidget(QFrame):
         self.floatIcon.setToolTip(tr("float_btn_tip"))
         self.logIcon.setToolTip(tr("log_btn_tip"))
         self.exportIcon.setToolTip(tr("export_btn_tip"))
-        self.uploadIcon.setToolTip(tr("upload_config_tip"))
+        self.screenshotIcon.setToolTip(tr("screenshot_btn_tip"))
         self._rebuild_rows()
 
     def _save_config(self):
@@ -716,7 +751,7 @@ class CardWidget(QFrame):
         port = self.config.get("port", "22267")
         try:
             url = f"http://{ip}:{port}/api/configs"
-            resp = requests.delete(
+            resp = _requests().delete(
                 url,
                 params={"config": config_name},
                 headers=api_headers(self.config),
@@ -773,154 +808,6 @@ class CardWidget(QFrame):
         )
         self._start_poll_thread()
 
-    def choose_and_upload_config(self):
-        file_path, _ = QFileDialog.getOpenFileName(
-            self.window(),
-            tr("upload_config_title"),
-            "",
-            tr("upload_config_filter"),
-        )
-        if not file_path:
-            return
-        self.upload_config(file_path, overwrite=False)
-
-    def upload_config(self, file_path, overwrite=False):
-        try:
-            config_name = os.path.splitext(os.path.basename(file_path))[0].strip()
-            if not config_name:
-                raise ValueError(tr("upload_config_invalid_name"))
-            with open(file_path, "r", encoding="utf-8-sig") as f:
-                content = f.read()
-            config_data = json.loads(content)
-            validate_alas_config(config_data)
-        except AlasConfigValidationError as exc:
-            show_warning(
-                self,
-                tr("upload_config_title"),
-                tr(
-                    "upload_config_failed",
-                    error=format_alas_config_validation_error(exc),
-                ),
-            )
-            return
-        except Exception as exc:
-            show_warning(
-                self,
-                tr("upload_config_title"),
-                tr("upload_config_failed", error=str(exc)),
-            )
-            return
-
-        threading.Thread(
-            target=self._upload_config_task,
-            args=(file_path, config_name, content, overwrite),
-            daemon=True,
-        ).start()
-
-    def _upload_config_task(self, file_path, config_name, content, overwrite):
-        ip = self.config.get("ip", "127.0.0.1")
-        port = self.config.get("port", "22267")
-        try:
-            url = f"http://{ip}:{port}/api/configs/upload"
-            resp = requests.post(
-                url,
-                json={
-                    "name": config_name,
-                    "content": content,
-                    "overwrite": overwrite,
-                },
-                headers=api_headers(self.config),
-                timeout=8,
-            )
-            try:
-                data = resp.json()
-            except Exception:
-                data = {}
-
-            result = {
-                "ok": resp.status_code == 200,
-                "status_code": resp.status_code,
-                "config": data.get("config") or config_name,
-                "error": data.get("error", ""),
-                "reason": data.get("reason", ""),
-                "message": data.get("message") or data.get("error") or resp.text,
-                "configs": data.get("configs", []),
-                "default": data.get("default", ""),
-                "file_path": file_path,
-            }
-            self.config_upload_result_signal.emit(result)
-        except Exception as exc:
-            self.config_upload_result_signal.emit(
-                {
-                    "ok": False,
-                    "status_code": 0,
-                    "config": config_name,
-                    "error": "",
-                    "reason": "",
-                    "message": str(exc),
-                    "configs": [],
-                    "default": "",
-                    "file_path": file_path,
-                }
-            )
-
-    def _on_config_upload_result(self, result):
-        config_name = result.get("config", "")
-        message = result.get("message", "")
-        status_code = result.get("status_code", 0)
-
-        if not result.get("ok"):
-            if status_code == 409 and message == "config_exists":
-                if ask_confirm(
-                    self,
-                    tr("upload_config_title"),
-                    tr("upload_config_exists", config=config_name),
-                    tr("upload_config_overwrite"),
-                    tr("cancel"),
-                    danger=True,
-                ):
-                    self.upload_config(result.get("file_path", ""), overwrite=True)
-                return
-
-            if result.get("error") == "invalid_alas_config":
-                message = format_alas_config_error(
-                    result.get("reason", ""),
-                    result.get("message", ""),
-                )
-
-            show_warning(
-                self,
-                tr("upload_config_title"),
-                tr("upload_config_failed", error=message),
-            )
-            return
-
-        configs = [str(config) for config in result.get("configs", []) if str(config)]
-        if configs:
-            self._configs = configs
-        elif config_name and config_name not in self._configs:
-            self._configs.append(config_name)
-            self._configs.sort(key=str.lower)
-
-        if config_name:
-            self.current_config = config_name
-            self.config["current_config"] = self.current_config
-            self._save_config()
-
-        self._rebuild_rows()
-        if hasattr(self, "mini_dialog") and self.mini_dialog.isVisible():
-            self.mini_dialog.rebuild_rows()
-        if hasattr(self, "log_dialog") and self.log_dialog.isVisible():
-            self.log_dialog.set_configs(self._configs, self.current_config)
-            self.log_dialog.set_config(self.current_config)
-
-        show_info(
-            self,
-            tr("upload_config_title"),
-            tr("upload_config_success", config=config_name),
-        )
-        self._start_poll_thread()
-
     def _forward_drag_press(self, event):
         if self.window():
             self.window().mousePressEvent(event)
@@ -955,19 +842,36 @@ class CardWidget(QFrame):
         print(f"[日志] 状态同步 → {status} ({self.current_config})")
 
     def _start_poll_thread(self):
-        # 只要还没成功获取过完整的配置列表，就启动一次获取任务
-        if not hasattr(self, "_configs_fetched") and not self._configs_fetching:
-            self._configs_fetching = True
-            self._configs_last_fetch_at = time.monotonic()
+        # 避免心跳慢或网络卡顿时不断堆积轮询线程。
+        start_fetch = False
+        start_poll = False
+        with self._poll_lock:
+            if not hasattr(self, "_configs_fetched") and not self._configs_fetching:
+                self._configs_fetching = True
+                self._configs_last_fetch_at = time.monotonic()
+                start_fetch = True
+            if not self._polling_status:
+                self._polling_status = True
+                start_poll = True
+
+        if start_fetch:
             threading.Thread(target=self._fetch_configs_task, daemon=True).start()
-        threading.Thread(target=self._poll_status_task, daemon=True).start()
+        if start_poll:
+            threading.Thread(target=self._poll_status_task_guarded, daemon=True).start()
+
+    def _poll_status_task_guarded(self):
+        try:
+            self._poll_status_task()
+        finally:
+            with self._poll_lock:
+                self._polling_status = False
 
     def _fetch_configs_task(self):
         ip = self.config.get("ip", "127.0.0.1")
         port = self.config.get("port", "22267")
         try:
             url = f"http://{ip}:{port}/api/configs"
-            resp = requests.get(url, headers=api_headers(self.config), timeout=2.0)
+            resp = _requests().get(url, headers=api_headers(self.config), timeout=2.0)
             if resp.status_code == 200:
                 data = resp.json()
                 configs = data.get("configs", ["alas"])
@@ -976,41 +880,52 @@ class CardWidget(QFrame):
         except Exception:
             pass
         finally:
-            self._configs_fetching = False
+            with self._poll_lock:
+                self._configs_fetching = False
 
     def _on_configs_updated(self, configs):
         self._configs_fetched = True
-        self._configs = [str(config) for config in configs if str(config)]
-        if not self._configs:
-            self._configs = ["alas"]
-        
-        # 尝试恢复上次的选择
-        if self.current_config in self._configs:
-            pass
-        else:
-            self.current_config = self._configs[0]
+        new_configs = [str(config) for config in configs if str(config)]
+        if not new_configs:
+            new_configs = ["alas"]
+
+        old_current_config = self.current_config
+        if self.current_config not in new_configs:
+            self.current_config = new_configs[0]
             self.config["current_config"] = self.current_config
+
+        configs_changed = new_configs != self._configs
+        current_changed = self.current_config != old_current_config
+        self._configs = new_configs
+        if not (configs_changed or current_changed):
+            return
+
         self._rebuild_rows()
-        
-        # 强制下一次 update_status 能够生效，以便更新文字前缀
+
+        # 强制下一次 update_status 能够生效，以便更新文字前缀。
         old_status = self._status
         self._status = None
         self._update_status_ui(old_status or "idle")
-        
-        # 广播给迷你悬浮窗让其重建列表
+
+        # 广播给迷你悬浮窗和日志窗口。
         if hasattr(self, "mini_dialog") and self.mini_dialog.isVisible():
             self.mini_dialog.rebuild_rows()
         if hasattr(self, "log_dialog") and self.log_dialog.isVisible():
             self.log_dialog.set_configs(self._configs, self.current_config)
 
     def _on_status_all_updated(self, statuses):
+        changed_statuses = {
+            config_name: status
+            for config_name, status in statuses.items()
+            if self._statuses.get(config_name) != status
+        }
         self._statuses.update(statuses)
         new_configs = [str(config_name) for config_name in statuses if str(config_name) not in self._configs]
         if new_configs:
             self._configs.extend(new_configs)
             self._configs.sort(key=str.lower)
             self._rebuild_rows()
-        for config_name, status in statuses.items():
+        for config_name, status in changed_statuses.items():
             if config_name in self.rows:
                 self.rows[config_name].update_status(status)
 
@@ -1025,7 +940,7 @@ class CardWidget(QFrame):
         port = self.config.get("port", "22267")
         try:
             url = f"http://{ip}:{port}/api/status_all"
-            resp = requests.get(url, headers=api_headers(self.config), timeout=1.5)
+            resp = _requests().get(url, headers=api_headers(self.config), timeout=1.5)
             if resp.status_code == 200:
                 data = resp.json()
                 statuses = {
@@ -1041,7 +956,7 @@ class CardWidget(QFrame):
                 for config_name in self._configs:
                     try:
                         url = f"http://{ip}:{port}/api/status"
-                        resp2 = requests.get(
+                        resp2 = _requests().get(
                             url,
                             params={"config": config_name},
                             headers=api_headers(self.config),
@@ -1127,6 +1042,7 @@ class CardWidget(QFrame):
                         self.mini_dialog.apply_window_settings()
                 except Exception as e:
                     print(f"[错误] 写入 {self.config_path} 失败: {e}")
+            dialog.deleteLater()
         elif name == "主页":
             import webbrowser
             # 根据设置中的 IP 和端口组合 URL 并打开默认浏览器
@@ -1135,19 +1051,30 @@ class CardWidget(QFrame):
             webbrowser.open(url)
         elif name == "日志":
             from .log_window import LogWindow
-            if hasattr(self, "log_dialog") and self.log_dialog.isVisible():
-                # 如果已经打开了，但在切换配置时可能需要更新内容
-                self.log_dialog.set_configs(self._configs, self.current_config)
-                self.log_dialog.set_config(self.current_config)
-                self.log_dialog.activateWindow()
-            else:
+            dialog = getattr(self, "log_dialog", None)
+            if dialog is not None:
+                try:
+                    dialog.set_configs(self._configs, self.current_config)
+                    dialog.set_config(self.current_config)
+                    dialog.show()
+                    dialog.activateWindow()
+                    return
+                except RuntimeError:
+                    dialog = None
+            if dialog is None:
                 self.log_dialog = LogWindow(self.window(), self.config, self.current_config, self._configs)
                 self.log_dialog.show()
         elif name == "导出":
             from .fastapi_export_window import FastapiExportWindow
-            if hasattr(self, "fastapi_dialog") and self.fastapi_dialog.isVisible():
-                self.fastapi_dialog.activateWindow()
-            else:
+            dialog = getattr(self, "fastapi_dialog", None)
+            if dialog is not None:
+                try:
+                    dialog.show()
+                    dialog.activateWindow()
+                    return
+                except RuntimeError:
+                    dialog = None
+            if dialog is None:
                 self.fastapi_dialog = FastapiExportWindow(
                     self.window(),
                     fastapi_source_path(),
@@ -1156,8 +1083,20 @@ class CardWidget(QFrame):
                     self.config_path,
                 )
                 self.fastapi_dialog.show()
-        elif name == "上传配置":
-            self.choose_and_upload_config()
+        elif name == "错误截图":
+            from .error_screenshot_window import ErrorScreenshotWindow
+            dialog = getattr(self, "screenshot_dialog", None)
+            if dialog is not None:
+                try:
+                    dialog.show()
+                    dialog.activateWindow()
+                    dialog.fetch_groups()
+                    return
+                except RuntimeError:
+                    dialog = None
+            if dialog is None:
+                self.screenshot_dialog = ErrorScreenshotWindow(self.window(), self.config)
+                self.screenshot_dialog.show()
         elif name == "最小化":
             self.show_mini_window()
 

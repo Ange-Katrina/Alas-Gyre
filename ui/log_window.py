@@ -1,9 +1,10 @@
-from PySide6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QWidget, QLabel, QPushButton, QFrame, QTextEdit, QGraphicsDropShadowEffect, QSizeGrip, QComboBox
+from PySide6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QWidget, QLabel, QFrame, QTextEdit, QGraphicsDropShadowEffect, QSizeGrip, QComboBox
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QTextCursor, QFontMetrics
 import requests
 import threading
 import html
+import hashlib
 
 from .api_client import api_headers
 from .main_window import WindowButton
@@ -26,6 +27,8 @@ LOG_LEVEL_STYLES_LIGHT = {
     "DEBUG": {"fg": "#475569", "bg": "transparent", "bar": "#64748b"},
     "SUCCESS": {"fg": "#047857", "bg": "transparent", "bar": "#10b981"},
 }
+
+LOG_FETCH_LINES = 500
 
 class LogWindow(QDialog):
     # 用信号在主线程更新 UI
@@ -111,7 +114,9 @@ class LogWindow(QDialog):
         self.log_update_signal.connect(self._on_log_updated)
 
         # 初始抓取并启动定时器
-        self.last_log_content = ""
+        self._last_log_digest = ""
+        self._fetching_log = False
+        self.logText.document().setMaximumBlockCount(LOG_FETCH_LINES + 80)
         self._fetch_log()
         
         self.poll_timer = QTimer(self)
@@ -153,7 +158,9 @@ class LogWindow(QDialog):
                 event.accept()
 
     def _fetch_log(self):
-        # 必须在新线程中请求以免阻塞 UI
+        if self._fetching_log:
+            return
+        self._fetching_log = True
         threading.Thread(target=self._fetch_log_thread, daemon=True).start()
 
     def _fetch_log_thread(self):
@@ -163,7 +170,7 @@ class LogWindow(QDialog):
             url = f"http://{ip}:{port}/api/log"
             resp = requests.get(
                 url,
-                params={"config": self.current_config, "lines": 1000},
+                params={"config": self.current_config, "lines": LOG_FETCH_LINES},
                 headers=api_headers(self.config),
                 timeout=1.5,
             )
@@ -187,6 +194,8 @@ class LogWindow(QDialog):
                 self.log_update_signal.emit(f"无法获取日志，HTTP 状态码: {resp.status_code}\n{message}")
         except Exception as e:
             self.log_update_signal.emit(f"连接服务器失败: {e}")
+        finally:
+            self._fetching_log = False
 
     def set_config(self, config_name):
         self.current_config = config_name
@@ -198,7 +207,7 @@ class LogWindow(QDialog):
             self.configCombo.blockSignals(True)
             self.configCombo.setCurrentText(self.current_config)
             self.configCombo.blockSignals(False)
-        self.last_log_content = ""
+        self._last_log_digest = ""
         self.logText.clear()
         self._fetch_log()
 
@@ -291,16 +300,15 @@ class LogWindow(QDialog):
         )
 
     def _on_log_updated(self, text):
-        if not text:
+        if not text or not self.isVisible():
             return
-            
-        # 如果日志没有变化，就不刷新
-        if text == self.last_log_content:
-            return
-            
-        self.last_log_content = text
 
-        # 检查当前滚动条是否在最底部，如果是，更新后自动滚到底部
+        digest = hashlib.blake2s(text.encode("utf-8", errors="ignore"), digest_size=12).hexdigest()
+        if digest == self._last_log_digest:
+            return
+
+        self._last_log_digest = digest
+
         scrollbar = self.logText.verticalScrollBar()
         is_at_bottom = scrollbar.value() >= scrollbar.maximum() - 5
 
@@ -308,7 +316,15 @@ class LogWindow(QDialog):
 
         if is_at_bottom:
             self.logText.moveCursor(QTextCursor.End)
-            
+
     def reject(self):
         self.poll_timer.stop()
+        self.logText.clear()
+        self._last_log_digest = ""
         super().reject()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        if not self.poll_timer.isActive():
+            self.poll_timer.start(2000)
+        self._fetch_log()

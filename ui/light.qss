@@ -1,5 +1,5 @@
 /* 主卡片 */
-QFrame#card, QFrame#settingsCard, QFrame#logCard, QFrame#fastapiCard, QFrame#initCard {
+QFrame#card, QFrame#settingsCard, QFrame#logCard, QFrame#screenshotCard, QFrame#fastapiCard, QFrame#initCard {
     background-color: #ffffff;
     border: 1px solid #e2e8f0;
     border-radius: 8px;
@@ -46,7 +46,7 @@ QWidget#topBg {
     border-bottom: 1px solid #e2e8f0;
 }
 
-QWidget#settingsTopBg, QWidget#logTopBg, QWidget#fastapiTopBg, QWidget#initTopBg {
+QWidget#settingsTopBg, QWidget#logTopBg, QWidget#screenshotTopBg, QWidget#fastapiTopBg, QWidget#initTopBg {
     background-color: #f1f5f9;
     border-top-left-radius: 8px;
     border-top-right-radius: 8px;
@@ -54,7 +54,7 @@ QWidget#settingsTopBg, QWidget#logTopBg, QWidget#fastapiTopBg, QWidget#initTopBg
 }
 
 /* 中下区域背景 */
-QWidget#midBg, QWidget#settingsFormBg, QWidget#fastapiBodyBg, QWidget#initBodyBg {
+QWidget#midBg, QWidget#settingsFormBg, QWidget#screenshotBodyBg, QWidget#fastapiBodyBg, QWidget#initBodyBg {
     background-color: transparent;
     border: none;
     border-bottom-left-radius: 8px;
@@ -80,7 +80,7 @@ QLabel#sectionTitle, QLabel#settingsTitle {
     background: transparent;
 }
 
-QLabel#settingsTitle, QLabel#logTitle, QLabel#fastapiTitle, QLabel#initTitle {
+QLabel#settingsTitle, QLabel#logTitle, QLabel#screenshotTitle, QLabel#fastapiTitle, QLabel#initTitle {
     color: #334155;
     font-size: 12px;
     font-weight: normal;
@@ -509,7 +509,7 @@ QLabel#rowStatusLabel {
 }
 
 /* 日志窗口下拉框与文本面板 */
-QComboBox#logConfigCombo {
+QComboBox#logConfigCombo, QComboBox#screenshotCombo {
     background-color: #ffffff;
     border: 1px solid #cbd5e1;
     border-radius: 5px;
@@ -518,25 +518,25 @@ QComboBox#logConfigCombo {
     font-size: 13px;
     font-family: "Microsoft YaHei", "Segoe UI";
 }
-QComboBox#logConfigCombo:hover {
+QComboBox#logConfigCombo:hover, QComboBox#screenshotCombo:hover {
     background-color: #f8fafc;
     border: 1px solid #94a3b8;
 }
-QComboBox#logConfigCombo:focus {
+QComboBox#logConfigCombo:focus, QComboBox#screenshotCombo:focus {
     outline: none;
 }
-QComboBox#logConfigCombo::drop-down {
+QComboBox#logConfigCombo::drop-down, QComboBox#screenshotCombo::drop-down {
     subcontrol-origin: padding;
     subcontrol-position: top right;
     border: none;
     width: 20px;
 }
-QComboBox#logConfigCombo::down-arrow {
+QComboBox#logConfigCombo::down-arrow, QComboBox#screenshotCombo::down-arrow {
     image: none;
     width: 0px;
     height: 0px;
 }
-QComboBox#logConfigCombo QAbstractItemView {
+QComboBox#logConfigCombo QAbstractItemView, QComboBox#screenshotCombo QAbstractItemView {
     background-color: #ffffff;
     color: #0f172a;
     border: 1px solid #cbd5e1;
@@ -545,6 +545,58 @@ QComboBox#logConfigCombo QAbstractItemView {
     outline: none;
     padding: 4px;
     font-size: 13px;
+}
+
+QLabel#screenshotFieldLabel {
+    color: #64748b;
+    font-size: 12px;
+    font-family: "Microsoft YaHei", "Segoe UI";
+    background: transparent;
+}
+
+QLabel#screenshotStatusLabel {
+    color: #64748b;
+    font-size: 12px;
+    font-family: "Microsoft YaHei", "Segoe UI";
+    background: transparent;
+}
+
+QFrame#screenshotImagePanel {
+    background-color: #ffffff;
+    border: 1px solid #cbd5e1;
+    border-radius: 8px;
+}
+
+QLabel#screenshotImageLabel {
+    color: #64748b;
+    background: transparent;
+    font-size: 13px;
+    font-family: "Microsoft YaHei", "Segoe UI";
+}
+
+QPushButton#screenshotRefreshBtn {
+    background-color: #f8fafc;
+    color: #475569;
+    border: 1px solid #cbd5e1;
+    border-radius: 5px;
+    font-size: 12px;
+    font-family: "Microsoft YaHei", "Segoe UI";
+}
+QPushButton#screenshotRefreshBtn:hover {
+    background-color: #eef2f7;
+    color: #0f172a;
+    border: 1px solid #94a3b8;
+}
+QPushButton#screenshotRefreshBtn:pressed {
+    background-color: #e2e8f0;
+}
+QPushButton#screenshotRefreshBtn:disabled {
+    color: #94a3b8;
+    background-color: #f8fafc;
+    border: 1px solid #e2e8f0;
+}
+QPushButton#screenshotRefreshBtn:focus {
+    outline: none;
 }
 
 QTextEdit#logTextPanel {

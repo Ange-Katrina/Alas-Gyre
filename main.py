@@ -6,12 +6,11 @@ from PySide6.QtCore import QTimer
 from PySide6.QtGui import QAction, QFont, QIcon
 
 from ui import AlasConsole
-from ui.init_window import InitSetupWindow
 from ui.main_window import config_path, fastapi_output_path, fastapi_source_path
 from updater import cleanup_old_exe
 from ui.i18n import set_language, tr
 
-VERSION = "v1.1.3"
+VERSION = "v1.1.4"
 APP_USER_MODEL_ID = "AngeKatrina.AlasGyre"
 
 def resource_path(relative_path):
@@ -68,6 +67,8 @@ def main():
         tray.show()
 
     if not window.card.config.get("setup_completed", False):
+        from ui.init_window import InitSetupWindow
+
         setup_dialog = InitSetupWindow(
             None,
             window.card.config,
@@ -78,6 +79,7 @@ def main():
         if not app_icon.isNull():
             setup_dialog.setWindowIcon(app_icon)
         setup_dialog.exec()
+        setup_dialog.deleteLater()
 
     window.show()
     QTimer.singleShot(1500, lambda: window.start_auto_update_check(VERSION))
@@ -132,6 +134,8 @@ def create_tray(app, app_icon, window):
 
 
 def open_init_setup(window, app_icon):
+    from ui.init_window import InitSetupWindow
+
     window.card.restore_main_window()
     dialog = InitSetupWindow(
         window,
@@ -144,6 +148,7 @@ def open_init_setup(window, app_icon):
         dialog.setWindowIcon(app_icon)
     if dialog.exec():
         window.card._save_config()
+    dialog.deleteLater()
 
 if __name__ == "__main__":
     main()

@@ -338,9 +338,8 @@ class MiniWindow(QWidget):
             and self._click_through_enabled
         ):
             try:
-                import ctypes
                 from ctypes import wintypes
-                msg = ctypes.wintypes.MSG.from_address(int(message))
+                msg = wintypes.MSG.from_address(int(message))
                 if msg.message == 0x0084:  # WM_NCHITTEST
                     point = self._point_from_lparam(msg.lParam)
                     local_pos = self.mapFromGlobal(point)

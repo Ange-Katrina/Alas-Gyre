@@ -11,6 +11,8 @@ build_onefile/
 dist/
 dist_single/
 output/
+tools/upx-*/
+tools/*.zip
 
 config.json
 *.log
