@@ -177,18 +177,11 @@ jobs:
         run: |
           pyinstaller Alas-Gyre.spec --noconfirm
 
-      - name: Add explicit PyInstaller Windows asset
-        shell: pwsh
-        run: |
-          Copy-Item -LiteralPath "dist/Alas-Gyre.exe" -Destination "dist/Alas-Gyre-PyInstaller.exe" -Force
-
       - name: Upload PyInstaller artifact
         uses: actions/upload-artifact@v4
         with:
           name: Alas-Gyre-Windows-PyInstaller-${{ needs.meta.outputs.tag }}
-          path: |
-            dist/Alas-Gyre.exe
-            dist/Alas-Gyre-PyInstaller.exe
+          path: dist/Alas-Gyre.exe
           retention-days: 7
 
   build-nuitka:
@@ -284,7 +277,6 @@ jobs:
           mkdir -p release
           # Copy Windows exe files
           find assets/ -name "Alas-Gyre.exe" -exec cp {} release/ \;
-          find assets/ -name "Alas-Gyre-PyInstaller.exe" -exec cp {} release/ \;
           find assets/ -name "Alas-Gyre-Nuitka.exe" -exec cp {} release/ \;
 
           # Copy CHANGELOG.md (only for body_path description)
@@ -300,6 +292,5 @@ jobs:
           body_path: release/CHANGELOG.md
           files: |
             release/Alas-Gyre.exe
-            release/Alas-Gyre-PyInstaller.exe
             release/Alas-Gyre-Nuitka.exe
           prerelease: ${{ needs.meta.outputs.prerelease != 'false' }}
