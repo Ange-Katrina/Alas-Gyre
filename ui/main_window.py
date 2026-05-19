@@ -317,10 +317,9 @@ class BottomIconButton(QPushButton):
 
         icon_path = asset_path("bottom_icons", f"{kind}.png")
         if os.path.exists(icon_path):
-            self.pixmap = QPixmap(icon_path)
+            self.icon = QIcon(icon_path)
         else:
-            icon = build_bottom_icon(kind, "#a6abb4")
-            self.pixmap = icon.pixmap(22, 22)
+            self.icon = build_bottom_icon(kind, "#a6abb4")
 
     def enterEvent(self, event):
         self._hover = True
@@ -343,6 +342,7 @@ class BottomIconButton(QPushButton):
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
+        painter.setRenderHint(QPainter.SmoothPixmapTransform)
 
         theme = "dark"
         curr = self
@@ -359,18 +359,21 @@ class BottomIconButton(QPushButton):
                 bg_color = QColor("#2a2e36") if theme == "dark" else QColor("#cbd5e1")
             painter.fillRect(self.rect(), bg_color)
 
-        opacity = 1.0 if self._hover else 0.75
+        opacity = 1.0 if self._hover else 0.8
         painter.setOpacity(opacity)
 
-        icon_w, icon_h = 22, 22
-        x = (self.width() - icon_w) / 2
-        y = (self.height() - icon_h) / 2
-
         if self._hover:
-            y -= 1.0
+            icon_w, icon_h = 23, 23
+            y_offset = -1.0
+        else:
+            icon_w, icon_h = 22, 22
+            y_offset = 0.0
 
-        target_rect = QRectF(x, y, icon_w, icon_h)
-        painter.drawPixmap(target_rect, self.pixmap, QRectF(self.pixmap.rect()))
+        x = (self.width() - icon_w) / 2
+        y = (self.height() - icon_h) / 2 + y_offset
+
+        target_rect = QRectF(x, y, icon_w, icon_h).toRect()
+        self.icon.paint(painter, target_rect, Qt.AlignCenter)
         painter.end()
 
 
