@@ -139,19 +139,9 @@ jobs:
           retention-days: 1
 
   build-pyinstaller:
-    name: Build PyInstaller on ${{ matrix.os }}
+    name: Build PyInstaller on Windows
     needs: meta
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: windows-latest
-            artifact_name: Alas-Gyre-Windows-PyInstaller
-          - os: macos-latest
-            artifact_name: Alas-Gyre-macOS
-          - os: ubuntu-latest
-            artifact_name: Alas-Gyre-Linux
+    runs-on: windows-latest
     steps:
       - name: Download updated code
         uses: actions/download-artifact@v4
@@ -174,7 +164,6 @@ jobs:
           pip install -r requirements.txt
 
       - name: Install UPX
-        if: matrix.os == 'windows-latest'
         shell: pwsh
         run: |
           $version = "5.1.1"
@@ -189,34 +178,17 @@ jobs:
           pyinstaller Alas-Gyre.spec --noconfirm
 
       - name: Add explicit PyInstaller Windows asset
-        if: matrix.os == 'windows-latest'
         shell: pwsh
         run: |
           Copy-Item -LiteralPath "dist/Alas-Gyre.exe" -Destination "dist/Alas-Gyre-PyInstaller.exe" -Force
 
-      - name: Package macOS bundle
-        if: matrix.os == 'macos-latest'
-        run: |
-          cd dist
-          zip -r ../Alas-Gyre-macOS.zip Alas-Gyre.app Alas-Gyre
-          cd ..
-
-      - name: Package Linux binary
-        if: matrix.os == 'ubuntu-latest'
-        run: |
-          cd dist
-          tar -czf ../Alas-Gyre-Linux.tar.gz Alas-Gyre
-          cd ..
-
       - name: Upload PyInstaller artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact_name }}-${{ needs.meta.outputs.tag }}
+          name: Alas-Gyre-Windows-PyInstaller-${{ needs.meta.outputs.tag }}
           path: |
             dist/Alas-Gyre.exe
             dist/Alas-Gyre-PyInstaller.exe
-            Alas-Gyre-macOS.zip
-            Alas-Gyre-Linux.tar.gz
           retention-days: 7
 
   build-nuitka:
@@ -315,10 +287,6 @@ jobs:
           find assets/ -name "Alas-Gyre-PyInstaller.exe" -exec cp {} release/ \;
           find assets/ -name "Alas-Gyre-Nuitka.exe" -exec cp {} release/ \;
 
-          # Copy macOS zip and Linux tar.gz
-          find assets/ -name "Alas-Gyre-macOS.zip" -exec cp {} release/ \;
-          find assets/ -name "Alas-Gyre-Linux.tar.gz" -exec cp {} release/ \;
-
           # Copy CHANGELOG.md (only for body_path description)
           find assets/ -name "CHANGELOG.md" -exec cp {} release/ \;
           ls -la release
@@ -334,6 +302,4 @@ jobs:
             release/Alas-Gyre.exe
             release/Alas-Gyre-PyInstaller.exe
             release/Alas-Gyre-Nuitka.exe
-            release/Alas-Gyre-macOS.zip
-            release/Alas-Gyre-Linux.tar.gz
           prerelease: ${{ needs.meta.outputs.prerelease != 'false' }}
