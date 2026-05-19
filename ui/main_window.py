@@ -290,7 +290,10 @@ def load_bottom_icon(kind, hover=False):
 
     suffix = "_hover" if hover else ""
     icon_path = asset_path("bottom_icons", f"{kind}{suffix}.png")
-    if os.path.exists(icon_path):
+    
+    if kind in {"settings", "home", "float", "log", "export", "screenshot"}:
+        icon = build_bottom_icon(kind, "#d4d8df" if hover else "#a6abb4")
+    elif os.path.exists(icon_path):
         icon = QIcon(icon_path)
     else:
         icon = build_bottom_icon(kind, "#d4d8df" if hover else "#a6abb4")
