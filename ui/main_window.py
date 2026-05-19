@@ -304,7 +304,7 @@ class BottomIconButton(QPushButton):
         self.kind = kind
         self._normal_icon = load_bottom_icon(kind)
         self._hover_icon = load_bottom_icon(kind, hover=True)
-        self.setFixedSize(32, 30)
+        self.setFixedSize(36, 40)
         self.setIconSize(QSize(22, 22))
         self.setIcon(self._normal_icon)
         self.setCursor(Qt.PointingHandCursor)
@@ -646,7 +646,7 @@ class CardWidget(QFrame):
         self.bottomBg.setAttribute(Qt.WA_StyledBackground, True)
         self.bottomBg.setFixedHeight(40)
         bot_layout = QHBoxLayout(self.bottomBg)
-        bot_layout.setContentsMargins(24, 2, 24, 2)
+        bot_layout.setContentsMargins(24, 0, 24, 0)
         bot_layout.setSpacing(0)
         
         self.setIcon = BottomIconButton("settings") # 设置

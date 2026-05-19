@@ -238,20 +238,34 @@ QComboBox QAbstractItemView {
 }
 
 /* 底部图标按钮 */
-QPushButton.iconBtn, QPushButton#lineIconBtn {
+QPushButton.iconBtn {
     background-color: transparent;
     border: none;
     outline: none;
 }
-QPushButton.iconBtn:hover, QPushButton#lineIconBtn:hover {
+QPushButton.iconBtn:hover {
     background-color: rgba(0, 0, 0, 15);
     border: none;
 }
-QPushButton#lineIconBtn:pressed {
-    background-color: rgba(0, 0, 0, 25);
+QPushButton.iconBtn:focus {
+    outline: none;
     border: none;
 }
-QPushButton.iconBtn:focus, QPushButton#lineIconBtn:focus {
+
+QPushButton#lineIconBtn {
+    background-color: transparent;
+    border: none;
+    outline: none;
+}
+QPushButton#lineIconBtn:hover {
+    background-color: #cbd5e1;
+    border: none;
+}
+QPushButton#lineIconBtn:pressed {
+    background-color: #b8c5d6;
+    border: none;
+}
+QPushButton#lineIconBtn:focus {
     outline: none;
     border: none;
 }
