@@ -309,22 +309,69 @@ class BottomIconButton(QPushButton):
     def __init__(self, kind, parent=None):
         super().__init__(parent)
         self.kind = kind
-        self._normal_icon = load_bottom_icon(kind)
-        self._hover_icon = load_bottom_icon(kind, hover=True)
         self.setFixedSize(36, 40)
-        self.setIconSize(QSize(22, 22))
-        self.setIcon(self._normal_icon)
         self.setCursor(Qt.PointingHandCursor)
         self.setFocusPolicy(Qt.NoFocus)
         self.setObjectName("lineIconBtn")
+        self._hover = False
+
+        icon_path = asset_path("bottom_icons", f"{kind}.png")
+        if os.path.exists(icon_path):
+            self.pixmap = QPixmap(icon_path)
+        else:
+            icon = build_bottom_icon(kind, "#a6abb4")
+            self.pixmap = icon.pixmap(22, 22)
 
     def enterEvent(self, event):
-        self.setIcon(self._hover_icon)
+        self._hover = True
+        self.update()
         super().enterEvent(event)
 
     def leaveEvent(self, event):
-        self.setIcon(self._normal_icon)
+        self._hover = False
+        self.update()
         super().leaveEvent(event)
+
+    def mousePressEvent(self, event):
+        super().mousePressEvent(event)
+        self.update()
+
+    def mouseReleaseEvent(self, event):
+        super().mouseReleaseEvent(event)
+        self.update()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+
+        theme = "dark"
+        curr = self
+        while curr:
+            if hasattr(curr, "config"):
+                theme = curr.config.get("theme", "dark")
+                break
+            curr = curr.parent()
+
+        if self.underMouse() or self._hover:
+            if self.isDown():
+                bg_color = QColor("#343a46") if theme == "dark" else QColor("#b8c5d6")
+            else:
+                bg_color = QColor("#2a2e36") if theme == "dark" else QColor("#cbd5e1")
+            painter.fillRect(self.rect(), bg_color)
+
+        opacity = 1.0 if self._hover else 0.75
+        painter.setOpacity(opacity)
+
+        icon_w, icon_h = 22, 22
+        x = (self.width() - icon_w) / 2
+        y = (self.height() - icon_h) / 2
+
+        if self._hover:
+            y -= 1.0
+
+        target_rect = QRectF(x, y, icon_w, icon_h)
+        painter.drawPixmap(target_rect, self.pixmap, QRectF(self.pixmap.rect()))
+        painter.end()
 
 
 class ConfigActionButton(QPushButton):
