@@ -228,7 +228,7 @@ def do_update(download_url, progress_callback, finish_callback):
 
         old_file = exe_path + ".old"
 
-        # 尝试多次清理旧的 .old 备份文件，防止操作系统锁定或杀软扫描导致的延迟释放
+        # Try to clean up the old .old backup file, with retries to handle OS locks or antivirus scanning delays
         for _ in range(5):
             try:
                 if os.path.exists(old_file):
@@ -238,7 +238,7 @@ def do_update(download_url, progress_callback, finish_callback):
                 import time
                 time.sleep(0.1)
 
-        # 执行高可靠的原地替换，带有 5 次微秒级重试机制以规避偶发的文件占用锁冲突
+        # Perform high-reliability native inplace replacement with retries to handle file locks
         replace_success = False
         last_error = None
         for _ in range(5):
@@ -253,9 +253,9 @@ def do_update(download_url, progress_callback, finish_callback):
                 time.sleep(0.1)
 
         if not replace_success:
-            raise RuntimeError(f"无法替换可执行文件，文件可能被系统或其他进程锁定: {last_error}")
+            raise RuntimeError(f"Failed to replace executable, the file might be locked by another process: {last_error}")
 
-        # 通知界面更新完成，并无缝拉起全新版本进程，完美终止当前进程
+        # Notify update finished, spawn the new executable, and exit the current process
         finish_callback(True, "Update complete. Restarting to apply...")
         import time
         time.sleep(0.5)
