@@ -19,7 +19,7 @@ jobs:
       prerelease: ${{ steps.set_pre.outputs.prerelease }}
     steps:
       - name: Check-out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -132,7 +132,7 @@ jobs:
           sed -i "s/VERSION = \"v[0-9]\+\.[0-9]\+\.[0-9]\+\"/VERSION = \"$tag\"/g" main.py
 
       - name: Upload updated code
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: updated-code
           path: .
@@ -154,13 +154,13 @@ jobs:
             artifact_name: Alas-Gyre-Linux
     steps:
       - name: Download updated code
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: updated-code
           path: .
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.12'
           architecture: 'x64'
@@ -209,7 +209,7 @@ jobs:
           cd ..
 
       - name: Upload PyInstaller artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.artifact_name }}-${{ needs.meta.outputs.tag }}
           path: |
@@ -225,13 +225,13 @@ jobs:
     runs-on: windows-latest
     steps:
       - name: Download updated code
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: updated-code
           path: .
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.12'
           architecture: 'x64'
@@ -290,7 +290,7 @@ jobs:
           }
 
       - name: Upload Nuitka artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: Alas-Gyre-Windows-Nuitka-${{ needs.meta.outputs.tag }}
           path: Alas-Gyre-Nuitka.exe
@@ -303,7 +303,7 @@ jobs:
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     steps:
       - name: Download artifacts from GitHub
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: assets
 
