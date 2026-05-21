@@ -312,6 +312,21 @@ git push origin v1.1.4
 - Confirm ALAS has produced an error record.
 - Check whether `log/error/<timestamp>` exists in the ALAS directory.
 
+## Repository hygiene
+
+The following files are intentionally ignored and should not be uploaded:
+
+```text
+config.json
+fastapi.py
+build_info.py
+build/
+dist/
+__pycache__/
+.ruff_cache/
+tools/upx-*/
+```
+
 ## License
 
 Alas-Gyre is released under the [GNU General Public License v3.0](LICENSE).

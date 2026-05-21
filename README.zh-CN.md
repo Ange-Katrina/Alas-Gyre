@@ -330,6 +330,26 @@ git push origin v1.1.5
 - 确认 ALAS 目录存在 `log/error/<timestamp>`。
 - 打开日志窗口，切换到“错误截图”页并刷新。
 
+## 仓库清理规则
+
+不要提交以下本地文件：
+
+```text
+config.json
+fastapi.py
+build_info.py
+build/
+dist/
+*.build/
+*.dist/
+*.onefile-build/
+*.nuitka-cache/
+__pycache__/
+.ruff_cache/
+```
+
+这些文件已经加入 `.gitignore`。
+
 ## 许可证
 
 本项目基于 [GPL-3.0](LICENSE) 发布。
