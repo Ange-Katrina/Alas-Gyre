@@ -1,3 +1,5 @@
+from PySide6.QtCore import Qt, Signal, QSize
+from PySide6.QtGui import QColor, QPixmap
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -10,12 +12,9 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-from PySide6.QtCore import Qt, Signal, QSize
-from PySide6.QtGui import QColor, QPixmap
-import requests
 import threading
 
-from .api_client import api_headers
+from .api_client import api_headers, api_request
 from .i18n import tr
 from .main_window import WindowButton
 
@@ -23,11 +22,11 @@ from .main_window import WindowButton
 MAX_SCREENSHOT_PIXMAP_SIZE = QSize(1600, 1200)
 
 
-class ErrorScreenshotWindow(QDialog):
+class ErrorScreenshotPanel(QWidget):
     groups_update_signal = Signal(object)
     image_update_signal = Signal(object, str, str, str)
 
-    def __init__(self, parent=None, config=None):
+    def __init__(self, parent=None, config=None, auto_fetch=True):
         super().__init__(parent)
         self.config = config if config is not None else {}
         self.groups = []
@@ -38,51 +37,10 @@ class ErrorScreenshotWindow(QDialog):
         self._fetching_image_key = None
         self._loaded_image_key = None
 
-        self.setObjectName("screenshotWindow")
-        self.resize(760, 520)
-        self.setMinimumSize(620, 420)
-        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog)
-        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setObjectName("screenshotBodyBg")
+        self.setAttribute(Qt.WA_StyledBackground, True)
 
-        main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(30, 20, 30, 30)
-
-        self.card = QFrame(self)
-        self.card.setObjectName("screenshotCard")
-        card_layout = QVBoxLayout(self.card)
-        card_layout.setContentsMargins(0, 0, 0, 0)
-        card_layout.setSpacing(0)
-
-        self.topBg = QWidget(self.card)
-        self.topBg.setObjectName("screenshotTopBg")
-        self.topBg.setAttribute(Qt.WA_StyledBackground, True)
-        self.topBg.setFixedHeight(30)
-        top_layout = QHBoxLayout(self.topBg)
-        top_layout.setContentsMargins(20, 0, 8, 0)
-        top_layout.setSpacing(8)
-
-        self.titleLabel = QLabel(tr("screenshot_title"))
-        self.titleLabel.setObjectName("screenshotTitle")
-        top_layout.addWidget(self.titleLabel)
-        top_layout.addStretch()
-
-        self.refreshBtn = QPushButton(tr("screenshot_refresh"), self.topBg)
-        self.refreshBtn.setObjectName("screenshotRefreshBtn")
-        self.refreshBtn.setCursor(Qt.PointingHandCursor)
-        self.refreshBtn.setFocusPolicy(Qt.NoFocus)
-        self.refreshBtn.setFixedSize(72, 24)
-        self.refreshBtn.clicked.connect(self.fetch_groups)
-        top_layout.addWidget(self.refreshBtn, alignment=Qt.AlignVCenter)
-
-        self.closeBtn = WindowButton("close", self.topBg)
-        self.closeBtn.mousePressEvent = lambda event: self.reject() if event.button() == Qt.LeftButton else None
-        top_layout.addWidget(self.closeBtn)
-        card_layout.addWidget(self.topBg)
-
-        self.bodyBg = QWidget(self.card)
-        self.bodyBg.setObjectName("screenshotBodyBg")
-        self.bodyBg.setAttribute(Qt.WA_StyledBackground, True)
-        body_layout = QVBoxLayout(self.bodyBg)
+        body_layout = QVBoxLayout(self)
         body_layout.setContentsMargins(14, 12, 14, 14)
         body_layout.setSpacing(10)
 
@@ -90,35 +48,43 @@ class ErrorScreenshotWindow(QDialog):
         control_layout.setContentsMargins(0, 0, 0, 0)
         control_layout.setSpacing(8)
 
-        group_label = QLabel(tr("screenshot_error_group"), self.bodyBg)
+        group_label = QLabel(tr("screenshot_error_group"), self)
         group_label.setObjectName("screenshotFieldLabel")
         control_layout.addWidget(group_label)
 
-        self.groupCombo = QComboBox(self.bodyBg)
+        self.groupCombo = QComboBox(self)
         self.groupCombo.setObjectName("screenshotCombo")
         self.groupCombo.setFocusPolicy(Qt.NoFocus)
         self.groupCombo.setCursor(Qt.PointingHandCursor)
         self.groupCombo.currentIndexChanged.connect(self._on_group_selected)
         control_layout.addWidget(self.groupCombo, stretch=1)
 
-        image_label = QLabel(tr("screenshot_image"), self.bodyBg)
+        image_label = QLabel(tr("screenshot_image"), self)
         image_label.setObjectName("screenshotFieldLabel")
         control_layout.addWidget(image_label)
 
-        self.imageCombo = QComboBox(self.bodyBg)
+        self.imageCombo = QComboBox(self)
         self.imageCombo.setObjectName("screenshotCombo")
         self.imageCombo.setFocusPolicy(Qt.NoFocus)
         self.imageCombo.setCursor(Qt.PointingHandCursor)
         self.imageCombo.currentIndexChanged.connect(self._on_image_selected)
         control_layout.addWidget(self.imageCombo, stretch=1)
 
+        self.refreshBtn = QPushButton(tr("screenshot_refresh"), self)
+        self.refreshBtn.setObjectName("screenshotRefreshBtn")
+        self.refreshBtn.setCursor(Qt.PointingHandCursor)
+        self.refreshBtn.setFocusPolicy(Qt.NoFocus)
+        self.refreshBtn.setFixedSize(72, 24)
+        self.refreshBtn.clicked.connect(self.fetch_groups)
+        control_layout.addWidget(self.refreshBtn, alignment=Qt.AlignVCenter)
+
         body_layout.addLayout(control_layout)
 
-        self.statusLabel = QLabel("", self.bodyBg)
+        self.statusLabel = QLabel("", self)
         self.statusLabel.setObjectName("screenshotStatusLabel")
         body_layout.addWidget(self.statusLabel)
 
-        self.imagePanel = QFrame(self.bodyBg)
+        self.imagePanel = QFrame(self)
         self.imagePanel.setObjectName("screenshotImagePanel")
         image_layout = QVBoxLayout(self.imagePanel)
         image_layout.setContentsMargins(12, 12, 12, 12)
@@ -130,60 +96,15 @@ class ErrorScreenshotWindow(QDialog):
         image_layout.addWidget(self.imageLabel)
         body_layout.addWidget(self.imagePanel, stretch=1)
 
-        card_layout.addWidget(self.bodyBg, stretch=1)
-        main_layout.addWidget(self.card)
-
-        shadow = QGraphicsDropShadowEffect()
-        shadow.setBlurRadius(20)
-        shadow.setOffset(0, 6)
-        shadow.setColor(QColor(0, 0, 0, 80))
-        self.card.setGraphicsEffect(shadow)
-
-        self.sizeGrip = QSizeGrip(self.card)
-        self.sizeGrip.setFixedSize(18, 18)
-        self.sizeGrip.setStyleSheet("background: transparent;")
-        self.sizeGrip.raise_()
-
         self.groups_update_signal.connect(self._on_groups_updated)
         self.image_update_signal.connect(self._on_image_updated)
 
-        self._center_on_screen()
-        self.fetch_groups()
+        if auto_fetch:
+            self.fetch_groups()
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        if hasattr(self, "sizeGrip"):
-            self.sizeGrip.move(
-                self.card.width() - self.sizeGrip.width() - 3,
-                self.card.height() - self.sizeGrip.height() - 3,
-            )
         self._update_image_view()
-
-    def _center_on_screen(self):
-        if self.parent():
-            parent_geom = self.parent().geometry()
-            x = parent_geom.x() + (parent_geom.width() - self.width()) // 2
-            y = parent_geom.y() + (parent_geom.height() - self.height()) // 2
-            self.move(x, y)
-
-    def mousePressEvent(self, event):
-        if event.button() == Qt.LeftButton:
-            import sys
-            if sys.platform == "win32":
-                import ctypes
-                ctypes.windll.user32.ReleaseCapture()
-                hwnd = self.winId()
-                ctypes.windll.user32.SendMessageW(int(hwnd), 0x0112, 0xF012, 0)
-            else:
-                self._drag_offset = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
-            event.accept()
-
-    def mouseMoveEvent(self, event):
-        import sys
-        if sys.platform != "win32":
-            if hasattr(self, "_drag_offset") and event.buttons() & Qt.LeftButton:
-                self.move(event.globalPosition().toPoint() - self._drag_offset)
-                event.accept()
 
     def fetch_groups(self):
         if self._fetching_groups:
@@ -198,7 +119,8 @@ class ErrorScreenshotWindow(QDialog):
         ip = self.config.get("ip", "127.0.0.1")
         port = self.config.get("port", "22267")
         try:
-            resp = requests.get(
+            resp = api_request(
+                "GET",
                 f"http://{ip}:{port}/api/error_screenshots",
                 params={"limit": 30},
                 headers=api_headers(self.config),
@@ -234,7 +156,10 @@ class ErrorScreenshotWindow(QDialog):
         for group in self.groups:
             title = group.get("display_time") or group.get("folder", "")
             count = group.get("image_count", len(group.get("images") or []))
-            self.groupCombo.addItem(f"{title}  ·  {count}", group.get("folder"))
+            self.groupCombo.addItem(
+                f"{title}  {tr('screenshot_group_count', count=count)}",
+                group.get("folder"),
+            )
         if self.groups:
             self.groupCombo.setCurrentIndex(0)
         self.groupCombo.blockSignals(False)
@@ -302,7 +227,8 @@ class ErrorScreenshotWindow(QDialog):
         error = ""
         data = b""
         try:
-            resp = requests.get(
+            resp = api_request(
+                "GET",
                 f"http://{ip}:{port}/api/error_screenshots/image",
                 params={"folder": folder, "file": file_name},
                 headers=api_headers(self.config),
@@ -324,6 +250,7 @@ class ErrorScreenshotWindow(QDialog):
     def _on_image_updated(self, data, folder, file_name, error):
         if self._fetching_image_key != (folder, file_name):
             return
+        self._fetching_image_key = None
 
         if error:
             message = tr("screenshot_image_failed", error=error)
@@ -373,9 +300,106 @@ class ErrorScreenshotWindow(QDialog):
         self.imageLabel.setText("")
         self.imageLabel.setPixmap(scaled)
 
-    def reject(self):
+    def clear(self):
         self.current_pixmap = QPixmap()
         self._fetching_image_key = None
         self._loaded_image_key = None
         self.imageLabel.clear()
+
+
+class ErrorScreenshotWindow(QDialog):
+    def __init__(self, parent=None, config=None):
+        super().__init__(parent)
+        self.config = config if config is not None else {}
+
+        self.setObjectName("screenshotWindow")
+        self.resize(760, 520)
+        self.setMinimumSize(620, 420)
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(30, 20, 30, 30)
+
+        self.card = QFrame(self)
+        self.card.setObjectName("screenshotCard")
+        self.card.setAttribute(Qt.WA_StyledBackground, True)
+        card_layout = QVBoxLayout(self.card)
+        card_layout.setContentsMargins(0, 0, 0, 0)
+        card_layout.setSpacing(0)
+
+        self.topBg = QWidget(self.card)
+        self.topBg.setObjectName("screenshotTopBg")
+        self.topBg.setAttribute(Qt.WA_StyledBackground, True)
+        self.topBg.setFixedHeight(30)
+        top_layout = QHBoxLayout(self.topBg)
+        top_layout.setContentsMargins(20, 0, 8, 0)
+        top_layout.setSpacing(8)
+
+        self.titleLabel = QLabel(tr("screenshot_title"))
+        self.titleLabel.setObjectName("screenshotTitle")
+        top_layout.addWidget(self.titleLabel)
+        top_layout.addStretch()
+
+        self.closeBtn = WindowButton("close", self.topBg)
+        self.closeBtn.mousePressEvent = lambda event: self.reject() if event.button() == Qt.LeftButton else None
+        top_layout.addWidget(self.closeBtn)
+        card_layout.addWidget(self.topBg)
+
+        self.panel = ErrorScreenshotPanel(self.card, self.config, auto_fetch=True)
+        card_layout.addWidget(self.panel, stretch=1)
+        main_layout.addWidget(self.card)
+
+        shadow = QGraphicsDropShadowEffect()
+        shadow.setBlurRadius(20)
+        shadow.setOffset(0, 6)
+        shadow.setColor(QColor(0, 0, 0, 80))
+        self.card.setGraphicsEffect(shadow)
+
+        self.sizeGrip = QSizeGrip(self.card)
+        self.sizeGrip.setFixedSize(18, 18)
+        self.sizeGrip.setStyleSheet("background: transparent;")
+        self.sizeGrip.raise_()
+
+        self._center_on_screen()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if hasattr(self, "sizeGrip"):
+            self.sizeGrip.move(
+                self.card.width() - self.sizeGrip.width() - 3,
+                self.card.height() - self.sizeGrip.height() - 3,
+            )
+
+    def _center_on_screen(self):
+        if self.parent():
+            parent_geom = self.parent().geometry()
+            x = parent_geom.x() + (parent_geom.width() - self.width()) // 2
+            y = parent_geom.y() + (parent_geom.height() - self.height()) // 2
+            self.move(x, y)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            import sys
+            if sys.platform == "win32":
+                import ctypes
+                ctypes.windll.user32.ReleaseCapture()
+                hwnd = self.winId()
+                ctypes.windll.user32.SendMessageW(int(hwnd), 0x0112, 0xF012, 0)
+            else:
+                self._drag_offset = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+            event.accept()
+
+    def mouseMoveEvent(self, event):
+        import sys
+        if sys.platform != "win32":
+            if hasattr(self, "_drag_offset") and event.buttons() & Qt.LeftButton:
+                self.move(event.globalPosition().toPoint() - self._drag_offset)
+                event.accept()
+
+    def fetch_groups(self):
+        self.panel.fetch_groups()
+
+    def reject(self):
+        self.panel.clear()
         super().reject()

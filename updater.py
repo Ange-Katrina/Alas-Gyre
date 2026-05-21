@@ -1,4 +1,6 @@
 import os
+import re
+import shlex
 import subprocess
 import sys
 from urllib.parse import quote
@@ -25,6 +27,29 @@ NUITKA_ASSET_NAMES = ("alas-gyre-nuitka.exe",)
 def _requests():
     import requests
     return requests
+
+
+def http_get(url, **kwargs):
+    session = _requests().Session()
+    session.trust_env = False
+    try:
+        resp = session.get(url, **kwargs)
+        resp._alas_session = session
+        return resp
+    except Exception:
+        session.close()
+        raise
+
+
+def close_response(resp):
+    if resp is None:
+        return
+    try:
+        resp.close()
+    finally:
+        session = getattr(resp, "_alas_session", None)
+        if session is not None:
+            session.close()
 
 
 def get_current_exe_path():
@@ -58,9 +83,28 @@ def normalize_version_tag(tag):
 
 
 def parse_version_tag(tag):
-    from packaging import version
+    normalized = normalize_version_tag(tag).lstrip("v")
+    match = re.match(r"^(\d+(?:\.\d+)*)(?:[-_.]?([a-zA-Z]+)(\d*)?)?$", normalized)
+    if not match:
+        raise ValueError(f"invalid version tag: {tag}")
 
-    return version.parse(normalize_version_tag(tag).lstrip("v"))
+    release = [int(part) for part in match.group(1).split(".")]
+    release = (release + [0, 0, 0, 0])[:4]
+
+    label = (match.group(2) or "").lower()
+    number = int(match.group(3) or 0)
+    stage_order = {
+        "dev": -1,
+        "a": 0,
+        "alpha": 0,
+        "b": 1,
+        "beta": 1,
+        "rc": 2,
+        "pre": 2,
+        "preview": 2,
+        "": 3,
+    }
+    return (*release, stage_order.get(label, 3), number)
 
 
 def is_newer_version(latest_version, current_version):
@@ -104,6 +148,9 @@ def find_exe_asset(assets, build_flavor=None):
 
 
 def update_result_from_release(data, current_version):
+    if data.get("draft"):
+        return {"has_update": False, "error": "draft release"}
+
     latest_version = normalize_version_tag(data.get("tag_name", ""))
     if not latest_version:
         return {"has_update": False, "error": "empty latest version"}
@@ -130,27 +177,62 @@ def update_result_from_release(data, current_version):
 
 
 def fetch_latest_release_by_api(current_version):
-    resp = _requests().get(API_URL, headers=REQUEST_HEADERS, timeout=CHECK_TIMEOUT)
-    resp.raise_for_status()
-    releases = resp.json()
+    resp = http_get(API_URL, headers=REQUEST_HEADERS, timeout=CHECK_TIMEOUT)
+    try:
+        resp.raise_for_status()
+        releases = resp.json()
+    finally:
+        close_response(resp)
     if not releases or not isinstance(releases, list):
         raise ValueError("No releases found.")
-    # The first item is the latest release (including pre-releases)
-    return update_result_from_release(releases[0], current_version)
+
+    skipped_errors = []
+    newest_seen = ""
+    for release in releases:
+        result = update_result_from_release(release, current_version)
+        if result.get("version") and not newest_seen:
+            newest_seen = result["version"]
+        if result.get("has_update"):
+            return result
+        if result.get("error"):
+            skipped_errors.append(
+                f"{release.get('tag_name', 'unknown')}: {result.get('error')}"
+            )
+
+    fallback = {"has_update": False}
+    if newest_seen:
+        fallback["version"] = newest_seen
+    if skipped_errors:
+        fallback["error"] = "; ".join(skipped_errors)
+    return fallback
+
+
+def validate_downloaded_exe(path):
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"Downloaded file not found: {path}")
+    if os.path.getsize(path) < 1024:
+        raise RuntimeError("Downloaded file is too small.")
+    if sys.platform == "win32" or path.lower().endswith(".exe"):
+        with open(path, "rb") as f:
+            if f.read(2) != b"MZ":
+                raise RuntimeError("Downloaded file is not a valid Windows executable.")
 
 
 def fetch_latest_tag_by_redirect():
-    resp = _requests().get(
+    resp = http_get(
         RELEASE_LATEST_URL,
         headers=REQUEST_HEADERS,
         timeout=CHECK_TIMEOUT,
         allow_redirects=False,
     )
-    if resp.status_code not in (301, 302, 303, 307, 308):
-        resp.raise_for_status()
-        return ""
+    try:
+        if resp.status_code not in (301, 302, 303, 307, 308):
+            resp.raise_for_status()
+            return ""
 
-    location = resp.headers.get("Location", "")
+        location = resp.headers.get("Location", "")
+    finally:
+        close_response(resp)
     marker = "/releases/tag/"
     if marker not in location:
         return ""
@@ -159,9 +241,13 @@ def fetch_latest_tag_by_redirect():
 
 def fetch_release_by_tag(tag, current_version):
     url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/tags/{quote(tag, safe='')}"
-    resp = _requests().get(url, headers=REQUEST_HEADERS, timeout=CHECK_TIMEOUT)
-    resp.raise_for_status()
-    return update_result_from_release(resp.json(), current_version)
+    resp = http_get(url, headers=REQUEST_HEADERS, timeout=CHECK_TIMEOUT)
+    try:
+        resp.raise_for_status()
+        data = resp.json()
+    finally:
+        close_response(resp)
+    return update_result_from_release(data, current_version)
 
 
 def check_for_updates(current_version):
@@ -197,43 +283,40 @@ def do_update(download_url, progress_callback, finish_callback):
         resp = None
         try:
             print(f"[update] downloading from GitHub: {download_url}")
-            resp = _requests().get(download_url, stream=True, timeout=3.5)
+            resp = http_get(
+                download_url,
+                headers=REQUEST_HEADERS,
+                stream=True,
+                timeout=(4, 30),
+            )
             resp.raise_for_status()
-        except Exception as exc:
-            if download_url.startswith("https://github.com/"):
-                print(f"[update] GitHub download failed ({exc}); trying mirror.")
-                try:
-                    mirror_url = f"https://mirror.ghproxy.com/{download_url}"
-                    resp = _requests().get(mirror_url, stream=True, timeout=15)
-                    resp.raise_for_status()
-                except Exception as mirror_exc:
-                    print(f"[update] primary mirror failed ({mirror_exc}); trying backup mirror.")
-                    backup_mirror_url = f"https://ghproxy.net/{download_url}"
-                    resp = _requests().get(backup_mirror_url, stream=True, timeout=15)
-                    resp.raise_for_status()
-            else:
-                raise exc
 
-        total_length = resp.headers.get("content-length")
-        downloaded = 0
+            total_length = resp.headers.get("content-length")
+            downloaded = 0
 
-        temp_file = exe_path + ".new"
-        with open(temp_file, "wb") as f:
-            for chunk in resp.iter_content(chunk_size=8192):
-                if chunk:
-                    f.write(chunk)
-                    downloaded += len(chunk)
-                    if progress_callback and total_length:
-                        progress_callback(int(downloaded * 100 / int(total_length)))
+            temp_file = exe_path + ".new"
+            with open(temp_file, "wb") as f:
+                for chunk in resp.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+                        downloaded += len(chunk)
+                        if progress_callback and total_length:
+                            progress_callback(int(downloaded * 100 / int(total_length)))
+        finally:
+            close_response(resp)
+
+        validate_downloaded_exe(temp_file)
+        if progress_callback:
+            progress_callback(100)
 
         dir_name = os.path.dirname(exe_path)
 
         if sys.platform == "win32":
             bat_path = os.path.join(dir_name, "update.bat")
             bat_content = f"""@echo off
-set PID={os.getpid()}
-set TEMP_FILE={temp_file}
-set EXE_PATH={exe_path}
+set "PID={os.getpid()}"
+set "TEMP_FILE={temp_file}"
+set "EXE_PATH={exe_path}"
 
 :wait_loop
 tasklist /FI "PID eq %PID%" 2>NUL | find /I "%PID%" >NUL
@@ -243,13 +326,11 @@ if %ERRORLEVEL%==0 (
 )
 
 :replace
-copy /Y "%TEMP_FILE%" "%EXE_PATH%" >nul
+move /Y "%TEMP_FILE%" "%EXE_PATH%" >nul
 if not %ERRORLEVEL%==0 (
     timeout /t 1 /nobreak >nul
     goto replace
 )
-
-del /Q "%TEMP_FILE%" >nul
 
 start "" "%EXE_PATH%"
 del /Q "%~f0" >nul
@@ -269,8 +350,8 @@ del /Q "%~f0" >nul
             sh_path = os.path.join(dir_name, "update.sh")
             sh_content = f"""#!/bin/sh
 PID={os.getpid()}
-TEMP_FILE="{temp_file}"
-EXE_PATH="{exe_path}"
+TEMP_FILE={shlex.quote(temp_file)}
+EXE_PATH={shlex.quote(exe_path)}
 
 while kill -0 $PID 2>/dev/null; do
     sleep 1

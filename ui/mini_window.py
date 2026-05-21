@@ -209,6 +209,7 @@ class MiniWindow(QWidget):
         
         self.bg = QFrame(self)
         self.bg.setObjectName("miniBg")
+        self.bg.setAttribute(Qt.WA_StyledBackground, True)
         self.bg_layout = QVBoxLayout(self.bg)
         self.bg_layout.setContentsMargins(5, 5, 5, 5)
         self.bg_layout.setSpacing(2)
@@ -259,6 +260,8 @@ class MiniWindow(QWidget):
         # 清理旧的行
         for row in self.rows.values():
             self.bg_layout.removeWidget(row)
+            row.hide()
+            row.setParent(None)
             row.deleteLater()
         self.rows.clear()
         

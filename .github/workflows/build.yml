@@ -127,9 +127,27 @@ jobs:
           python bilingual_changelog.py commits.txt "$compare_from" "${{ steps.set_tag.outputs.tag }}"
 
       - name: Update version in main.py
+        env:
+          TAG: ${{ steps.set_tag.outputs.tag }}
         run: |
-          tag="${{ steps.set_tag.outputs.tag }}"
-          sed -i "s/VERSION = \"v[0-9]\+\.[0-9]\+\.[0-9]\+\"/VERSION = \"$tag\"/g" main.py
+          python - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          path = Path("main.py")
+          tag = os.environ["TAG"]
+          text = path.read_text(encoding="utf-8")
+          text, count = re.subn(
+              r'VERSION = "v\d+\.\d+\.\d+(?:[-.][A-Za-z0-9._-]+)?"',
+              f'VERSION = "{tag}"',
+              text,
+              count=1,
+          )
+          if count != 1:
+              raise SystemExit("Failed to update VERSION in main.py")
+          path.write_text(text, encoding="utf-8", newline="\n")
+          PY
 
       - name: Upload updated code
         uses: actions/upload-artifact@v4
@@ -162,6 +180,12 @@ jobs:
           python -m pip install --upgrade pip
           pip install pyinstaller
           pip install -r requirements.txt
+
+      - name: Configure PyInstaller build flavor
+        shell: pwsh
+        run: |
+          $content = "BUILD_FLAVOR = `"pyinstaller`"`n"
+          [System.IO.File]::WriteAllText((Join-Path $PWD "build_info.py"), $content, [System.Text.UTF8Encoding]::new($false))
 
       - name: Install UPX
         shell: pwsh

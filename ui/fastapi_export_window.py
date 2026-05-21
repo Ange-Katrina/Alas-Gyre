@@ -6,12 +6,13 @@ from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QDialog, QFrame, QGraphicsDropShadowEffect, QHBoxLayout,
-    QLabel, QLineEdit, QPushButton, QVBoxLayout, QWidget
+    QFileDialog, QLabel, QLineEdit, QPushButton, QSizePolicy, QVBoxLayout, QWidget
 )
 from .main_window import WindowButton
 from .i18n import tr
 
 TOKEN_ASSIGNMENT = 'ALAS_GYRE_API_TOKEN = "__ALAS_GYRE_API_TOKEN__"'
+FASTAPI_CUSTOM_DIR_KEY = "fastapi_custom_dir"
 
 
 def save_config(config, config_path):
@@ -32,7 +33,7 @@ def ensure_api_token(config, config_path=""):
     return token
 
 
-def export_fastapi_file(source_path, output_path, config, config_path=""):
+def render_fastapi_payload(source_path, config, config_path=""):
     if not os.path.exists(source_path):
         raise FileNotFoundError(f"未找到源文件 {source_path}")
 
@@ -47,10 +48,36 @@ def export_fastapi_file(source_path, output_path, config, config_path=""):
         f"ALAS_GYRE_API_TOKEN = {json.dumps(token)}",
         1,
     )
+    return rendered
+
+
+def write_fastapi_file(output_path, rendered):
+    output_path = os.path.abspath(output_path)
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     with open(output_path, "w", encoding="utf-8", newline="\n") as f:
         f.write(rendered)
     return output_path
+
+
+def export_fastapi_file(source_path, output_path, config, config_path=""):
+    rendered = render_fastapi_payload(source_path, config, config_path)
+    return write_fastapi_file(output_path, rendered)
+
+
+def custom_fastapi_output_path(custom_dir):
+    custom_dir = str(custom_dir or "").strip().strip('"')
+    if not custom_dir:
+        return ""
+    return os.path.join(os.path.abspath(os.path.expanduser(custom_dir)), "fastapi.py")
+
+
+def selected_fastapi_output_path(root_output_path, custom_dir=""):
+    return custom_fastapi_output_path(custom_dir) or os.path.abspath(root_output_path)
+
+
+def export_fastapi_to_selected_path(source_path, root_output_path, config, config_path="", custom_dir=""):
+    rendered = render_fastapi_payload(source_path, config, config_path)
+    return write_fastapi_file(selected_fastapi_output_path(root_output_path, custom_dir), rendered)
 
 
 class FastapiExportWindow(QDialog):
@@ -62,7 +89,7 @@ class FastapiExportWindow(QDialog):
         self.config_path = config_path
 
         self.setObjectName("fastapiExportWindow")
-        self.setFixedSize(520, 520)
+        self.setFixedSize(520, 580)
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog)
         self.setAttribute(Qt.WA_TranslucentBackground)
 
@@ -71,7 +98,8 @@ class FastapiExportWindow(QDialog):
 
         self.card = QFrame(self)
         self.card.setObjectName("fastapiCard")
-        self.card.setFixedSize(484, 488)
+        self.card.setAttribute(Qt.WA_StyledBackground, True)
+        self.card.setFixedSize(484, 548)
         card_layout = QVBoxLayout(self.card)
         card_layout.setContentsMargins(0, 0, 0, 0)
         card_layout.setSpacing(0)
@@ -96,7 +124,7 @@ class FastapiExportWindow(QDialog):
         self.bodyBg = QWidget(self.card)
         self.bodyBg.setObjectName("fastapiBodyBg")
         self.bodyBg.setAttribute(Qt.WA_StyledBackground, True)
-        self.bodyBg.setFixedSize(484, 458)
+        self.bodyBg.setFixedSize(484, 518)
         body_layout = QVBoxLayout(self.bodyBg)
         body_layout.setContentsMargins(24, 16, 24, 18)
         body_layout.setSpacing(7)
@@ -113,23 +141,40 @@ class FastapiExportWindow(QDialog):
         self.pathBox = QWidget(self.bodyBg)
         self.pathBox.setObjectName("fastapiPathBox")
         self.pathBox.setAttribute(Qt.WA_StyledBackground, True)
-        self.pathBox.setFixedHeight(70)
+        self.pathBox.setFixedHeight(108)
         path_layout = QVBoxLayout(self.pathBox)
         path_layout.setContentsMargins(12, 8, 12, 10)
         path_layout.setSpacing(7)
 
-        file_label = QLabel("fastapi.py")
-        file_label.setObjectName("fastapiPathTitle")
-        path_layout.addWidget(file_label)
+        custom_label = QLabel(tr("output_custom_dir"))
+        custom_label.setObjectName("fastapiPathTitle")
+        path_layout.addWidget(custom_label)
 
-        self.outputPathInput = QLineEdit(self.output_path)
-        self.outputPathInput.setObjectName("fastapiPathInput")
-        self.outputPathInput.setReadOnly(True)
-        self.outputPathInput.setFocusPolicy(Qt.ClickFocus)
-        self.outputPathInput.setCursorPosition(0)
-        self.outputPathInput.setFixedHeight(28)
-        self.outputPathInput.setToolTip(self.output_path)
-        path_layout.addWidget(self.outputPathInput)
+        hint_label = QLabel(tr("output_hint"))
+        hint_label.setObjectName("fastapiPathHint")
+        hint_label.setWordWrap(True)
+        hint_label.setFixedHeight(28)
+        path_layout.addWidget(hint_label)
+
+        custom_layout = QHBoxLayout()
+        custom_layout.setContentsMargins(0, 0, 0, 0)
+        custom_layout.setSpacing(8)
+        self.customDirInput = QLineEdit("")
+        self.customDirInput.setObjectName("fastapiPathInput")
+        self.customDirInput.setFixedHeight(28)
+        self.customDirInput.setPlaceholderText(tr("output_default_hint"))
+        self.customDirInput.setToolTip(self.output_path)
+        self.customDirInput.textChanged.connect(self.customDirInput.setToolTip)
+        custom_layout.addWidget(self.customDirInput, stretch=1)
+
+        self.browseBtn = QPushButton(tr("browse"))
+        self.browseBtn.setObjectName("tokenBtn")
+        self.browseBtn.setCursor(Qt.PointingHandCursor)
+        self.browseBtn.setFocusPolicy(Qt.NoFocus)
+        self.browseBtn.setFixedSize(76, 28)
+        self.browseBtn.clicked.connect(self._choose_custom_dir)
+        custom_layout.addWidget(self.browseBtn)
+        path_layout.addLayout(custom_layout)
         body_layout.addWidget(self.pathBox)
 
         steps_title = QLabel(tr("install_steps"))
@@ -139,7 +184,7 @@ class FastapiExportWindow(QDialog):
         self.stepsBox = QWidget(self.bodyBg)
         self.stepsBox.setObjectName("fastapiStepsBox")
         self.stepsBox.setAttribute(Qt.WA_StyledBackground, True)
-        self.stepsBox.setFixedHeight(124)
+        self.stepsBox.setFixedHeight(154)
         steps_layout = QVBoxLayout(self.stepsBox)
         steps_layout.setContentsMargins(12, 9, 12, 9)
         steps_layout.setSpacing(6)
@@ -152,7 +197,7 @@ class FastapiExportWindow(QDialog):
         warning = QLabel(tr("export_warning"))
         warning.setObjectName("fastapiWarning")
         warning.setWordWrap(True)
-        warning.setFixedHeight(44)
+        warning.setFixedHeight(48)
         body_layout.addWidget(warning)
 
         body_layout.addSpacing(6)
@@ -171,7 +216,7 @@ class FastapiExportWindow(QDialog):
         self.exportBtn.setObjectName("fastapiExportBtn")
         self.exportBtn.setCursor(Qt.PointingHandCursor)
         self.exportBtn.setFocusPolicy(Qt.NoFocus)
-        self.exportBtn.setFixedSize(128, 32)
+        self.exportBtn.setFixedSize(180, 32)
         self.exportBtn.clicked.connect(self._export_fastapi)
         btn_layout.addWidget(self.exportBtn)
         body_layout.addLayout(btn_layout)
@@ -195,7 +240,7 @@ class FastapiExportWindow(QDialog):
         QTimer.singleShot(0, self._force_layout)
 
     def _force_layout(self):
-        for widget in (self, self.card, self.bodyBg, self.stepsBox):
+        for widget in (self, self.card, self.bodyBg, self.pathBox, self.stepsBox):
             layout = widget.layout()
             if layout is not None:
                 layout.invalidate()
@@ -206,7 +251,8 @@ class FastapiExportWindow(QDialog):
     def _create_step(self, number, text):
         row = QWidget(self.bodyBg)
         row.setObjectName("fastapiStepRow")
-        row.setFixedHeight(23)
+        row.setMinimumHeight(23)
+        row.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         row_layout = QHBoxLayout(row)
         row_layout.setContentsMargins(0, 0, 0, 0)
         row_layout.setSpacing(8)
@@ -219,8 +265,9 @@ class FastapiExportWindow(QDialog):
 
         label = QLabel(text)
         label.setObjectName("fastapiStepText")
-        label.setWordWrap(False)
-        label.setFixedHeight(23)
+        label.setWordWrap(True)
+        label.setMinimumHeight(23)
+        label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         row_layout.addWidget(label, stretch=1)
         return row
 
@@ -241,19 +288,33 @@ class FastapiExportWindow(QDialog):
     def _ensure_token(self):
         return ensure_api_token(self.config, self.config_path)
 
+    def _choose_custom_dir(self):
+        start_dir = (
+            self.customDirInput.text().strip()
+            or str(self.config.get(FASTAPI_CUSTOM_DIR_KEY, "") or "").strip()
+            or os.path.dirname(self.output_path)
+        )
+        selected_dir = QFileDialog.getExistingDirectory(self, tr("output_custom_dir"), start_dir)
+        if selected_dir:
+            self.customDirInput.setText(selected_dir)
+
     def _export_fastapi(self):
         if not os.path.exists(self.source_path):
             self._set_status(tr("export_fail", error=f"Source path not found: {self.source_path}"), "error")
             return
 
         try:
-            export_fastapi_file(
+            custom_dir = self.customDirInput.text().strip()
+            self.config[FASTAPI_CUSTOM_DIR_KEY] = custom_dir
+            output_path = export_fastapi_to_selected_path(
                 self.source_path,
                 self.output_path,
                 self.config,
                 self.config_path,
+                custom_dir,
             )
-            self._set_status(tr("export_success", path=self.output_path), "success")
+            save_config(self.config, self.config_path)
+            self._set_status(tr("export_success", path=output_path), "success")
         except Exception as exc:
             self._set_status(tr("export_fail", error=str(exc)), "error")
 

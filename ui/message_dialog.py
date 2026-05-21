@@ -113,6 +113,7 @@ class MessageDialog(QDialog):
 
         self.card = QFrame(self)
         self.card.setObjectName("messageCard")
+        self.card.setAttribute(Qt.WA_StyledBackground, True)
         root.addWidget(self.card)
 
         shadow = QGraphicsDropShadowEffect()
@@ -127,6 +128,7 @@ class MessageDialog(QDialog):
 
         self.topBg = QWidget(self.card)
         self.topBg.setObjectName("messageTopBg")
+        self.topBg.setAttribute(Qt.WA_StyledBackground, True)
         self.topBg.setFixedHeight(44)
         self.topBg.mousePressEvent = self._mouse_press
         self.topBg.mouseMoveEvent = self._mouse_move
@@ -143,6 +145,7 @@ class MessageDialog(QDialog):
 
         body = QWidget(self.card)
         body.setObjectName("messageBodyBg")
+        body.setAttribute(Qt.WA_StyledBackground, True)
         body_layout = QVBoxLayout(body)
         body_layout.setContentsMargins(20, 18, 20, 18)
         body_layout.setSpacing(18)

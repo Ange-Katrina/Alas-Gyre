@@ -1,12 +1,15 @@
-from PySide6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QWidget, QLabel, QFrame, QTextEdit, QGraphicsDropShadowEffect, QSizeGrip, QComboBox
+from PySide6.QtWidgets import (
+    QDialog, QVBoxLayout, QHBoxLayout, QWidget, QLabel, QFrame, QTextEdit,
+    QGraphicsDropShadowEffect, QSizeGrip, QComboBox, QPushButton, QStackedWidget
+)
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QTextCursor, QFontMetrics
-import requests
 import threading
 import html
 import hashlib
 
-from .api_client import api_headers
+from .api_client import api_headers, api_request
+from .error_screenshot_window import ErrorScreenshotPanel
 from .main_window import WindowButton
 from .i18n import tr
 
@@ -53,6 +56,7 @@ class LogWindow(QDialog):
         # 卡片背景
         self.card = QFrame(self)
         self.card.setObjectName("logCard")
+        self.card.setAttribute(Qt.WA_StyledBackground, True)
         card_layout = QVBoxLayout(self.card)
         card_layout.setContentsMargins(0, 0, 0, 0)
         card_layout.setSpacing(0)
@@ -81,6 +85,24 @@ class LogWindow(QDialog):
         top_layout.addSpacing(10)
         top_layout.addWidget(self.configCombo)
         self._update_config_combo_width()
+        top_layout.addSpacing(8)
+
+        self.logTabBtn = QPushButton(tr("log_view"), self.topBg)
+        self.logTabBtn.setObjectName("logViewTab")
+        self.logTabBtn.setCursor(Qt.PointingHandCursor)
+        self.logTabBtn.setFocusPolicy(Qt.NoFocus)
+        self.logTabBtn.setCheckable(True)
+        self.logTabBtn.clicked.connect(lambda: self._set_active_view(0))
+        top_layout.addWidget(self.logTabBtn)
+
+        self.screenshotTabBtn = QPushButton(tr("screenshot_view"), self.topBg)
+        self.screenshotTabBtn.setObjectName("logViewTab")
+        self.screenshotTabBtn.setCursor(Qt.PointingHandCursor)
+        self.screenshotTabBtn.setFocusPolicy(Qt.NoFocus)
+        self.screenshotTabBtn.setCheckable(True)
+        self.screenshotTabBtn.clicked.connect(lambda: self._set_active_view(1))
+        top_layout.addWidget(self.screenshotTabBtn)
+
         top_layout.addStretch()
 
         self.closeBtn = WindowButton("close", self.topBg)
@@ -89,11 +111,20 @@ class LogWindow(QDialog):
 
         card_layout.addWidget(self.topBg)
 
-        # ====== 日志显示区 ======
+        # ====== 内容区 ======
+        self.stack = QStackedWidget(self.card)
+        self.stack.setObjectName("logContentStack")
+
         self.logText = QTextEdit(self.card)
         self.logText.setObjectName("logTextPanel")
         self.logText.setReadOnly(True)
-        card_layout.addWidget(self.logText)
+        self.stack.addWidget(self.logText)
+
+        self.screenshotPanel = ErrorScreenshotPanel(self.card, self.config, auto_fetch=False)
+        self.stack.addWidget(self.screenshotPanel)
+        self._screenshot_loaded_once = False
+
+        card_layout.addWidget(self.stack, stretch=1)
         main_layout.addWidget(self.card)
 
         # 阴影效果
@@ -117,6 +148,7 @@ class LogWindow(QDialog):
         self._last_log_digest = ""
         self._fetching_log = False
         self.logText.document().setMaximumBlockCount(LOG_FETCH_LINES + 80)
+        self._set_active_view(0)
         self._fetch_log()
         
         self.poll_timer = QTimer(self)
@@ -168,7 +200,8 @@ class LogWindow(QDialog):
         port = self.config.get("port", "22267")
         try:
             url = f"http://{ip}:{port}/api/log"
-            resp = requests.get(
+            resp = api_request(
+                "GET",
                 url,
                 params={"config": self.current_config, "lines": LOG_FETCH_LINES},
                 headers=api_headers(self.config),
@@ -239,6 +272,19 @@ class LogWindow(QDialog):
         if 0 <= index < len(self.configs):
             self.set_config(self.configs[index])
 
+    def _set_active_view(self, index):
+        self.stack.setCurrentIndex(index)
+        self.logTabBtn.setChecked(index == 0)
+        self.screenshotTabBtn.setChecked(index == 1)
+        for button in (self.logTabBtn, self.screenshotTabBtn):
+            button.setProperty("active", button.isChecked())
+            button.style().unpolish(button)
+            button.style().polish(button)
+
+        if index == 1 and not self._screenshot_loaded_once:
+            self._screenshot_loaded_once = True
+            self.screenshotPanel.fetch_groups()
+
     def _log_to_html(self, text):
         theme = self.config.get("theme", "dark")
         styles = LOG_LEVEL_STYLES_LIGHT if theme == "light" else LOG_LEVEL_STYLES
@@ -294,7 +340,7 @@ class LogWindow(QDialog):
         body = "".join(rows)
         return (
             '<html><body style="white-space:pre-wrap; margin:0; '
-            'font-family:Consolas, Courier New, monospace; font-size:12px; '
+            "font-family:'Microsoft YaHei UI','Microsoft YaHei',Consolas,Courier New,monospace; font-size:12px; "
             f'line-height:1.45; color:{default_fg};">'
             f"{body}</body></html>"
         )
@@ -320,6 +366,7 @@ class LogWindow(QDialog):
     def reject(self):
         self.poll_timer.stop()
         self.logText.clear()
+        self.screenshotPanel.clear()
         self._last_log_digest = ""
         super().reject()
 
@@ -328,3 +375,6 @@ class LogWindow(QDialog):
         if not self.poll_timer.isActive():
             self.poll_timer.start(2000)
         self._fetch_log()
+        if self.stack.currentIndex() == 1 and not self._screenshot_loaded_once:
+            self._screenshot_loaded_once = True
+            self.screenshotPanel.fetch_groups()

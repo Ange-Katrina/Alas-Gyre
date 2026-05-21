@@ -9,13 +9,14 @@ from PySide6.QtWidgets import (
 )
 
 from .api_client import api_base_url, api_headers
-from .fastapi_export_window import ensure_api_token, export_fastapi_file, save_config
+from .fastapi_export_window import ensure_api_token, export_fastapi_to_selected_path, save_config
 from .main_window import WindowButton
 from .i18n import tr
 
 
 class InitSetupWindow(QDialog):
     test_result_signal = Signal(bool, str)
+    local_alas_result_signal = Signal(bool, str)
 
     def __init__(
         self,
@@ -41,6 +42,7 @@ class InitSetupWindow(QDialog):
 
         self.card = QFrame(self)
         self.card.setObjectName("initCard")
+        self.card.setAttribute(Qt.WA_StyledBackground, True)
         self.card.setFixedSize(484, 468)
         card_layout = QVBoxLayout(self.card)
         card_layout.setContentsMargins(0, 0, 0, 0)
@@ -155,11 +157,20 @@ class InitSetupWindow(QDialog):
 
         install_btn_layout = QHBoxLayout()
         install_btn_layout.addStretch()
+
+        self.searchAlasBtn = QPushButton(tr("search_local_alas"))
+        self.searchAlasBtn.setObjectName("tokenBtn")
+        self.searchAlasBtn.setCursor(Qt.PointingHandCursor)
+        self.searchAlasBtn.setFocusPolicy(Qt.NoFocus)
+        self.searchAlasBtn.setFixedSize(142, 32)
+        self.searchAlasBtn.clicked.connect(self._search_local_alas)
+        install_btn_layout.addWidget(self.searchAlasBtn)
+
         self.exportBtn = QPushButton(tr("export_btn"))
         self.exportBtn.setObjectName("fastapiExportBtn")
         self.exportBtn.setCursor(Qt.PointingHandCursor)
         self.exportBtn.setFocusPolicy(Qt.NoFocus)
-        self.exportBtn.setFixedSize(128, 32)
+        self.exportBtn.setFixedSize(180, 32)
         self.exportBtn.clicked.connect(self._export_fastapi)
         install_btn_layout.addWidget(self.exportBtn)
         install_layout.addLayout(install_btn_layout)
@@ -190,6 +201,7 @@ class InitSetupWindow(QDialog):
         body_layout.addLayout(btn_layout)
 
         self.test_result_signal.connect(self._on_test_result)
+        self.local_alas_result_signal.connect(self._on_local_alas_result)
         card_layout.addWidget(self.bodyBg)
         main_layout.addWidget(self.card)
 
@@ -244,7 +256,7 @@ class InitSetupWindow(QDialog):
     def _export_fastapi(self):
         self._sync_config_from_ui()
         try:
-            output_path = export_fastapi_file(
+            output_path = export_fastapi_to_selected_path(
                 self.fastapi_source_path,
                 self.fastapi_output_path,
                 self.config,
@@ -254,6 +266,40 @@ class InitSetupWindow(QDialog):
             self._set_status(tr("export_success", path=output_path), "success")
         except Exception as exc:
             self._set_status(tr("export_fail", error=str(exc)), "error")
+
+    def _search_local_alas(self):
+        self._sync_config_from_ui()
+        self.searchAlasBtn.setEnabled(False)
+        self.exportBtn.setEnabled(False)
+        self.searchAlasBtn.setText(tr("searching"))
+        self._set_status(tr("searching_local_alas"), "normal")
+        threading.Thread(target=self._search_local_alas_task, daemon=True).start()
+
+    def _search_local_alas_task(self):
+        success = False
+        message = ""
+        try:
+            from .alas_local import install_to_first_running_alas
+
+            result = install_to_first_running_alas(
+                self.fastapi_source_path,
+                self.config,
+                self.config_path,
+            )
+            success = True
+            message = tr("local_alas_update_success", path=result["path"])
+        except Exception as exc:
+            message = str(exc)
+        try:
+            self.local_alas_result_signal.emit(success, message)
+        except RuntimeError:
+            pass
+
+    def _on_local_alas_result(self, success, message):
+        self.searchAlasBtn.setEnabled(True)
+        self.exportBtn.setEnabled(True)
+        self.searchAlasBtn.setText(tr("search_local_alas"))
+        self._set_status(message if success else tr("local_alas_update_failed", error=message), "success" if success else "error")
 
     def _finish_setup(self):
         self._sync_config_from_ui()

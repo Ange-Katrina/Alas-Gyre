@@ -17,6 +17,12 @@ from .window_snap import snap_to_available_screen
 from .i18n import tr
 from .message_dialog import ask_confirm, show_info, show_warning
 
+try:
+    from shiboken6 import isValid
+except Exception:
+    def isValid(widget):
+        return widget is not None
+
 VALID_STATUSES = {"idle", "running", "error", "update", "disconnected"}
 ANIMATED_STATUSES = {"running", "error", "update", "disconnected"}
 _BOTTOM_ICON_CACHE = {}
@@ -53,7 +59,7 @@ def fastapi_source_path():
     return candidates[0]
 
 def fastapi_output_path():
-    return os.path.join(app_base_dir(), "output", "fastapi.py")
+    return os.path.join(app_base_dir(), "fastapi.py")
 
 def asset_path(*parts):
     relative_path = os.path.join("ui", "assets", *parts)
@@ -79,7 +85,7 @@ class StatusIndicator(QWidget):
         self._state = "idle"  # idle, running, error
         self_ref = weakref.ref(self)
         cls = type(self)
-        self.destroyed.connect(lambda: cls._active_widgets.discard(self_ref()))
+        self.destroyed.connect(lambda: (widget := self_ref()) is not None and cls._active_widgets.discard(widget))
 
     @classmethod
     def _ensure_animation_timer(cls):
@@ -704,14 +710,12 @@ class CardWidget(QFrame):
         self.floatIcon = BottomIconButton("float")
         self.logIcon = BottomIconButton("log")
         self.exportIcon = BottomIconButton("export")
-        self.screenshotIcon = BottomIconButton("screenshot")
 
         self.setIcon.setToolTip(tr("settings_btn_tip"))
         self.homeIcon.setToolTip(tr("home_btn_tip"))
         self.floatIcon.setToolTip(tr("float_btn_tip"))
         self.logIcon.setToolTip(tr("log_btn_tip"))
         self.exportIcon.setToolTip(tr("export_btn_tip"))
-        self.screenshotIcon.setToolTip(tr("screenshot_btn_tip"))
             
         bot_layout.addWidget(self.setIcon)
         bot_layout.addStretch()
@@ -722,15 +726,12 @@ class CardWidget(QFrame):
         bot_layout.addWidget(self.logIcon)
         bot_layout.addStretch()
         bot_layout.addWidget(self.exportIcon)
-        bot_layout.addStretch()
-        bot_layout.addWidget(self.screenshotIcon)
 
         self.setIcon.mousePressEvent = lambda e: self._on_icon_click("settings", self.setIcon)
         self.homeIcon.mousePressEvent = lambda e: self._on_icon_click("home", self.homeIcon)
         self.floatIcon.mousePressEvent = lambda e: self._on_icon_click("minimize", self.floatIcon)
         self.logIcon.mousePressEvent = lambda e: self._on_icon_click("log", self.logIcon)
         self.exportIcon.mousePressEvent = lambda e: self._on_icon_click("export", self.exportIcon)
-        self.screenshotIcon.mousePressEvent = lambda e: self._on_icon_click("error_screenshot", self.screenshotIcon)
 
         main_layout.addWidget(self.bottomBg)
 
@@ -740,7 +741,6 @@ class CardWidget(QFrame):
         self.floatIcon.setToolTip(tr("float_btn_tip"))
         self.logIcon.setToolTip(tr("log_btn_tip"))
         self.exportIcon.setToolTip(tr("export_btn_tip"))
-        self.screenshotIcon.setToolTip(tr("screenshot_btn_tip"))
         self._rebuild_rows()
 
     def _save_config(self):
@@ -765,6 +765,8 @@ class CardWidget(QFrame):
             item = self.rows_layout.takeAt(0)
             widget = item.widget()
             if widget is not None:
+                widget.hide()
+                widget.setParent(None)
                 widget.deleteLater()
         self.rows.clear()
 
@@ -1123,20 +1125,6 @@ class CardWidget(QFrame):
                     self.config_path,
                 )
                 self.fastapi_dialog.show()
-        elif name == "error_screenshot":
-            from .error_screenshot_window import ErrorScreenshotWindow
-            dialog = getattr(self, "screenshot_dialog", None)
-            if dialog is not None:
-                try:
-                    dialog.show()
-                    dialog.activateWindow()
-                    dialog.fetch_groups()
-                    return
-                except RuntimeError:
-                    dialog = None
-            if dialog is None:
-                self.screenshot_dialog = ErrorScreenshotWindow(self.window(), self.config)
-                self.screenshot_dialog.show()
         elif name == "minimize":
             self.show_mini_window()
 
@@ -1185,9 +1173,15 @@ class AlasConsole(QWidget):
             result = check_for_updates(current_version)
         except Exception as exc:
             result = {"has_update": False, "error": str(exc)}
-        self.auto_update_result_signal.emit(result, check_id)
+        try:
+            if isValid(self):
+                self.auto_update_result_signal.emit(result, check_id)
+        except RuntimeError:
+            pass
 
     def _on_auto_update_result(self, result, check_id):
+        if not isValid(self):
+            return
         if check_id != self._auto_update_check_id:
             return
         if not result.get("has_update"):

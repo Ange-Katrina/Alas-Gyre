@@ -11,10 +11,18 @@ build_onefile/
 dist/
 dist_single/
 output/
+*.build/
+*.dist/
+*.onefile-build/
+*.nuitka-cache/
+Alas-Gyre-Nuitka.exe
+*.exe
 tools/upx-*/
 tools/*.zip
 
 config.json
+build_info.py
+fastapi.py
 *.log
 *.tmp
 *.bak

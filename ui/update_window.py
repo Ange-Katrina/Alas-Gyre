@@ -12,13 +12,17 @@ from updater import do_update
 from .i18n import tr
 from .main_window import WindowButton
 
+try:
+    from shiboken6 import isValid
+except Exception:
+    def isValid(widget):
+        return widget is not None
+
 
 CHANGELOG_PHRASE_MAP = {
     "feat: improve update flow and config display": "功能：改进更新流程和配置显示",
     "fix: improve startup taskbar integration": "修复：改进启动任务栏集成",
     "fix: allow floating widget buttons during click-through": "修复：允许悬浮窗穿透时按钮仍可点击",
-    "feat: Implement intelligent failover update download logic: official first, dual-mirror backup fallbacks": "功能：实现智能故障转移更新下载逻辑：官方优先，双镜像备份回退",
-    "fix: Increase updater and GUI timeouts and implement high-speed mirror.ghproxy.com download acceleration": "修复：增加更新程序和界面超时时间，并实现 mirror.ghproxy.com 高速下载加速",
 }
 
 CHANGELOG_PREFIX_MAP = {
@@ -107,7 +111,7 @@ class UpdatePromptWindow(QDialog):
         self.download_url = self.update_info.get("url", "")
 
         self.setObjectName("updateWindow")
-        self.setFixedSize(520, 430)
+        self.setFixedSize(520, 440)
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog)
         self.setAttribute(Qt.WA_TranslucentBackground)
 
@@ -116,6 +120,7 @@ class UpdatePromptWindow(QDialog):
 
         self.card = QFrame(self)
         self.card.setObjectName("updateCard")
+        self.card.setAttribute(Qt.WA_StyledBackground, True)
         card_layout = QVBoxLayout(self.card)
         card_layout.setContentsMargins(0, 0, 0, 0)
         card_layout.setSpacing(0)
@@ -218,14 +223,32 @@ class UpdatePromptWindow(QDialog):
         self._set_status(tr("downloading"), "info")
         threading.Thread(
             target=do_update,
-            args=(self.download_url, self.progress_signal.emit, self.finish_signal.emit),
+            args=(self.download_url, self._emit_progress, self._emit_finish),
             daemon=True,
         ).start()
 
+    def _emit_progress(self, percentage):
+        try:
+            if isValid(self):
+                self.progress_signal.emit(percentage)
+        except RuntimeError:
+            pass
+
+    def _emit_finish(self, success, message):
+        try:
+            if isValid(self):
+                self.finish_signal.emit(success, message)
+        except RuntimeError:
+            pass
+
     def _on_progress(self, percentage):
+        if not isValid(self):
+            return
         self.downloadBtn.setText(f"{percentage}%")
 
     def _on_finish(self, success, message):
+        if not isValid(self):
+            return
         self._set_status(message or "", "success" if success else "error")
         self.downloadBtn.setText(tr("restart") if success else tr("download_update"))
         if not success:
@@ -233,6 +256,8 @@ class UpdatePromptWindow(QDialog):
             self.laterBtn.setEnabled(True)
 
     def _set_status(self, text, state):
+        if not isValid(self):
+            return
         self.statusLabel.setText(text)
         self.statusLabel.setProperty("state", state)
         self.statusLabel.style().unpolish(self.statusLabel)

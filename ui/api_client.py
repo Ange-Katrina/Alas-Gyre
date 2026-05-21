@@ -12,3 +12,14 @@ def api_headers(config):
     if not token:
         return {}
     return {TOKEN_HEADER: token}
+
+
+def api_request(method, url, **kwargs):
+    import requests
+
+    session = requests.Session()
+    session.trust_env = False
+    try:
+        return session.request(method, url, **kwargs)
+    finally:
+        session.close()

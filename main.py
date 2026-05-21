@@ -44,10 +44,14 @@ def main():
 
     configure_windows_app_id()
     app = QApplication(sys.argv)
+    # The first-run setup dialog is shown before the main window. With Qt's
+    # default quit-on-last-window-closed behavior, closing that dialog can mark
+    # the app as quitting before the main window is shown, which looks like a
+    # flash crash in packaged builds. Real exits use explicit quit actions.
+    app.setQuitOnLastWindowClosed(False)
     app.setApplicationName("Alas-Gyre")
     app.setApplicationDisplayName("Alas-Gyre")
     app.setOrganizationName("Ange-Katrina")
-    app.setQuitOnLastWindowClosed(False)
     app.setFont(QFont("Microsoft YaHei", 9))
 
     icon_path = resource_path(os.path.join("ui", "assets", "alas.ico"))

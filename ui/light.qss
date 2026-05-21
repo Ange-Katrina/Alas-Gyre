@@ -145,6 +145,12 @@ QLabel#fastapiPathTitle {
     background: transparent;
 }
 
+QLabel#fastapiPathHint {
+    color: #64748b;
+    font-size: 12px;
+    background: transparent;
+}
+
 QLineEdit#fastapiPathInput {
     background-color: #ffffff;
     border: 1px solid #cbd5e1;
@@ -208,6 +214,14 @@ QLabel#fastapiStatus[state="error"] {
 QLabel#formLabel {
     color: #334155;
     font-size: 13px;
+}
+
+QLabel#settingsSectionLabel {
+    color: #047857;
+    font-size: 12px;
+    font-weight: 600;
+    background: transparent;
+    padding-top: 2px;
 }
 
 QLabel#sliderValueLabel {
@@ -565,6 +579,28 @@ QComboBox#logConfigCombo QAbstractItemView, QComboBox#screenshotCombo QAbstractI
     outline: none;
     padding: 4px;
     font-size: 13px;
+}
+
+QPushButton#logViewTab {
+    background-color: transparent;
+    color: #64748b;
+    border: 1px solid transparent;
+    border-radius: 5px;
+    padding: 3px 10px;
+    font-size: 12px;
+    font-family: "Microsoft YaHei", "Segoe UI";
+}
+QPushButton#logViewTab:hover {
+    background-color: #f1f5f9;
+    color: #0f172a;
+}
+QPushButton#logViewTab[active="true"] {
+    background-color: #ecfdf5;
+    color: #047857;
+    border: 1px solid #bbf7d0;
+}
+QPushButton#logViewTab:focus {
+    outline: none;
 }
 
 QLabel#screenshotFieldLabel {

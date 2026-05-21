@@ -1,20 +1,29 @@
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QWidget, QLabel, QLineEdit, QCheckBox,
-    QPushButton, QFrame, QGraphicsDropShadowEffect, QSlider
+    QPushButton, QFrame, QGraphicsDropShadowEffect, QSlider, QGridLayout
 )
 from PySide6.QtCore import Qt, Signal, QTimer, QSize
 from PySide6.QtGui import QColor, QPixmap, QPainter, QPen, QIcon
-import requests
 import secrets
 import threading
 
-from .api_client import api_base_url, api_headers
+from .api_client import api_base_url, api_headers, api_request
 from updater import check_for_updates, do_update
 from main import VERSION
-from .main_window import WindowButton
+from .main_window import WindowButton, config_path, fastapi_output_path, fastapi_source_path
 from .i18n import tr
 
+try:
+    from shiboken6 import isValid
+except Exception:
+    def isValid(widget):
+        return widget is not None
+
 class CheckBox(QCheckBox):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.setFocusPolicy(Qt.NoFocus)
+
     def paintEvent(self, event):
         super().paintEvent(event)
         if not self.isChecked():
@@ -34,12 +43,13 @@ class SettingsWindow(QDialog):
     update_result_signal = Signal(dict, int)
     update_progress_signal = Signal(int)
     update_finish_signal = Signal(bool, str)
+    fastapi_update_result_signal = Signal(bool, str)
 
     def __init__(self, parent=None, config=None, configs=None, current_config="alas"):
         super().__init__(parent)
         self.config = config if config is not None else {}
         self.setObjectName("settingsWindow")
-        self.setFixedSize(420, 440)  # 高度微调至 440 以完美容纳多一行复选框
+        self.setFixedSize(480, 580)
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog)
         self.setAttribute(Qt.WA_TranslucentBackground)
 
@@ -49,6 +59,7 @@ class SettingsWindow(QDialog):
         # 背景容器卡片
         self.card = QFrame(self)
         self.card.setObjectName("settingsCard")
+        self.card.setAttribute(Qt.WA_StyledBackground, True)
         card_layout = QVBoxLayout(self.card)
         card_layout.setContentsMargins(0, 0, 0, 0)
         card_layout.setSpacing(0)
@@ -77,12 +88,8 @@ class SettingsWindow(QDialog):
         self.formBg.setObjectName("settingsFormBg")
         self.formBg.setAttribute(Qt.WA_StyledBackground, True)
         form_layout = QVBoxLayout(self.formBg)
-        form_layout.setContentsMargins(24, 18, 24, 16)
-        form_layout.setSpacing(12)
-
-        # 开关选项第1行
-        option_layout1 = QHBoxLayout()
-        option_layout1.setSpacing(28)
+        form_layout.setContentsMargins(24, 16, 24, 16)
+        form_layout.setSpacing(10)
 
         self.autoStartCheck = CheckBox(tr("auto_start"))
         self.autoStartCheck.setCursor(Qt.PointingHandCursor)
@@ -92,14 +99,6 @@ class SettingsWindow(QDialog):
         self.alwaysOnTopCheck.setCursor(Qt.PointingHandCursor)
         self.alwaysOnTopCheck.setChecked(self.config.get("always_on_top", False))
 
-        option_layout1.addWidget(self.autoStartCheck)
-        option_layout1.addWidget(self.alwaysOnTopCheck)
-        option_layout1.addStretch()
-
-        # 开关选项第2行
-        option_layout2 = QHBoxLayout()
-        option_layout2.setSpacing(28)
-
         self.miniClickThroughCheck = CheckBox(tr("click_through"))
         self.miniClickThroughCheck.setCursor(Qt.PointingHandCursor)
         self.miniClickThroughCheck.setChecked(self.config.get("mini_click_through", False))
@@ -108,30 +107,25 @@ class SettingsWindow(QDialog):
         self.lightThemeCheck.setCursor(Qt.PointingHandCursor)
         self.lightThemeCheck.setChecked(self.config.get("theme", "dark") == "light")
 
-        option_layout2.addWidget(self.miniClickThroughCheck)
-        option_layout2.addWidget(self.lightThemeCheck)
-        option_layout2.addStretch()
-
-        # 开关选项第3行 (语言设置)
-        option_layout3 = QHBoxLayout()
-        option_layout3.setSpacing(28)
-
         self.englishLangCheck = CheckBox(tr("english_mode"))
         self.englishLangCheck.setCursor(Qt.PointingHandCursor)
         self.englishLangCheck.setChecked(self.config.get("lang", "zh") == "en")
 
-        option_layout3.addWidget(self.englishLangCheck)
-        option_layout3.addStretch()
-
-        form_layout.addLayout(option_layout1)
-        form_layout.addLayout(option_layout2)
-        form_layout.addLayout(option_layout3)
+        preference_grid = QGridLayout()
+        preference_grid.setContentsMargins(0, 0, 0, 0)
+        preference_grid.setHorizontalSpacing(22)
+        preference_grid.setVerticalSpacing(8)
+        preference_grid.addWidget(self.autoStartCheck, 0, 0)
+        preference_grid.addWidget(self.alwaysOnTopCheck, 0, 1)
+        preference_grid.addWidget(self.miniClickThroughCheck, 1, 0)
+        preference_grid.addWidget(self.lightThemeCheck, 1, 1)
+        preference_grid.addWidget(self.englishLangCheck, 2, 0, 1, 2)
 
         opacity_layout = QHBoxLayout()
         opacity_layout.setSpacing(10)
         opacity_label = QLabel(tr("float_opacity"))
         opacity_label.setObjectName("formLabel")
-        opacity_label.setFixedWidth(100)
+        opacity_label.setFixedWidth(104)
         self.miniOpacitySlider = QSlider(Qt.Horizontal)
         self.miniOpacitySlider.setObjectName("settingsSlider")
         self.miniOpacitySlider.setRange(35, 100)
@@ -148,14 +142,13 @@ class SettingsWindow(QDialog):
         opacity_layout.addWidget(opacity_label)
         opacity_layout.addWidget(self.miniOpacitySlider, stretch=1)
         opacity_layout.addWidget(self.miniOpacityValue)
-        form_layout.addLayout(opacity_layout)
 
         # IP 布局
         ip_layout = QHBoxLayout()
         ip_layout.setSpacing(10)
         ip_label = QLabel(tr("ip_address"))
         ip_label.setObjectName("formLabel")
-        ip_label.setFixedWidth(100)
+        ip_label.setFixedWidth(104)
         self.ipInput = QLineEdit()
         self.ipInput.setObjectName("settingsInput")
         self.ipInput.setFixedHeight(30)
@@ -169,11 +162,11 @@ class SettingsWindow(QDialog):
         
         port_label = QLabel(tr("service_port"))
         port_label.setObjectName("formLabel")
-        port_label.setFixedWidth(100)
+        port_label.setFixedWidth(104)
         self.portInput = QLineEdit()
         self.portInput.setObjectName("settingsInput")
-        self.portInput.setFixedSize(90, 30)
-        self.portInput.setText(self.config.get("port", "22267"))
+        self.portInput.setFixedSize(96, 30)
+        self.portInput.setText(str(self.config.get("port", "22267")))
         port_layout.addWidget(port_label)
         port_layout.addWidget(self.portInput)
         port_layout.addStretch()
@@ -182,7 +175,7 @@ class SettingsWindow(QDialog):
         self.testBtn.setObjectName("testBtn")
         self.testBtn.setCursor(Qt.PointingHandCursor)
         self.testBtn.setFocusPolicy(Qt.NoFocus)
-        self.testBtn.setFixedSize(120, 30)
+        self.testBtn.setFixedSize(116, 30)
         self.testBtn.clicked.connect(self._run_connection_test)
         port_layout.addWidget(self.testBtn)
 
@@ -190,7 +183,7 @@ class SettingsWindow(QDialog):
         token_layout.setSpacing(10)
         token_label = QLabel("API Token")
         token_label.setObjectName("formLabel")
-        token_label.setFixedWidth(100)
+        token_label.setFixedWidth(104)
         self.tokenInput = QLineEdit()
         self.tokenInput.setObjectName("settingsInput")
         self.tokenInput.setFixedHeight(30)
@@ -203,9 +196,39 @@ class SettingsWindow(QDialog):
         self.tokenGenerateBtn.setObjectName("tokenBtn")
         self.tokenGenerateBtn.setCursor(Qt.PointingHandCursor)
         self.tokenGenerateBtn.setFocusPolicy(Qt.NoFocus)
-        self.tokenGenerateBtn.setFixedSize(80, 30)
+        self.tokenGenerateBtn.setFixedSize(82, 30)
         self.tokenGenerateBtn.clicked.connect(self._generate_token)
         token_layout.addWidget(self.tokenGenerateBtn)
+
+        wizard_layout = QHBoxLayout()
+        wizard_layout.setSpacing(10)
+
+        wizard_label = QLabel(tr("wizard"))
+        wizard_label.setObjectName("formLabel")
+        wizard_label.setFixedWidth(104)
+
+        self.wizardBtn = QPushButton(tr("open_wizard"))
+        self.wizardBtn.setObjectName("updateBtn")
+        self.wizardBtn.setCursor(Qt.PointingHandCursor)
+        self.wizardBtn.setFocusPolicy(Qt.NoFocus)
+        self.wizardBtn.setFixedSize(116, 30)
+        self.wizardBtn.setStyleSheet("""
+            QPushButton#updateBtn {
+                background-color: transparent;
+                border: 1px solid #454852;
+                border-radius: 4px;
+                color: #a6abb4;
+            }
+            QPushButton#updateBtn:hover {
+                background-color: #454852;
+                color: #ffffff;
+            }
+        """)
+        self.wizardBtn.clicked.connect(self._open_init_setup)
+
+        wizard_layout.addWidget(wizard_label)
+        wizard_layout.addStretch()
+        wizard_layout.addWidget(self.wizardBtn)
 
         # 版本更新布局
         update_layout = QHBoxLayout()
@@ -213,7 +236,7 @@ class SettingsWindow(QDialog):
         
         update_label = QLabel(tr("version_update"))
         update_label.setObjectName("formLabel")
-        update_label.setFixedWidth(100)
+        update_label.setFixedWidth(104)
         
         self.versionLabel = QLabel(f"{tr('current_version')} {VERSION}")
         self.versionLabel.setStyleSheet("color: #a6abb4; font-size: 13px; font-family: 'Microsoft YaHei', 'Segoe UI';")
@@ -222,7 +245,7 @@ class SettingsWindow(QDialog):
         self.updateBtn.setObjectName("updateBtn")
         self.updateBtn.setCursor(Qt.PointingHandCursor)
         self.updateBtn.setFocusPolicy(Qt.NoFocus)
-        self.updateBtn.setFixedSize(110, 30)
+        self.updateBtn.setFixedSize(116, 30)
         self.updateBtn.setStyleSheet("""
             QPushButton#updateBtn {
                 background-color: transparent;
@@ -242,10 +265,42 @@ class SettingsWindow(QDialog):
         update_layout.addStretch()
         update_layout.addWidget(self.updateBtn)
 
+        fastapi_update_layout = QHBoxLayout()
+        fastapi_update_layout.setSpacing(10)
+
+        fastapi_update_label = QLabel(tr("fastapi_update"))
+        fastapi_update_label.setObjectName("formLabel")
+        fastapi_update_label.setFixedWidth(104)
+
+        self.fastapiUpdateHint = QLabel(tr("fastapi_update_hint"))
+        self.fastapiUpdateHint.setStyleSheet("color: #8f96a3; font-size: 12px; font-family: 'Microsoft YaHei', 'Segoe UI';")
+        self.fastapiUpdateHint.setWordWrap(True)
+
+        self.fastapiUpdateBtn = QPushButton(tr("update_fastapi"))
+        self.fastapiUpdateBtn.setObjectName("updateBtn")
+        self.fastapiUpdateBtn.setCursor(Qt.PointingHandCursor)
+        self.fastapiUpdateBtn.setFocusPolicy(Qt.NoFocus)
+        self.fastapiUpdateBtn.setFixedSize(116, 30)
+        self.fastapiUpdateBtn.setStyleSheet(self.updateBtn.styleSheet())
+        self.fastapiUpdateBtn.clicked.connect(self._update_remote_fastapi)
+
+        fastapi_update_layout.addWidget(fastapi_update_label)
+        fastapi_update_layout.addWidget(self.fastapiUpdateHint, stretch=1)
+        fastapi_update_layout.addWidget(self.fastapiUpdateBtn)
+
+        form_layout.addWidget(self._section_label(tr("settings_section_behavior")))
+        form_layout.addLayout(preference_grid)
+        form_layout.addLayout(opacity_layout)
+        form_layout.addSpacing(2)
+        form_layout.addWidget(self._section_label(tr("settings_section_connection")))
         form_layout.addLayout(ip_layout)
         form_layout.addLayout(port_layout)
         form_layout.addLayout(token_layout)
+        form_layout.addSpacing(2)
+        form_layout.addWidget(self._section_label(tr("settings_section_maintenance")))
+        form_layout.addLayout(wizard_layout)
         form_layout.addLayout(update_layout)
+        form_layout.addLayout(fastapi_update_layout)
         form_layout.addStretch()
 
         # 绑定测试结果信号
@@ -253,6 +308,7 @@ class SettingsWindow(QDialog):
         self.update_result_signal.connect(self._handle_update_check_result)
         self.update_progress_signal.connect(self._on_download_progress)
         self.update_finish_signal.connect(self._on_update_finish)
+        self.fastapi_update_result_signal.connect(self._on_remote_fastapi_updated)
 
         # 底部按钮
         btn_layout = QHBoxLayout()
@@ -291,6 +347,12 @@ class SettingsWindow(QDialog):
         self._center_on_screen()
         QTimer.singleShot(100, self._check_for_updates)
 
+    def _section_label(self, text):
+        label = QLabel(text)
+        label.setObjectName("settingsSectionLabel")
+        label.setFixedHeight(18)
+        return label
+
     def _center_on_screen(self):
         if self.parent():
             parent_geom = self.parent().geometry()
@@ -299,6 +361,8 @@ class SettingsWindow(QDialog):
             self.move(x, y)
 
     def _check_for_updates(self):
+        if not isValid(self):
+            return
         self.updateBtn.setEnabled(False)
         self.updateBtn.setText(tr("checking"))
         self.updateBtn.setToolTip("")
@@ -309,10 +373,19 @@ class SettingsWindow(QDialog):
         threading.Thread(target=self._update_task, args=(check_id,), daemon=True).start()
 
     def _update_task(self, check_id):
-        result = check_for_updates(VERSION)
-        self.update_result_signal.emit(result, check_id)
+        try:
+            result = check_for_updates(VERSION)
+        except Exception as exc:
+            result = {"has_update": False, "error": str(exc)}
+        try:
+            if isValid(self):
+                self.update_result_signal.emit(result, check_id)
+        except RuntimeError:
+            pass
 
     def _handle_update_check_result(self, result, check_id):
+        if not isValid(self):
+            return
         if not getattr(self, "_checking_active", False):
             return
         if check_id != getattr(self, "_update_check_id", None):
@@ -353,18 +426,38 @@ class SettingsWindow(QDialog):
             QTimer.singleShot(3000, self._reset_update_btn)
 
     def _start_download(self, download_url):
+        if not isValid(self):
+            return
         self.updateBtn.setEnabled(False)
         self.updateBtn.setText("0%")
         threading.Thread(
             target=do_update,
-            args=(download_url, self.update_progress_signal.emit, self.update_finish_signal.emit),
+            args=(download_url, self._emit_update_progress, self._emit_update_finish),
             daemon=True,
         ).start()
 
+    def _emit_update_progress(self, percentage):
+        try:
+            if isValid(self):
+                self.update_progress_signal.emit(percentage)
+        except RuntimeError:
+            pass
+
+    def _emit_update_finish(self, success, message):
+        try:
+            if isValid(self):
+                self.update_finish_signal.emit(success, message)
+        except RuntimeError:
+            pass
+
     def _on_download_progress(self, percentage):
+        if not isValid(self):
+            return
         self.updateBtn.setText(f"{percentage}%")
 
     def _on_update_finish(self, success, message):
+        if not isValid(self):
+            return
         self.updateBtn.setText(tr("restart") if success else tr("check_failed"))
         self.updateBtn.setToolTip(message or "")
         if not success:
@@ -372,6 +465,8 @@ class SettingsWindow(QDialog):
             QTimer.singleShot(3000, self._reset_update_btn)
 
     def _on_update_timeout(self, check_id=None):
+        if not isValid(self):
+            return
         if getattr(self, "_checking_active", False):
             if check_id is not None and check_id != getattr(self, "_update_check_id", None):
                 return
@@ -382,6 +477,8 @@ class SettingsWindow(QDialog):
             QTimer.singleShot(2000, self._reset_update_btn)
 
     def _reset_update_btn(self):
+        if not isValid(self):
+            return
         self.updateBtn.setText(tr("check_update"))
         self.updateBtn.setToolTip("")
         self.updateBtn.setEnabled(True)
@@ -403,6 +500,69 @@ class SettingsWindow(QDialog):
             pass
         self.updateBtn.clicked.connect(self._check_for_updates)
 
+    def _update_remote_fastapi(self):
+        if not isValid(self):
+            return
+        self._sync_config_from_ui()
+        self.fastapiUpdateBtn.setEnabled(False)
+        self.fastapiUpdateBtn.setText(tr("updating"))
+        threading.Thread(target=self._update_remote_fastapi_task, daemon=True).start()
+
+    def _update_remote_fastapi_task(self):
+        success = False
+        message = ""
+        try:
+            from .fastapi_export_window import render_fastapi_payload
+
+            update_config = {
+                "ip": self.config.get("ip", "127.0.0.1"),
+                "port": self.config.get("port", "22267"),
+                "api_token": self.config.get("api_token", ""),
+            }
+            content = render_fastapi_payload(fastapi_source_path(), self.config, config_path())
+            resp = api_request(
+                "POST",
+                f"{api_base_url(update_config)}/api/fastapi/update",
+                headers=api_headers(update_config),
+                json={"content": content, "restart": True},
+                timeout=12,
+            )
+            if resp.status_code == 200:
+                success = True
+                try:
+                    data = resp.json()
+                    message = tr("fastapi_update_success", path=data.get("path", "fastapi.py"))
+                except Exception:
+                    message = tr("fastapi_update_success", path="fastapi.py")
+            elif resp.status_code == 404:
+                message = tr("fastapi_update_unsupported")
+            elif resp.status_code == 401:
+                message = tr("test_unauthorized")
+            else:
+                try:
+                    data = resp.json()
+                    message = data.get("message") or data.get("error") or f"HTTP {resp.status_code}"
+                except Exception:
+                    message = f"HTTP {resp.status_code}"
+        except Exception as exc:
+            message = str(exc)
+        self._emit_fastapi_update_result(success, message)
+
+    def _emit_fastapi_update_result(self, success, message):
+        try:
+            if isValid(self):
+                self.fastapi_update_result_signal.emit(success, message)
+        except RuntimeError:
+            pass
+
+    def _on_remote_fastapi_updated(self, success, message):
+        if not isValid(self):
+            return
+        self.fastapiUpdateBtn.setEnabled(True)
+        self.fastapiUpdateBtn.setText(tr("update_fastapi"))
+        self.fastapiUpdateBtn.setToolTip(message or "")
+        self.fastapiUpdateHint.setText(message if success else tr("fastapi_update_failed", error=message))
+
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
             import sys
@@ -422,7 +582,7 @@ class SettingsWindow(QDialog):
                 self.move(event.globalPosition().toPoint() - self._drag_offset)
                 event.accept()
 
-    def accept(self):
+    def _sync_config_from_ui(self):
         self.config["auto_start"] = self.autoStartCheck.isChecked()
         self.config["always_on_top"] = self.alwaysOnTopCheck.isChecked()
         self.config["theme"] = "light" if self.lightThemeCheck.isChecked() else "dark"
@@ -434,7 +594,30 @@ class SettingsWindow(QDialog):
         self.config["mini_opacity"] = self._normalize_opacity(self.miniOpacitySlider.value())
         if "api_port" in self.config:
             del self.config["api_port"]
-        print(f"[配置保存] 语言: {self.config['lang']}, 自动启动: {self.config['auto_start']}, 主窗口置顶: {self.config['always_on_top']}, 主题: {self.config['theme']}, IP: {self.config['ip']}, Port: {self.config['port']}")
+
+    def _refresh_fields_from_config(self):
+        self.ipInput.setText(self.config.get("ip", "127.0.0.1"))
+        self.portInput.setText(str(self.config.get("port", "22267")))
+        self.tokenInput.setText(self.config.get("api_token", ""))
+
+    def _open_init_setup(self):
+        self._sync_config_from_ui()
+        from .init_window import InitSetupWindow
+
+        dialog = InitSetupWindow(
+            self,
+            self.config,
+            config_path(),
+            fastapi_source_path(),
+            fastapi_output_path(),
+        )
+        if dialog.exec():
+            self._refresh_fields_from_config()
+        dialog.deleteLater()
+
+    def accept(self):
+        self._sync_config_from_ui()
+        print(f"[Settings] lang={self.config['lang']}, auto_start={self.config['auto_start']}, always_on_top={self.config['always_on_top']}, theme={self.config['theme']}, ip={self.config['ip']}, port={self.config['port']}")
         super().accept()
 
     def _normalize_opacity(self, value):
@@ -449,6 +632,8 @@ class SettingsWindow(QDialog):
         self.tokenInput.setFocus()
 
     def _run_connection_test(self):
+        if not isValid(self):
+            return
         ip = self.ipInput.text().strip()
         port_str = self.portInput.text().strip()
         
@@ -478,7 +663,8 @@ class SettingsWindow(QDialog):
                 "port": port,
                 "api_token": token,
             }
-            resp = requests.get(
+            resp = api_request(
+                "GET",
                 f"{api_base_url(test_config)}/api/health",
                 headers=api_headers(test_config),
                 timeout=2.0,
@@ -490,7 +676,14 @@ class SettingsWindow(QDialog):
                 message = f"HTTP {resp.status_code}"
         except Exception as exc:
             message = str(exc)
-        self.test_result_signal.emit(success, message)
+        self._emit_test_result(success, message)
+
+    def _emit_test_result(self, success, message):
+        try:
+            if isValid(self):
+                self.test_result_signal.emit(success, message)
+        except RuntimeError:
+            pass
 
     def _create_icon(self, state):
         pixmap = QPixmap(24, 24)
@@ -515,6 +708,8 @@ class SettingsWindow(QDialog):
         return QIcon(pixmap)
 
     def _on_test_result(self, success, message=""):
+        if not isValid(self):
+            return
         self.testBtn.setEnabled(True)
         self.testBtn.setText("")
         self.testBtn.setToolTip(message)
@@ -532,6 +727,8 @@ class SettingsWindow(QDialog):
         QTimer.singleShot(2000, self._reset_test_btn)
 
     def _reset_test_btn(self):
+        if not isValid(self):
+            return
         self.testBtn.setIcon(QIcon())
         self.testBtn.setText(tr("test_connection"))
         self.testBtn.setToolTip("")
