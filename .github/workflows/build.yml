@@ -242,11 +242,20 @@ jobs:
             }
           }
 
+      - name: Generate PyInstaller sha256
+        shell: pwsh
+        run: |
+          $exe = "dist/Alas-Gyre.exe"
+          $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $exe).Hash.ToLowerInvariant()
+          [System.IO.File]::WriteAllText((Join-Path $PWD "dist/Alas-Gyre.exe.sha256"), "$hash  Alas-Gyre.exe`n", [System.Text.Encoding]::ASCII)
+
       - name: Upload PyInstaller artifact
         uses: actions/upload-artifact@v4
         with:
           name: Alas-Gyre-Windows-PyInstaller-${{ needs.meta.outputs.tag }}
-          path: dist/Alas-Gyre.exe
+          path: |
+            dist/Alas-Gyre.exe
+            dist/Alas-Gyre.exe.sha256
           retention-days: 7
 
   build-nuitka:
@@ -323,11 +332,20 @@ jobs:
             }
           }
 
+      - name: Generate Nuitka sha256
+        shell: pwsh
+        run: |
+          $exe = "Alas-Gyre-Nuitka.exe"
+          $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $exe).Hash.ToLowerInvariant()
+          [System.IO.File]::WriteAllText((Join-Path $PWD "Alas-Gyre-Nuitka.exe.sha256"), "$hash  Alas-Gyre-Nuitka.exe`n", [System.Text.Encoding]::ASCII)
+
       - name: Upload Nuitka artifact
         uses: actions/upload-artifact@v4
         with:
           name: Alas-Gyre-Windows-Nuitka-${{ needs.meta.outputs.tag }}
-          path: Alas-Gyre-Nuitka.exe
+          path: |
+            Alas-Gyre-Nuitka.exe
+            Alas-Gyre-Nuitka.exe.sha256
           retention-days: 7
 
   release:
@@ -347,6 +365,8 @@ jobs:
           # Copy Windows exe files
           find assets/ -name "Alas-Gyre.exe" -exec cp {} release/ \;
           find assets/ -name "Alas-Gyre-Nuitka.exe" -exec cp {} release/ \;
+          find assets/ -name "Alas-Gyre.exe.sha256" -exec cp {} release/ \;
+          find assets/ -name "Alas-Gyre-Nuitka.exe.sha256" -exec cp {} release/ \;
 
           # Copy CHANGELOG.md (only for body_path description)
           find assets/ -name "CHANGELOG.md" -exec cp {} release/ \;
@@ -361,5 +381,7 @@ jobs:
           body_path: release/CHANGELOG.md
           files: |
             release/Alas-Gyre.exe
+            release/Alas-Gyre.exe.sha256
             release/Alas-Gyre-Nuitka.exe
+            release/Alas-Gyre-Nuitka.exe.sha256
           prerelease: ${{ needs.meta.outputs.prerelease != 'false' }}

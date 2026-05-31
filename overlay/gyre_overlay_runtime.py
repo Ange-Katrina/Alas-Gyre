@@ -38,6 +38,10 @@ INVALID_CONFIG_NAME_CHARS = set('/\\:*?"<>|')
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
 
 
+def log_internal_error(context, exc):
+    print("[Alas-Gyre Overlay] %s: %r" % (context, exc), flush=True)
+
+
 def create_overlay_app(original_app):
     async def overlay_app(scope, receive, send):
         scope_type = scope.get("type")
@@ -95,7 +99,8 @@ async def handle_api(scope, receive, send):
         else:
             await send_json(send, {"error": "not_found", "path": route}, status=404)
     except Exception as exc:
-        await send_json(send, {"error": "internal_error", "message": str(exc)}, status=500)
+        log_internal_error("internal_error", exc)
+        await send_json(send, {"error": "internal_error"}, status=500)
 
 
 def parse_query(raw_query):
@@ -146,9 +151,6 @@ def response_headers(content_type="application/json; charset=utf-8", extra=None)
     headers = [
         (b"content-type", content_type.encode("latin1")),
         (b"cache-control", b"no-cache"),
-        (b"access-control-allow-origin", b"*"),
-        (b"access-control-allow-methods", b"GET, POST, DELETE, OPTIONS"),
-        (b"access-control-allow-headers", b"Content-Type, Authorization, X-Alas-Gyre-Token"),
     ]
     if extra:
         headers.extend(extra)
@@ -673,7 +675,8 @@ async def api_delete_config(send, query):
             },
         )
     except Exception as exc:
-        await send_json(send, {"error": "delete_failed", "config": config_name, "message": str(exc)}, status=500)
+        log_internal_error("delete_failed", exc)
+        await send_json(send, {"error": "delete_failed", "config": config_name}, status=500)
 
 
 async def api_get_status_all(send):
@@ -688,7 +691,8 @@ async def api_get_status_all(send):
         except Exception as exc:
             statuses[config_name] = "error"
             tasks[config_name] = ""
-            errors[config_name] = str(exc)
+            log_internal_error("status_all_failed:%s" % config_name, exc)
+            errors[config_name] = "status_failed"
 
     payload = {"statuses": statuses, "tasks": tasks}
     if errors:
@@ -708,7 +712,8 @@ async def api_get_status(send, query):
         task = extract_running_task(config_name) if status == "running" else ""
         await send_json(send, {"config": config_name, "status": status, "task": task})
     except Exception as exc:
-        await send_json(send, {"config": config_name, "status": "error", "error": str(exc)}, status=500)
+        log_internal_error("status_failed:%s" % config_name, exc)
+        await send_json(send, {"config": config_name, "status": "error", "error": "status_failed"}, status=500)
 
 
 async def api_post_start(send, query):
@@ -732,9 +737,10 @@ async def api_post_start(send, query):
             },
         )
     except Exception as exc:
+        log_internal_error("start_failed:%s" % config_name, exc)
         await send_json(
             send,
-            {"config": config_name, "message": "start_failed", "status": "error", "error": str(exc)},
+            {"config": config_name, "message": "start_failed", "status": "error", "error": "start_failed"},
             status=500,
         )
 
@@ -760,9 +766,10 @@ async def api_post_stop(send, query):
             },
         )
     except Exception as exc:
+        log_internal_error("stop_failed:%s" % config_name, exc)
         await send_json(
             send,
-            {"config": config_name, "message": "stop_failed", "status": "error", "error": str(exc)},
+            {"config": config_name, "message": "stop_failed", "status": "error", "error": "stop_failed"},
             status=500,
         )
 
@@ -780,7 +787,8 @@ async def api_get_log(send, query):
         live_log = get_live_log(config_name, line_limit)
     except Exception as exc:
         live_log = ""
-        live_error = str(exc)
+        log_internal_error("live_log_failed:%s" % config_name, exc)
+        live_error = "live_log_unavailable"
 
     if live_log:
         await send_json(send, {"config": config_name, "exists": True, "source": "live", "lines": line_limit, "log": live_log})
@@ -807,6 +815,7 @@ async def api_get_log(send, query):
             payload["live_error"] = live_error
         await send_json(send, payload)
     except Exception as exc:
+        log_internal_error("log_file_failed:%s" % config_name, exc)
         await send_json(
             send,
             {
@@ -816,7 +825,7 @@ async def api_get_log(send, query):
                 "file": os.path.basename(log_file),
                 "lines": line_limit,
                 "log": "",
-                "error": str(exc),
+                "error": "log_read_failed",
             },
             status=500,
         )
@@ -835,7 +844,8 @@ async def api_get_error_screenshots(send, query):
             },
         )
     except Exception as exc:
-        await send_json(send, {"exists": False, "groups": [], "error": str(exc)}, status=500)
+        log_internal_error("error_screenshots_failed", exc)
+        await send_json(send, {"exists": False, "groups": [], "error": "list_failed"}, status=500)
 
 
 async def api_get_error_screenshot_image(send, query):
@@ -849,4 +859,5 @@ async def api_get_error_screenshot_image(send, query):
     except ValueError as exc:
         await send_json(send, {"error": str(exc), "folder": folder, "file": file_name}, status=400)
     except Exception as exc:
-        await send_json(send, {"error": str(exc), "folder": folder, "file": file_name}, status=500)
+        log_internal_error("error_screenshot_image_failed", exc)
+        await send_json(send, {"error": "image_read_failed", "folder": folder, "file": file_name}, status=500)

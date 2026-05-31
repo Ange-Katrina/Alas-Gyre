@@ -19,7 +19,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 TOKEN_HEADER = "X-Alas-Gyre-Token"
 PROTOCOL = "alas-gyre-runtime-update"
 RUNTIME_VERSION = "__RUNTIME_VERSION__"
-DEFAULT_HOST = "0.0.0.0"
+DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 22268
 MAX_FILE_BYTES = 1024 * 1024
 MAX_REQUEST_BYTES = 8 * 1024 * 1024
@@ -78,9 +78,6 @@ def json_response(handler, payload, status=200):
     handler.send_response(status)
     handler.send_header("Content-Type", "application/json; charset=utf-8")
     handler.send_header("Cache-Control", "no-cache")
-    handler.send_header("Access-Control-Allow-Origin", "*")
-    handler.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-    handler.send_header("Access-Control-Allow-Headers", "Content-Type, X-Alas-Gyre-Token")
     handler.send_header("Content-Length", str(len(body)))
     handler.end_headers()
     handler.wfile.write(body)
@@ -163,7 +160,8 @@ class RuntimeUpdaterHandler(BaseHTTPRequestHandler):
         except ValueError as exc:
             json_response(self, {"error": str(exc)}, status=400)
         except Exception as exc:
-            json_response(self, {"error": "update_failed", "message": str(exc)}, status=500)
+            print("[Alas-Gyre Updater] update_failed: %r" % (exc,), flush=True)
+            json_response(self, {"error": "update_failed"}, status=500)
 
     def authorized(self):
         expected = read_token()

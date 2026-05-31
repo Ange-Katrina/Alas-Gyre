@@ -1,3 +1,4 @@
+import hashlib
 import os
 import re
 import shlex
@@ -114,7 +115,7 @@ def is_newer_version(latest_version, current_version):
         return False
 
 
-def find_exe_asset(assets, build_flavor=None):
+def find_exe_asset_object(assets, build_flavor=None):
     build_flavor = normalize_build_flavor(build_flavor or get_build_flavor())
     exe_assets = []
     for asset in assets or []:
@@ -131,20 +132,55 @@ def find_exe_asset(assets, build_flavor=None):
     for preferred_name in preferred_names:
         for asset in exe_assets:
             if asset.get("name", "").lower() == preferred_name:
-                return asset.get("browser_download_url")
+                return asset
 
     for asset in exe_assets:
         name = asset.get("name", "").lower()
         if build_flavor == "nuitka" and "nuitka" in name:
-            return asset.get("browser_download_url")
+            return asset
         if (
             build_flavor == "pyinstaller"
             and "nuitka" not in name
             and "pyinstaller" not in name
         ):
-            return asset.get("browser_download_url")
+            return asset
 
     return None
+
+
+def find_exe_asset(assets, build_flavor=None):
+    asset = find_exe_asset_object(assets, build_flavor)
+    return asset.get("browser_download_url") if asset else None
+
+
+def find_sha256_asset(assets, exe_asset):
+    exe_name = (exe_asset or {}).get("name", "")
+    if not exe_name:
+        return None
+    exe_name_lower = exe_name.lower()
+    exact_names = {
+        f"{exe_name_lower}.sha256",
+        f"{exe_name_lower}.sha256sum",
+        exe_name_lower.replace(".exe", ".sha256"),
+    }
+    for asset in assets or []:
+        name = asset.get("name", "").lower()
+        if name in exact_names:
+            return asset
+
+    stem = exe_name_lower[:-4] if exe_name_lower.endswith(".exe") else exe_name_lower
+    for asset in assets or []:
+        name = asset.get("name", "").lower()
+        if name.endswith((".sha256", ".sha256sum")) and stem in name:
+            return asset
+    return None
+
+
+def find_update_assets(assets, build_flavor=None):
+    exe_asset = find_exe_asset_object(assets, build_flavor)
+    if not exe_asset:
+        return None, None
+    return exe_asset, find_sha256_asset(assets, exe_asset)
 
 
 def update_result_from_release(data, current_version):
@@ -159,18 +195,34 @@ def update_result_from_release(data, current_version):
         return {"has_update": False, "version": latest_version}
 
     build_flavor = get_build_flavor()
-    download_url = find_exe_asset(data.get("assets", []), build_flavor)
-    if not download_url:
+    exe_asset, sha256_asset = find_update_assets(data.get("assets", []), build_flavor)
+    if not exe_asset:
         return {
             "has_update": False,
             "version": latest_version,
             "error": f"missing {build_flavor} exe asset",
+        }
+    if not sha256_asset:
+        return {
+            "has_update": False,
+            "version": latest_version,
+            "error": f"missing {build_flavor} sha256 asset",
+        }
+    download_url = exe_asset.get("browser_download_url")
+    sha256_url = sha256_asset.get("browser_download_url")
+    if not download_url or not sha256_url:
+        return {
+            "has_update": False,
+            "version": latest_version,
+            "error": f"missing {build_flavor} download url",
         }
 
     return {
         "has_update": True,
         "version": latest_version,
         "url": download_url,
+        "sha256_url": sha256_url,
+        "asset_name": exe_asset.get("name", ""),
         "changelog": data.get("body", ""),
         "build_flavor": build_flavor,
     }
@@ -216,6 +268,57 @@ def validate_downloaded_exe(path):
         with open(path, "rb") as f:
             if f.read(2) != b"MZ":
                 raise RuntimeError("Downloaded file is not a valid Windows executable.")
+
+
+def sha256_file(path):
+    digest = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def parse_sha256_text(text, asset_name=""):
+    lines = (text or "").splitlines()
+    preferred = []
+    fallback = []
+    asset_name = (asset_name or "").lower()
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            continue
+        match = re.search(r"\b([0-9a-fA-F]{64})\b", stripped)
+        if not match:
+            continue
+        digest = match.group(1).lower()
+        if asset_name and asset_name in stripped.lower():
+            preferred.append(digest)
+        fallback.append(digest)
+    if preferred:
+        return preferred[0]
+    if fallback:
+        return fallback[0]
+    raise RuntimeError("Missing sha256 checksum.")
+
+
+def fetch_expected_sha256(sha256_url, asset_name=""):
+    if not sha256_url:
+        raise RuntimeError("Missing sha256 asset.")
+    resp = http_get(sha256_url, headers=REQUEST_HEADERS, timeout=CHECK_TIMEOUT)
+    try:
+        resp.raise_for_status()
+        return parse_sha256_text(resp.text, asset_name)
+    finally:
+        close_response(resp)
+
+
+def validate_sha256(path, expected_sha256):
+    expected = str(expected_sha256 or "").strip().lower()
+    if len(expected) != 64 or any(c not in "0123456789abcdef" for c in expected):
+        raise RuntimeError("Invalid sha256 checksum.")
+    actual = sha256_file(path)
+    if actual != expected:
+        raise RuntimeError("Downloaded file checksum mismatch.")
 
 
 def fetch_latest_tag_by_redirect():
@@ -273,12 +376,22 @@ def check_for_updates(current_version):
     return {"has_update": False, "error": "; ".join(errors) or "unknown error"}
 
 
-def do_update(download_url, progress_callback, finish_callback):
+def do_update(
+    download_url,
+    progress_callback,
+    finish_callback,
+    sha256_url=None,
+    expected_sha256=None,
+    asset_name=None,
+):
     try:
         exe_path = get_current_exe_path()
         if not exe_path:
             finish_callback(False, "Auto update is only available in packaged exe builds.")
             return
+
+        if not expected_sha256:
+            expected_sha256 = fetch_expected_sha256(sha256_url, asset_name or os.path.basename(download_url or ""))
 
         resp = None
         try:
@@ -306,6 +419,7 @@ def do_update(download_url, progress_callback, finish_callback):
             close_response(resp)
 
         validate_downloaded_exe(temp_file)
+        validate_sha256(temp_file, expected_sha256)
         if progress_callback:
             progress_callback(100)
 

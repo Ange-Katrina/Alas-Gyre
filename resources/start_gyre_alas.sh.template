@@ -15,7 +15,7 @@ SYSTEMD_SERVICE_NAME="alas-gyre-overlay.service"
 OPENRC_SERVICE_NAME="alas-gyre-overlay"
 ALAS_GYRE_OVERLAY="$GYRE_RUNTIME/overlay"
 ALAS_GYRE_API_TOKEN=__API_TOKEN__
-DEFAULT_GYRE_UPDATE_HOST="0.0.0.0"
+DEFAULT_GYRE_UPDATE_HOST="127.0.0.1"
 DEFAULT_GYRE_UPDATE_PORT="22268"
 GYRE_UPDATE_HOST="${GYRE_UPDATE_HOST:-$DEFAULT_GYRE_UPDATE_HOST}"
 GYRE_UPDATE_PORT="${GYRE_UPDATE_PORT:-$DEFAULT_GYRE_UPDATE_PORT}"
@@ -694,6 +694,7 @@ show_updater_status() {
     cleanup_stale_updater_pid
     panel_top "Alas-Gyre Runtime Updater"
     panel_line "Updater" "$(updater_status_line)"
+    panel_line "Remote" "Local only by default. Set GYRE_UPDATE_HOST=0.0.0.0 or a LAN IP in .gyre_runtime.conf to update remotely."
     panel_line "Script" "$UPDATER_SCRIPT"
     panel_line "PID" "$UPDATER_PID_FILE"
     panel_line "Log" "$UPDATER_LOG_FILE"
@@ -937,6 +938,7 @@ show_status() {
         panel_line "PID" "$PID_FILE"
         panel_line "日志" "$LOG_FILE"
         panel_line "Updater" "$(updater_status_line)"
+        panel_line "远程更新" "默认仅本机可访问；如需远程更新，请在 .gyre_runtime.conf 设置 GYRE_UPDATE_HOST=0.0.0.0 或内网 IP。"
         panel_line "Updater log" "$UPDATER_LOG_FILE"
         panel_line "语言" "${C_CYAN}中文${C_RESET}"
         panel_bottom
@@ -953,6 +955,7 @@ show_status() {
         panel_line "PID" "$PID_FILE"
         panel_line "Log" "$LOG_FILE"
         panel_line "Updater" "$(updater_status_line)"
+        panel_line "Remote update" "Local only by default. Set GYRE_UPDATE_HOST=0.0.0.0 or a LAN IP in .gyre_runtime.conf."
         panel_line "Updater log" "$UPDATER_LOG_FILE"
         panel_line "Language" "${C_CYAN} English${C_RESET}"
         panel_bottom
@@ -1125,6 +1128,8 @@ show_paths_and_logs() {
         panel_line "PID" "$PID_FILE"
         panel_line "日志" "$LOG_FILE"
         panel_line "服务" "$SERVICE_DIR"
+        panel_line "更新监听" "$GYRE_UPDATE_HOST:$GYRE_UPDATE_PORT"
+        panel_line "远程更新" "默认仅本机可访问；远程更新需主动设置 GYRE_UPDATE_HOST 并开放端口。"
         panel_line "ALAS" "${ALAS_ROOT:-${C_RED}未配置${C_RESET}}"
         panel_bottom
         if [ -f "$LOG_FILE" ]; then
@@ -1142,6 +1147,8 @@ show_paths_and_logs() {
         panel_line "Updater PID" "$UPDATER_PID_FILE"
         panel_line "Updater log" "$UPDATER_LOG_FILE"
         panel_line "Service" "$SERVICE_DIR"
+        panel_line "Update listen" "$GYRE_UPDATE_HOST:$GYRE_UPDATE_PORT"
+        panel_line "Remote update" "Local only by default. Set GYRE_UPDATE_HOST and open the port to update remotely."
         panel_line "ALAS" "${ALAS_ROOT:-${C_RED}not configured${C_RESET}}"
         panel_bottom
         if [ -f "$LOG_FILE" ]; then

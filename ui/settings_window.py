@@ -551,8 +551,13 @@ class SettingsWindow(QDialog):
             except Exception:
                 pass
             
-            download_url = result["url"]
-            self.updateBtn.clicked.connect(lambda: self._start_download(download_url))
+            self.updateBtn.clicked.connect(
+                lambda: self._start_download(
+                    result.get("url", ""),
+                    result.get("sha256_url", ""),
+                    result.get("asset_name", ""),
+                )
+            )
         elif "error" in result:
             self.updateBtn.setText(tr("check_failed"))
             self.updateBtn.setToolTip(result.get("error", ""))
@@ -563,7 +568,7 @@ class SettingsWindow(QDialog):
             self.updateBtn.setToolTip(result.get("version", ""))
             QTimer.singleShot(3000, self._reset_update_btn)
 
-    def _start_download(self, download_url):
+    def _start_download(self, download_url, sha256_url="", asset_name=""):
         if not isValid(self):
             return
         self.updateBtn.setEnabled(False)
@@ -571,6 +576,7 @@ class SettingsWindow(QDialog):
         threading.Thread(
             target=do_update,
             args=(download_url, self._emit_update_progress, self._emit_update_finish),
+            kwargs={"sha256_url": sha256_url, "asset_name": asset_name},
             daemon=True,
         ).start()
 

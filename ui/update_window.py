@@ -109,6 +109,8 @@ class UpdatePromptWindow(QDialog):
         super().__init__(parent)
         self.update_info = update_info or {}
         self.download_url = self.update_info.get("url", "")
+        self.sha256_url = self.update_info.get("sha256_url", "")
+        self.asset_name = self.update_info.get("asset_name", "")
 
         self.setObjectName("updateWindow")
         self.setFixedSize(520, 440)
@@ -223,6 +225,7 @@ class UpdatePromptWindow(QDialog):
         threading.Thread(
             target=do_update,
             args=(self.download_url, self._emit_progress, self._emit_finish),
+            kwargs={"sha256_url": self.sha256_url, "asset_name": self.asset_name},
             daemon=True,
         ).start()
 
