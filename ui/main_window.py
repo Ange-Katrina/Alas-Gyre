@@ -1,21 +1,53 @@
-import sys
 import os
 import json
-import math
-import weakref
 from PySide6.QtWidgets import (
-    QApplication, QWidget, QLabel, QPushButton, QFrame,
-    QGraphicsDropShadowEffect, QVBoxLayout, QHBoxLayout, QSizePolicy, QScrollArea
+    QApplication, QWidget, QLabel, QFrame,
+    QVBoxLayout, QHBoxLayout, QScrollArea
 )
-from PySide6.QtCore import Qt, QRectF, QTimer, Signal, QPointF, QSize
-from PySide6.QtGui import QColor, QPainter, QPen, QFontMetrics, QPainterPath, QIcon, QPixmap
+from PySide6.QtCore import Qt, QTimer, Signal
 import threading
 import time
 
-from .api_client import api_headers
+from alas_gyre.api.client import api_headers, api_request, gyre_api_url
+from alas_gyre.core.paths import (
+    app_base_dir as app_base_dir, asset_path, config_path,
+)
+from alas_gyre.core.status import normalize_status
 from .window_snap import snap_to_available_screen
-from .i18n import tr
+from .i18n import get_language, tr
 from .message_dialog import ask_confirm, show_info, show_warning
+from .window_behavior import install_title_bar_drag, schedule_frameless_stabilize
+from .widgets import (
+    BottomIconButton,
+    ConfigActionButton,
+    ConfigDeleteButton,
+    MarqueeLabel,
+    StatusIndicator,
+    WindowButton,
+    build_bottom_icon,
+    load_bottom_icon,
+)
+
+
+
+__all__ = [
+    "AlasConsole",
+    "BottomIconButton",
+    "CardWidget",
+    "ConfigActionButton",
+    "ConfigDeleteButton",
+    "MainConfigRow",
+    "StatusIndicator",
+    "WindowButton",
+    "app_base_dir",
+    "asset_path",
+    "build_bottom_icon",
+    "config_path",
+    "get_status_text",
+    "load_bottom_icon",
+    "normalize_status",
+]
+
 
 try:
     from shiboken6 import isValid
@@ -23,424 +55,8 @@ except Exception:
     def isValid(widget):
         return widget is not None
 
-VALID_STATUSES = {"idle", "running", "error", "update", "disconnected"}
-ANIMATED_STATUSES = {"running", "error", "update", "disconnected"}
-_BOTTOM_ICON_CACHE = {}
-
-
-def _requests():
-    import requests
-    return requests
-
-def normalize_status(status):
-    return status if status in VALID_STATUSES else "idle"
-
 def get_status_text(status):
     return tr(normalize_status(status))
-
-def app_base_dir():
-    if getattr(sys, "frozen", False):
-        return os.path.dirname(sys.executable)
-    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-
-def config_path():
-    return os.path.join(app_base_dir(), "config.json")
-
-def fastapi_source_path():
-    relative_path = os.path.join("resources", "fastapi_payload.txt")
-    candidates = [
-        os.path.join(app_base_dir(), relative_path),
-    ]
-    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
-        candidates.append(os.path.join(sys._MEIPASS, relative_path))
-    for path in candidates:
-        if os.path.exists(path):
-            return path
-    return candidates[0]
-
-def fastapi_output_path():
-    return os.path.join(app_base_dir(), "fastapi.py")
-
-def asset_path(*parts):
-    relative_path = os.path.join("ui", "assets", *parts)
-    candidates = [
-        os.path.join(app_base_dir(), relative_path),
-    ]
-    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
-        candidates.append(os.path.join(sys._MEIPASS, relative_path))
-    for path in candidates:
-        if os.path.exists(path):
-            return path
-    return candidates[0]
-
-class StatusIndicator(QWidget):
-    """Animated status indicator"""
-    _sync_started_at = time.monotonic()
-    _active_widgets = weakref.WeakSet()
-    _animation_timer = None
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setFixedSize(16, 16)
-        self._state = "idle"  # idle, running, error
-        self_ref = weakref.ref(self)
-        cls = type(self)
-        self.destroyed.connect(lambda: (widget := self_ref()) is not None and cls._active_widgets.discard(widget))
-
-    @classmethod
-    def _ensure_animation_timer(cls):
-        if cls._animation_timer is not None:
-            return cls._animation_timer
-        cls._animation_timer = QTimer(QApplication.instance())
-        cls._animation_timer.setInterval(50)
-        cls._animation_timer.timeout.connect(cls._update_active_animations)
-        return cls._animation_timer
-
-    @classmethod
-    def _update_active_animations(cls):
-        for widget in list(cls._active_widgets):
-            try:
-                if widget.isVisible():
-                    widget.update()
-            except RuntimeError:
-                cls._active_widgets.discard(widget)
-        if not cls._active_widgets and cls._animation_timer:
-            cls._animation_timer.stop()
-
-    @classmethod
-    def _synced_angle(cls, degrees_per_second):
-        elapsed = time.monotonic() - cls._sync_started_at
-        return (elapsed * degrees_per_second) % 360
-
-    def setStatus(self, state):
-        state = normalize_status(state)
-        if self._state == state:
-            return
-        self._state = state
-        try:
-            if state in ANIMATED_STATUSES:
-                self._active_widgets.add(self)
-                timer = self._ensure_animation_timer()
-                if not timer.isActive():
-                    timer.start()
-            else:
-                self._active_widgets.discard(self)
-                if not self._active_widgets and self._animation_timer:
-                    self._animation_timer.stop()
-            self.update()
-        except RuntimeError:
-            pass
-
-    def paintEvent(self, event):
-        p = QPainter(self)
-        p.setRenderHint(QPainter.Antialiasing)
-        
-        if self._state == "idle":
-            pen = QPen(QColor("#6b707a"), 2.5, Qt.SolidLine, Qt.RoundCap)
-            p.setPen(pen)
-            p.setBrush(Qt.NoBrush)
-            p.drawEllipse(2, 2, 12, 12)
-            
-        elif self._state == "running":
-            pen = QPen(QColor(66, 211, 146), 2.5, Qt.SolidLine, Qt.RoundCap)
-            p.setPen(pen)
-            p.setBrush(Qt.NoBrush)
-            # drawArc: x, y, w, h, startAngle, spanAngle (in 1/16ths of a degree)
-            angle = self._synced_angle(-320)
-            p.drawArc(2, 2, 12, 12, int(angle * 16), 270 * 16)
-
-        elif self._state == "update":
-            pen = QPen(QColor(96, 165, 250), 2.5, Qt.SolidLine, Qt.RoundCap)
-            p.setPen(pen)
-            p.setBrush(Qt.NoBrush)
-            angle = self._synced_angle(-320)
-            p.drawArc(2, 2, 12, 12, int(angle * 16), 270 * 16)
-            
-        elif self._state == "error":
-            scale = self._synced_angle(600) / 360.0
-            size = 4 + 10 * scale # Scales between 4 and 14
-            offset = (16 - size) / 2
-            
-            alpha = int(255 * scale)
-            color = QColor(255, 193, 7, alpha)
-            
-            p.setPen(Qt.NoPen)
-            p.setBrush(color)
-            p.drawEllipse(QRectF(offset, offset, size, size))
-            
-        elif self._state == "disconnected":
-            angle = self._synced_angle(160)
-            scale = (math.sin(math.radians(angle)) + 1) / 2 # 0.0 ~ 1.0
-            size = 8 + 4 * scale # Scales between 8 and 12
-            offset = (16 - size) / 2
-            
-            p.setPen(Qt.NoPen)
-            p.setBrush(QColor(245, 108, 108)) # Red
-            p.drawEllipse(QRectF(offset, offset, size, size))
-            
-        p.end()
-
-class WindowButton(QWidget):
-    def __init__(self, kind, parent=None):
-        super().__init__(parent)
-        self.kind = kind
-        self._hover = False
-        self.setFixedSize(30, 30)
-        self.setCursor(Qt.PointingHandCursor)
-
-    def enterEvent(self, event):
-        self._hover = True
-        self.update()
-
-    def leaveEvent(self, event):
-        self._hover = False
-        self.update()
-
-    def paintEvent(self, event):
-        p = QPainter(self)
-        p.setRenderHint(QPainter.Antialiasing)
-
-        theme = "dark"
-        curr = self
-        while curr:
-            if hasattr(curr, "config"):
-                theme = curr.config.get("theme", "dark")
-                break
-            curr = curr.parent()
-
-        if self._hover:
-            if self.kind == "close":
-                fill_color = QColor("#e11d48") if theme == "light" else QColor("#c42b1c")
-                p.fillRect(self.rect(), fill_color)
-                color = QColor("#ffffff")
-            else:
-                fill_color = QColor("#cbd5e1") if theme == "light" else QColor("#2a2e36")
-                p.fillRect(self.rect(), fill_color)
-                color = QColor("#0f172a") if theme == "light" else QColor("#f0f0f0")
-        else:
-            color = QColor("#64748b") if theme == "light" else QColor("#a6abb4")
-
-        pen = QPen(color, 1.8, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin)
-        p.setPen(pen)
-        if self.kind == "minimize":
-            p.drawLine(9, 18, 21, 18)
-        else:
-            p.drawLine(10, 10, 20, 20)
-            p.drawLine(20, 10, 10, 20)
-        p.end()
-
-
-def build_bottom_icon(kind, color):
-    pixmap = QPixmap(24, 24)
-    pixmap.fill(Qt.transparent)
-
-    painter = QPainter(pixmap)
-    painter.setRenderHint(QPainter.Antialiasing)
-    painter.setPen(QPen(QColor(color), 1.7, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
-    painter.setBrush(Qt.NoBrush)
-
-    cx = 12.0
-    top = 3.0
-
-    if kind == "settings":
-        painter.drawEllipse(QRectF(cx - 3.0, top + 6.0, 6.0, 6.0))
-        for angle in range(0, 360, 45):
-            rad = math.radians(angle)
-            inner = QPointF(cx + math.cos(rad) * 6.3, top + 9.0 + math.sin(rad) * 6.3)
-            outer = QPointF(cx + math.cos(rad) * 8.3, top + 9.0 + math.sin(rad) * 8.3)
-            painter.drawLine(inner, outer)
-    elif kind == "home":
-        roof = QPainterPath()
-        roof.moveTo(QPointF(cx - 8.0, top + 10.0))
-        roof.lineTo(QPointF(cx, top + 3.0))
-        roof.lineTo(QPointF(cx + 8.0, top + 10.0))
-        painter.drawPath(roof)
-        painter.drawRoundedRect(QRectF(cx - 6.2, top + 9.5, 12.4, 9.0), 1.5, 1.5)
-    elif kind == "float":
-        painter.drawRoundedRect(QRectF(cx - 8.0, top + 5.0, 10.0, 10.0), 1.0, 1.0)
-        painter.drawRoundedRect(QRectF(cx - 2.0, top + 11.0, 10.0, 10.0), 1.0, 1.0)
-    elif kind == "log":
-        painter.drawRoundedRect(QRectF(cx - 6.5, top + 1.0, 13.0, 16.0), 1.5, 1.5)
-        painter.drawLine(QPointF(cx - 3.5, top + 6.0), QPointF(cx + 3.5, top + 6.0))
-        painter.drawLine(QPointF(cx - 3.5, top + 10.0), QPointF(cx + 3.5, top + 10.0))
-        painter.drawLine(QPointF(cx - 3.5, top + 14.0), QPointF(cx + 2.0, top + 14.0))
-    elif kind == "export":
-        painter.drawRoundedRect(QRectF(cx - 7.0, top + 9.0, 14.0, 9.0), 1.5, 1.5)
-        painter.drawLine(QPointF(cx, top + 12.0), QPointF(cx, top + 3.0))
-        painter.drawLine(QPointF(cx, top + 3.0), QPointF(cx - 4.0, top + 7.0))
-        painter.drawLine(QPointF(cx, top + 3.0), QPointF(cx + 4.0, top + 7.0))
-    elif kind == "screenshot":
-        painter.drawRoundedRect(QRectF(cx - 8.0, top + 4.0, 16.0, 13.0), 2.0, 2.0)
-        painter.drawEllipse(QRectF(cx + 2.5, top + 6.0, 2.5, 2.5))
-        image_path = QPainterPath()
-        image_path.moveTo(QPointF(cx - 6.0, top + 15.0))
-        image_path.lineTo(QPointF(cx - 1.5, top + 10.5))
-        image_path.lineTo(QPointF(cx + 1.5, top + 13.0))
-        image_path.lineTo(QPointF(cx + 5.5, top + 9.0))
-        image_path.lineTo(QPointF(cx + 8.0, top + 11.5))
-        painter.drawPath(image_path)
-    painter.end()
-    return QIcon(pixmap)
-
-
-def load_bottom_icon(kind, hover=False):
-    cache_key = (kind, hover)
-    if cache_key in _BOTTOM_ICON_CACHE:
-        return _BOTTOM_ICON_CACHE[cache_key]
-
-    # The original normal state PNGs have perfect alpha channels.
-    # The _hover.png assets have defective black backgrounds. We use the normal PNG for hover as well.
-    # Hover highlighting is fully handled by QSS/opacity to eliminate the black background issue.
-    if kind in {"settings", "home", "float", "log", "export", "screenshot"}:
-        icon_path = asset_path("bottom_icons", f"{kind}.png")
-    else:
-        suffix = "_hover" if hover else ""
-        icon_path = asset_path("bottom_icons", f"{kind}{suffix}.png")
-        
-    if os.path.exists(icon_path):
-        icon = QIcon(icon_path)
-    else:
-        icon = build_bottom_icon(kind, "#d4d8df" if hover else "#a6abb4")
-    _BOTTOM_ICON_CACHE[cache_key] = icon
-    return icon
-
-
-class BottomIconButton(QPushButton):
-    def __init__(self, kind, parent=None):
-        super().__init__(parent)
-        self.kind = kind
-        self.setFixedSize(36, 40)
-        self.setCursor(Qt.PointingHandCursor)
-        self.setFocusPolicy(Qt.NoFocus)
-        self.setObjectName("lineIconBtn")
-        self._hover = False
-
-        icon_path = asset_path("bottom_icons", f"{kind}.png")
-        if os.path.exists(icon_path):
-            self.icon = QIcon(icon_path)
-        else:
-            self.icon = build_bottom_icon(kind, "#a6abb4")
-
-    def enterEvent(self, event):
-        self._hover = True
-        self.update()
-        super().enterEvent(event)
-
-    def leaveEvent(self, event):
-        self._hover = False
-        self.update()
-        super().leaveEvent(event)
-
-    def mousePressEvent(self, event):
-        super().mousePressEvent(event)
-        self.update()
-
-    def mouseReleaseEvent(self, event):
-        super().mouseReleaseEvent(event)
-        self.update()
-
-    def paintEvent(self, event):
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing)
-        painter.setRenderHint(QPainter.SmoothPixmapTransform)
-
-        theme = "dark"
-        curr = self
-        while curr:
-            if hasattr(curr, "config"):
-                theme = curr.config.get("theme", "dark")
-                break
-            curr = curr.parent()
-
-        if self.underMouse() or self._hover:
-            if self.isDown():
-                bg_color = QColor("#343a46") if theme == "dark" else QColor("#b8c5d6")
-            else:
-                bg_color = QColor("#2a2e36") if theme == "dark" else QColor("#cbd5e1")
-            painter.fillRect(self.rect(), bg_color)
-
-        opacity = 1.0 if self._hover else 0.8
-        painter.setOpacity(opacity)
-
-        if self._hover:
-            icon_w, icon_h = 23, 23
-            y_offset = -1.0
-        else:
-            icon_w, icon_h = 22, 22
-            y_offset = 0.0
-
-        x = (self.width() - icon_w) / 2
-        y = (self.height() - icon_h) / 2 + y_offset
-
-        target_rect = QRectF(x, y, icon_w, icon_h).toRect()
-        self.icon.paint(painter, target_rect, Qt.AlignCenter)
-        painter.end()
-
-
-class ConfigActionButton(QPushButton):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self._status = "idle"
-        self.setFixedSize(72, 32)
-        self.setCursor(Qt.PointingHandCursor)
-        self.setFocusPolicy(Qt.NoFocus)
-        self.setObjectName("configActionBtn")
-
-    def set_status(self, status):
-        status = normalize_status(status)
-        if self._status == status:
-            return
-        self._status = status
-        self.update()
-
-    def paintEvent(self, event):
-        super().paintEvent(event)
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing)
-
-        if self._status == "running":
-            painter.setPen(Qt.NoPen)
-            painter.setBrush(QColor("#ff4d4f"))
-            painter.drawRect(33, 11, 12, 12)
-        else:
-            path = QPainterPath()
-            path.moveTo(QPointF(31, 9))
-            path.lineTo(QPointF(31, 23))
-            path.lineTo(QPointF(44, 16))
-            path.closeSubpath()
-            painter.setPen(Qt.NoPen)
-            painter.setBrush(QColor("#28e06f"))
-            painter.drawPath(path)
-        painter.end()
-
-
-class ConfigDeleteButton(QPushButton):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self._normal_icon = load_bottom_icon("delete")
-        self._hover_icon = load_bottom_icon("delete", hover=True)
-        disabled_path = asset_path("bottom_icons", "delete_disabled.png")
-        self._disabled_icon = QIcon(disabled_path) if os.path.exists(disabled_path) else self._normal_icon
-        self.setFixedSize(24, 32)
-        self.setIconSize(QSize(17, 17))
-        self.setIcon(self._normal_icon)
-        self.setCursor(Qt.PointingHandCursor)
-        self.setFocusPolicy(Qt.NoFocus)
-        self.setObjectName("configDeleteBtn")
-        self.setToolTip(tr("delete_config_tip"))
-
-    def enterEvent(self, event):
-        if self.isEnabled():
-            self.setIcon(self._hover_icon)
-        super().enterEvent(event)
-
-    def leaveEvent(self, event):
-        self.setIcon(self._normal_icon if self.isEnabled() else self._disabled_icon)
-        super().leaveEvent(event)
-
-    def setEnabled(self, enabled):
-        super().setEnabled(enabled)
-        self.setIcon(self._normal_icon if enabled else self._disabled_icon)
 
 
 class MainConfigRow(QWidget):
@@ -451,7 +67,8 @@ class MainConfigRow(QWidget):
         self.config_name = config_name
         self.main_card = main_card
         self.current_status = None
-        self.setFixedHeight(36)
+        self.current_task = ""
+        self.setFixedHeight(46)
         self.setCursor(Qt.PointingHandCursor)
 
         layout = QHBoxLayout(self)
@@ -461,12 +78,27 @@ class MainConfigRow(QWidget):
         self.statusIndicator = StatusIndicator()
         layout.addWidget(self.statusIndicator, alignment=Qt.AlignVCenter)
 
-        self.statusLabel = QLabel()
+        vbox = QVBoxLayout()
+        vbox.setContentsMargins(0, 0, 0, 0)
+        vbox.setSpacing(0)
+
+        self.statusLabel = MarqueeLabel()
         self.statusLabel.setObjectName("rowStatusLabel")
-        self.statusLabel.setMinimumWidth(0)
         self.statusLabel.setAlignment(Qt.AlignVCenter)
-        self.statusLabel.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
-        layout.addWidget(self.statusLabel, stretch=1, alignment=Qt.AlignVCenter)
+
+        self.taskLabel = MarqueeLabel()
+        self.taskLabel.setObjectName("rowTaskLabel")
+        self.taskLabel.setAlignment(Qt.AlignVCenter)
+        font = self.taskLabel.font()
+        font.setPointSize(font.pointSize() - 2)
+        self.taskLabel.setFont(font)
+        self.taskLabel.setStyleSheet("color: #888888;")
+        self.taskLabel.hide()
+
+        vbox.addWidget(self.statusLabel)
+        vbox.addWidget(self.taskLabel)
+
+        layout.addLayout(vbox, stretch=1)
 
         self.deleteBtn = ConfigDeleteButton()
         self.deleteBtn.clicked.connect(self._on_delete_clicked)
@@ -477,24 +109,18 @@ class MainConfigRow(QWidget):
         self.btn_enable_signal.connect(self.toggleBtn.setEnabled)
         layout.addWidget(self.toggleBtn)
 
-        self.update_status("idle")
+        self.update_status("idle", "")
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
             self.main_card.set_current_config(self.config_name)
-            if self.main_card.window():
-                self.main_card.window().mousePressEvent(event)
             event.accept()
 
     def mouseMoveEvent(self, event):
-        if self.main_card.window():
-            self.main_card.window().mouseMoveEvent(event)
-            event.accept()
+        super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event):
-        if self.main_card.window():
-            self.main_card.window().mouseReleaseEvent(event)
-            event.accept()
+        super().mouseReleaseEvent(event)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -502,22 +128,33 @@ class MainConfigRow(QWidget):
 
     def _refresh_label(self):
         full_text = f"{self.config_name}: {get_status_text(self.current_status)}"
-        metrics = QFontMetrics(self.statusLabel.font())
-        width = max(self.statusLabel.width() - 2, 20)
-        self.statusLabel.setText(metrics.elidedText(full_text, Qt.ElideRight, width))
+        self.statusLabel.set_marquee_text(full_text)
+        if self._should_show_task():
+            self.taskLabel.set_marquee_text(self.current_task)
+        else:
+            self.taskLabel.set_marquee_text("")
 
-    def update_status(self, status):
+    def _should_show_task(self):
+        return bool(self.current_task and self.main_card.config.get("show_task_name", False))
+
+    def apply_task_display_setting(self):
+        self.taskLabel.setVisible(self._should_show_task())
+        self._refresh_label()
+
+    def update_status(self, status, task=""):
         status = normalize_status(status)
         delete_enabled = status != "running" and len(self.main_card._configs) > 1
-        if self.current_status == status:
+        if self.current_status == status and getattr(self, "current_task", "") == task:
             if self.deleteBtn.isEnabled() != delete_enabled:
                 self.deleteBtn.setEnabled(delete_enabled)
             return
 
         self.current_status = status
+        self.current_task = task
         self.statusIndicator.setStatus(self.current_status)
         self.toggleBtn.set_status(self.current_status)
         self.deleteBtn.setEnabled(delete_enabled)
+        self.taskLabel.setVisible(self._should_show_task())
         self._refresh_label()
 
     def _on_delete_clicked(self):
@@ -552,11 +189,9 @@ class MainConfigRow(QWidget):
         action = "stop" if self.current_status == "running" else "start"
 
         def send_req():
-            ip = self.main_card.config.get("ip", "127.0.0.1")
-            port = self.main_card.config.get("port", "22267")
             try:
-                url = f"http://{ip}:{port}/api/{action}"
-                resp = _requests().post(
+                url = gyre_api_url(self.main_card.config, action)
+                resp = api_request("POST",
                     url,
                     params={"config": self.config_name},
                     headers=api_headers(self.main_card.config),
@@ -564,15 +199,23 @@ class MainConfigRow(QWidget):
                 )
                 if resp.status_code == 200:
                     status = normalize_status(resp.json().get("status", "idle"))
-                    self.main_card.status_all_update_signal.emit({self.config_name: status})
+                    self.main_card.status_all_update_signal.emit({self.config_name: status}, {self.config_name: ""})
                     if self.main_card.current_config == self.config_name:
-                        self.main_card.status_update_signal.emit(status)
+                        self.main_card.status_update_signal.emit(status, "")
                 else:
-                    print(f"[Error] {action} request failed, HTTP status code: {resp.status_code}")
+                    message = self.main_card.format_control_http_error(resp)
+                    self.main_card.control_error_signal.emit(action, message)
                 time.sleep(0.5)
                 self.main_card._start_poll_thread()
             except Exception as e:
                 print(f"[Error] Failed to send control command: {e}")
+                self.main_card.status_all_update_signal.emit(
+                    {self.config_name: "disconnected"},
+                    {self.config_name: ""},
+                )
+                if self.main_card.current_config == self.config_name:
+                    self.main_card.status_update_signal.emit("disconnected", "")
+                self.main_card.control_error_signal.emit(action, tr("control_connect_failed"))
             finally:
                 self.btn_enable_signal.emit(True)
 
@@ -580,16 +223,17 @@ class MainConfigRow(QWidget):
 
 class CardWidget(QFrame):
     """Main card"""
-    status_update_signal = Signal(str)
+    status_update_signal = Signal(str, str)
     configs_update_signal = Signal(list)
-    status_all_update_signal = Signal(dict)
+    status_all_update_signal = Signal(dict, dict)
     config_delete_result_signal = Signal(bool, str, str, list, str)
+    control_error_signal = Signal(str, str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("card")
         self.setFixedSize(294, 166)
-        
+
         self.config = {
             "ip": "127.0.0.1",
             "port": "22267",
@@ -597,10 +241,12 @@ class CardWidget(QFrame):
             "always_on_top": False,
             "api_token": "",
             "mini_click_through": False,
+            "show_task_name": False,
             "mini_opacity": 100,
+            "lang": get_language(),
             "setup_completed": False,
         }
-        
+
         self.config_path = config_path()
         if os.path.exists(self.config_path):
             try:
@@ -613,6 +259,7 @@ class CardWidget(QFrame):
                 print(f"[Warning] Failed to read {self.config_path}: {e}")
 
         self._status = "idle" # idle, running, error, disconnected
+        self._task = ""
         self._configs = ["alas"]
         self.current_config = self.config.get("current_config", "alas")
         self._configs[0] = self.current_config
@@ -622,21 +269,23 @@ class CardWidget(QFrame):
         self._polling_status = False
         self._poll_lock = threading.Lock()
         self._statuses = {}
+        self._tasks = {}
         self.rows = {}
-        
+
         self._config_idx = 0
 
         self._build_ui()
-        
+
         self.status_update_signal.connect(self._update_status_ui)
         self.configs_update_signal.connect(self._on_configs_updated)
         self.status_all_update_signal.connect(self._on_status_all_updated)
         self.config_delete_result_signal.connect(self._on_config_delete_result)
-        
+        self.control_error_signal.connect(self._on_control_error)
+
         self.poll_timer = QTimer(self)
         self.poll_timer.timeout.connect(self._start_poll_thread)
         self.poll_timer.start(3000)
-        
+
         from PySide6.QtCore import QTimer as CoreQTimer
         CoreQTimer.singleShot(50, self._start_poll_thread)
 
@@ -649,20 +298,15 @@ class CardWidget(QFrame):
         self.windowCtrlBg.setObjectName("compactCtrlBg")
         self.windowCtrlBg.setAttribute(Qt.WA_StyledBackground, True)
         self.windowCtrlBg.setFixedHeight(30)
-        self.windowCtrlBg.setCursor(Qt.SizeAllCursor)
-        self.windowCtrlBg.mousePressEvent = self._forward_drag_press
-        self.windowCtrlBg.mouseMoveEvent = self._forward_drag_move
-        self.windowCtrlBg.mouseReleaseEvent = self._forward_drag_release
+        install_title_bar_drag(self.window(), self.windowCtrlBg)
         ctrl_layout = QHBoxLayout(self.windowCtrlBg)
-        ctrl_layout.setContentsMargins(8, 0, 8, 0)
+        ctrl_layout.setContentsMargins(20, 0, 8, 0)
         ctrl_layout.setSpacing(0)
 
-        self.dragHint = QWidget(self.windowCtrlBg)
-        self.dragHint.setCursor(Qt.SizeAllCursor)
-        self.dragHint.mousePressEvent = self._forward_drag_press
-        self.dragHint.mouseMoveEvent = self._forward_drag_move
-        self.dragHint.mouseReleaseEvent = self._forward_drag_release
-        ctrl_layout.addWidget(self.dragHint, stretch=1)
+        self.titleLabel = QLabel("Alas-Gyre", self.windowCtrlBg)
+        self.titleLabel.setObjectName("settingsTitle")
+        ctrl_layout.addWidget(self.titleLabel)
+        ctrl_layout.addStretch()
 
         self.miniDot = WindowButton("minimize")
         self.miniDot.mousePressEvent = self._minimize_from_top
@@ -684,10 +328,6 @@ class CardWidget(QFrame):
         self.configListBg = QWidget()
         self.configListBg.setObjectName("configListBg")
         self.configListBg.setAttribute(Qt.WA_StyledBackground, True)
-        self.configListBg.setCursor(Qt.SizeAllCursor)
-        self.configListBg.mousePressEvent = self._forward_drag_press
-        self.configListBg.mouseMoveEvent = self._forward_drag_move
-        self.configListBg.mouseReleaseEvent = self._forward_drag_release
         list_layout = QVBoxLayout(self.configListBg)
         list_layout.setContentsMargins(10, 8, 10, 6)
         list_layout.setSpacing(2)
@@ -704,19 +344,17 @@ class CardWidget(QFrame):
         bot_layout = QHBoxLayout(self.bottomBg)
         bot_layout.setContentsMargins(24, 0, 24, 0)
         bot_layout.setSpacing(0)
-        
+
         self.setIcon = BottomIconButton("settings")
         self.homeIcon = BottomIconButton("home")
         self.floatIcon = BottomIconButton("float")
         self.logIcon = BottomIconButton("log")
-        self.exportIcon = BottomIconButton("export")
 
         self.setIcon.setToolTip(tr("settings_btn_tip"))
         self.homeIcon.setToolTip(tr("home_btn_tip"))
         self.floatIcon.setToolTip(tr("float_btn_tip"))
         self.logIcon.setToolTip(tr("log_btn_tip"))
-        self.exportIcon.setToolTip(tr("export_btn_tip"))
-            
+
         bot_layout.addWidget(self.setIcon)
         bot_layout.addStretch()
         bot_layout.addWidget(self.homeIcon)
@@ -724,14 +362,11 @@ class CardWidget(QFrame):
         bot_layout.addWidget(self.floatIcon)
         bot_layout.addStretch()
         bot_layout.addWidget(self.logIcon)
-        bot_layout.addStretch()
-        bot_layout.addWidget(self.exportIcon)
 
         self.setIcon.mousePressEvent = lambda e: self._on_icon_click("settings", self.setIcon)
         self.homeIcon.mousePressEvent = lambda e: self._on_icon_click("home", self.homeIcon)
         self.floatIcon.mousePressEvent = lambda e: self._on_icon_click("minimize", self.floatIcon)
         self.logIcon.mousePressEvent = lambda e: self._on_icon_click("log", self.logIcon)
-        self.exportIcon.mousePressEvent = lambda e: self._on_icon_click("export", self.exportIcon)
 
         main_layout.addWidget(self.bottomBg)
 
@@ -740,7 +375,6 @@ class CardWidget(QFrame):
         self.homeIcon.setToolTip(tr("home_btn_tip"))
         self.floatIcon.setToolTip(tr("float_btn_tip"))
         self.logIcon.setToolTip(tr("log_btn_tip"))
-        self.exportIcon.setToolTip(tr("export_btn_tip"))
         self._rebuild_rows()
 
     def _save_config(self):
@@ -752,13 +386,17 @@ class CardWidget(QFrame):
             print(f"[Error] Failed to write {self.config_path}: {e}")
             return False
 
+    def apply_task_display_settings(self):
+        for row in self.rows.values():
+            row.apply_task_display_setting()
+
     def _sync_window_size(self):
         row_count = min(max(len(self._configs), 2), 5)
-        list_height = 8 + 6 + row_count * 36 + max(row_count - 1, 0) * 2 + 8
+        list_height = 8 + 6 + row_count * 46 + max(row_count - 1, 0) * 2 + 8
         card_height = 30 + list_height + 40
         self.setFixedSize(294, card_height)
         if self.window() and self.window() is not self:
-            self.window().setFixedSize(314, card_height + 20)
+            self.window().setFixedSize(294, card_height)
 
     def _rebuild_rows(self):
         while self.rows_layout.count():
@@ -779,7 +417,7 @@ class CardWidget(QFrame):
             self.rows_layout.addWidget(row)
             self.rows[config_name] = row
             if config_name in self._statuses:
-                row.update_status(self._statuses[config_name])
+                row.update_status(self._statuses[config_name], self._tasks.get(config_name, ""))
         self.rows_layout.addStretch()
         self._sync_window_size()
 
@@ -798,11 +436,9 @@ class CardWidget(QFrame):
         threading.Thread(target=self._delete_config_task, args=(config_name,), daemon=True).start()
 
     def _delete_config_task(self, config_name):
-        ip = self.config.get("ip", "127.0.0.1")
-        port = self.config.get("port", "22267")
         try:
-            url = f"http://{ip}:{port}/api/configs"
-            resp = _requests().delete(
+            url = gyre_api_url(self.config, "configs")
+            resp = api_request("DELETE",
                 url,
                 params={"config": config_name},
                 headers=api_headers(self.config),
@@ -834,6 +470,7 @@ class CardWidget(QFrame):
             return
 
         self._statuses.pop(config_name, None)
+        self._tasks.pop(config_name, None)
         self._configs = [str(config) for config in configs if str(config)] or [
             config for config in self._configs if config != config_name
         ]
@@ -859,6 +496,30 @@ class CardWidget(QFrame):
         )
         self._start_poll_thread()
 
+    def format_control_http_error(self, resp):
+        try:
+            data = resp.json()
+        except Exception:
+            data = {}
+        detail = ""
+        if isinstance(data, dict):
+            detail = str(data.get("message") or data.get("error") or "").strip()
+        if not detail:
+            detail = str(getattr(resp, "text", "") or "").strip()
+        if detail:
+            return tr("control_http_failed_with_detail", status=resp.status_code, error=detail[:300])
+        return tr("control_http_failed", status=resp.status_code)
+
+    def _on_control_error(self, action, message):
+        parent = self.window()
+        if hasattr(self, "mini_dialog") and self.mini_dialog.isVisible():
+            parent = self.mini_dialog
+        show_warning(
+            parent or self,
+            tr("control_failed_title"),
+            message or tr("action_failed", error=action),
+        )
+
     def _forward_drag_press(self, event):
         if self.window():
             self.window().mousePressEvent(event)
@@ -883,13 +544,14 @@ class CardWidget(QFrame):
         QApplication.quit()
         event.accept()
 
-    def _update_status_ui(self, status):
+    def _update_status_ui(self, status, task=""):
         status = normalize_status(status)
-        if self._status == status:
+        if self._status == status and getattr(self, "_task", "") == task:
             return
         self._status = status
+        self._task = task
         if self.current_config in self.rows:
-            self.rows[self.current_config].update_status(status)
+            self.rows[self.current_config].update_status(status, task)
         print(f"[Log] Status sync -> {status} ({self.current_config})")
 
     def _start_poll_thread(self):
@@ -917,11 +579,9 @@ class CardWidget(QFrame):
                 self._polling_status = False
 
     def _fetch_configs_task(self):
-        ip = self.config.get("ip", "127.0.0.1")
-        port = self.config.get("port", "22267")
         try:
-            url = f"http://{ip}:{port}/api/configs"
-            resp = _requests().get(url, headers=api_headers(self.config), timeout=2.0)
+            url = gyre_api_url(self.config, "configs")
+            resp = api_request("GET", url, headers=api_headers(self.config), timeout=2.0)
             if resp.status_code == 200:
                 data = resp.json()
                 configs = data.get("configs", ["alas"])
@@ -954,28 +614,34 @@ class CardWidget(QFrame):
 
         old_status = self._status
         self._status = None
-        self._update_status_ui(old_status or "idle")
+        self._task = ""
+        self._update_status_ui(old_status or "idle", "")
 
         if hasattr(self, "mini_dialog") and self.mini_dialog.isVisible():
             self.mini_dialog.rebuild_rows()
         if hasattr(self, "log_dialog") and self.log_dialog.isVisible():
             self.log_dialog.set_configs(self._configs, self.current_config)
 
-    def _on_status_all_updated(self, statuses):
+    def _on_status_all_updated(self, statuses, tasks):
+        tasks = {
+            str(config_name): str((tasks or {}).get(config_name, "") or "")
+            for config_name in statuses
+        }
         changed_statuses = {
             config_name: status
             for config_name, status in statuses.items()
-            if self._statuses.get(config_name) != status
+            if self._statuses.get(config_name) != status or self._tasks.get(config_name) != tasks.get(config_name)
         }
         self._statuses.update(statuses)
+        self._tasks.update(tasks)
         new_configs = [str(config_name) for config_name in statuses if str(config_name) not in self._configs]
         if new_configs:
             self._configs.extend(new_configs)
             self._configs.sort(key=str.lower)
             self._rebuild_rows()
-        for config_name, status in changed_statuses.items():
+        for config_name in changed_statuses.keys():
             if config_name in self.rows:
-                self.rows[config_name].update_status(status)
+                self.rows[config_name].update_status(self._statuses[config_name], self._tasks.get(config_name, ""))
 
     def _poll_status_task(self):
         if (
@@ -984,43 +650,51 @@ class CardWidget(QFrame):
         ):
             delattr(self, "_configs_fetched")
 
-        ip = self.config.get("ip", "127.0.0.1")
-        port = self.config.get("port", "22267")
         try:
-            url = f"http://{ip}:{port}/api/status_all"
-            resp = _requests().get(url, headers=api_headers(self.config), timeout=1.5)
+            url = gyre_api_url(self.config, "status_all")
+            resp = api_request("GET", url, headers=api_headers(self.config), timeout=1.5)
             if resp.status_code == 200:
                 data = resp.json()
                 statuses = {
                     str(config_name): normalize_status(status)
                     for config_name, status in data.get("statuses", {}).items()
                 }
-                self.status_all_update_signal.emit(statuses)
+                tasks = {
+                    str(config_name): str(task)
+                    for config_name, task in data.get("tasks", {}).items()
+                }
+                self.status_all_update_signal.emit(statuses, tasks)
                 current_status = statuses.get(self.current_config, "idle")
-                self.status_update_signal.emit(current_status)
+                current_task = tasks.get(self.current_config, "")
+                self.status_update_signal.emit(current_status, current_task)
             elif resp.status_code == 404:
                 statuses = {}
+                tasks = {}
                 for config_name in self._configs:
                     try:
-                        url = f"http://{ip}:{port}/api/status"
-                        resp2 = _requests().get(
+                        url = gyre_api_url(self.config, "status")
+                        resp2 = api_request("GET",
                             url,
                             params={"config": config_name},
                             headers=api_headers(self.config),
                             timeout=1.5,
                         )
                         if resp2.status_code == 200:
-                            statuses[config_name] = normalize_status(resp2.json().get("status", "idle"))
+                            j = resp2.json()
+                            statuses[config_name] = normalize_status(j.get("status", "idle"))
+                            tasks[config_name] = j.get("task", "")
                         else:
                             statuses[config_name] = "disconnected"
+                            tasks[config_name] = ""
                     except Exception:
                         statuses[config_name] = "disconnected"
-                self.status_all_update_signal.emit(statuses)
-                self.status_update_signal.emit(statuses.get(self.current_config, "disconnected"))
+                        tasks[config_name] = ""
+                self.status_all_update_signal.emit(statuses, tasks)
+                self.status_update_signal.emit(statuses.get(self.current_config, "disconnected"), tasks.get(self.current_config, ""))
             else:
-                self.status_update_signal.emit("disconnected")
+                self.status_update_signal.emit("disconnected", "")
         except Exception:
-            self.status_update_signal.emit("disconnected")
+            self.status_update_signal.emit("disconnected", "")
 
     def restore_main_window(self):
         if hasattr(self, "mini_dialog"):
@@ -1068,19 +742,19 @@ class CardWidget(QFrame):
                     if hasattr(app, "_alas_tray"):
                         tray = app._alas_tray
                         actions = tray.contextMenu().actions()
-                        if len(actions) >= 7:
+                        if len(actions) >= 6:
                             actions[0].setText(tr("show_main"))
                             actions[1].setText(tr("show_float"))
                             actions[2].setText(tr("open_webui"))
                             actions[4].setText(tr("wizard"))
-                            actions[5].setText(tr("export_btn_tip"))
-                            actions[7].setText(tr("quit"))
+                            actions[5].setText(tr("quit"))
 
                     from .theme import apply_theme
                     apply_theme(app, self.config.get("theme", "dark"))
-                    
+
                     if hasattr(self.window(), "apply_always_on_top"):
                         self.window().apply_always_on_top(self.config.get("always_on_top", False))
+                    self.apply_task_display_settings()
                     if hasattr(self, "mini_dialog"):
                         self.mini_dialog.apply_window_settings()
                 except Exception as e:
@@ -1106,25 +780,6 @@ class CardWidget(QFrame):
             if dialog is None:
                 self.log_dialog = LogWindow(self.window(), self.config, self.current_config, self._configs)
                 self.log_dialog.show()
-        elif name == "export":
-            from .fastapi_export_window import FastapiExportWindow
-            dialog = getattr(self, "fastapi_dialog", None)
-            if dialog is not None:
-                try:
-                    dialog.show()
-                    dialog.activateWindow()
-                    return
-                except RuntimeError:
-                    dialog = None
-            if dialog is None:
-                self.fastapi_dialog = FastapiExportWindow(
-                    self.window(),
-                    fastapi_source_path(),
-                    fastapi_output_path(),
-                    self.config,
-                    self.config_path,
-                )
-                self.fastapi_dialog.show()
         elif name == "minimize":
             self.show_mini_window()
 
@@ -1134,22 +789,17 @@ class AlasConsole(QWidget):
     def __init__(self):
         super().__init__()
         self.setObjectName("mainWindow")
-        self.setFixedSize(314, 186)
+        self.setWindowTitle("Alas-Gyre")
+        self.setFixedSize(294, 186)
         self.setWindowFlags(Qt.FramelessWindowHint)
-        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setAttribute(Qt.WA_StyledBackground, True)
 
         main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(10, 10, 10, 10)
-        
+        main_layout.setContentsMargins(0, 0, 0, 0)
+
         self.card = CardWidget(self)
         self.apply_always_on_top(self.card.config.get("always_on_top", False), show_after=False)
         main_layout.addWidget(self.card, alignment=Qt.AlignTop)
-        
-        shadow = QGraphicsDropShadowEffect()
-        shadow.setBlurRadius(18)
-        shadow.setOffset(0, 5)
-        shadow.setColor(QColor(0, 0, 0, 90))
-        self.card.setGraphicsEffect(shadow)
 
         self._auto_update_check_id = 0
         self._update_prompt_shown = False
@@ -1169,7 +819,7 @@ class AlasConsole(QWidget):
 
     def _auto_update_check_task(self, current_version, check_id):
         try:
-            from updater import check_for_updates
+            from alas_gyre.services.updater import check_for_updates
             result = check_for_updates(current_version)
         except Exception as exc:
             result = {"has_update": False, "error": str(exc)}
@@ -1212,22 +862,18 @@ class AlasConsole(QWidget):
         y = (screen.height() - self.height()) // 2
         self.move(x, y)
 
+    def showEvent(self, event):
+        super().showEvent(event)
+        schedule_frameless_stabilize(self, self.card)
+
     def mousePressEvent(self, event):
-        if event.button() == Qt.LeftButton:
-            self._drag_offset = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
-            event.accept()
+        super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
-        if hasattr(self, "_drag_offset") and event.buttons() & Qt.LeftButton:
-            self.move(event.globalPosition().toPoint() - self._drag_offset)
-            event.accept()
+        super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event):
-        if event.button() == Qt.LeftButton:
-            self._snap_to_screen_edges()
-            if hasattr(self, "_drag_offset"):
-                del self._drag_offset
-            event.accept()
+        super().mouseReleaseEvent(event)
 
     def _snap_to_screen_edges(self):
         snap_to_available_screen(self, margins=(10, 10, 10, 10))

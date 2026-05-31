@@ -1,12 +1,13 @@
 {
     "ip": "127.0.0.1",
     "port": "22267",
+    "runtime_update_port": "22268",
     "api_token": "",
     "auto_start": false,
     "always_on_top": false,
     "mini_click_through": false,
+    "show_task_name": false,
     "mini_opacity": 100,
-    "fastapi_custom_dir": "",
     "setup_completed": false,
     "current_config": "alas"
 }

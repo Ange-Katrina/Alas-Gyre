@@ -1,17 +1,18 @@
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QWidget, QLabel, QFrame, QTextEdit,
-    QGraphicsDropShadowEffect, QSizeGrip, QComboBox, QPushButton, QStackedWidget
+    QSizeGrip, QComboBox, QPushButton, QStackedWidget
 )
 from PySide6.QtCore import Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QTextCursor, QFontMetrics
+from PySide6.QtGui import QTextCursor, QFontMetrics
 import threading
 import html
 import hashlib
 
-from .api_client import api_headers, api_request
+from alas_gyre.api.client import api_headers, api_request, gyre_api_url
 from .error_screenshot_window import ErrorScreenshotPanel
-from .main_window import WindowButton
+from .widgets import WindowButton
 from .i18n import tr
+from .window_behavior import install_title_bar_drag, schedule_frameless_stabilize
 
 LOG_LEVEL_STYLES = {
     "CRITICAL": {"fg": "#ff6b6b", "bg": "#2b171a", "bar": "#ff5c5c"},
@@ -48,10 +49,9 @@ class LogWindow(QDialog):
         self.resize(680, 460)
         self.setMinimumSize(560, 400)
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog)
-        self.setAttribute(Qt.WA_TranslucentBackground)
 
         main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(30, 20, 30, 30)
+        main_layout.setContentsMargins(0, 0, 0, 0)
 
         # 卡片背景
         self.card = QFrame(self)
@@ -66,6 +66,7 @@ class LogWindow(QDialog):
         self.topBg.setObjectName("logTopBg")
         self.topBg.setAttribute(Qt.WA_StyledBackground, True)
         self.topBg.setFixedHeight(30)
+        install_title_bar_drag(self, self.topBg)
         top_layout = QHBoxLayout(self.topBg)
         top_layout.setContentsMargins(20, 0, 8, 0)
 
@@ -128,11 +129,6 @@ class LogWindow(QDialog):
         main_layout.addWidget(self.card)
 
         # 阴影效果
-        shadow = QGraphicsDropShadowEffect()
-        shadow.setBlurRadius(20)
-        shadow.setOffset(0, 6)
-        shadow.setColor(QColor(0, 0, 0, 80))
-        self.card.setGraphicsEffect(shadow)
 
         self.sizeGrip = QSizeGrip(self.card)
         self.sizeGrip.setFixedSize(18, 18)
@@ -171,23 +167,10 @@ class LogWindow(QDialog):
             self.move(x, y)
 
     def mousePressEvent(self, event):
-        if event.button() == Qt.LeftButton:
-            import sys
-            if sys.platform == "win32":
-                import ctypes
-                ctypes.windll.user32.ReleaseCapture()
-                hwnd = self.winId()
-                ctypes.windll.user32.SendMessageW(int(hwnd), 0x0112, 0xF012, 0)
-            else:
-                self._drag_offset = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
-            event.accept()
+        super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
-        import sys
-        if sys.platform != "win32":
-            if hasattr(self, "_drag_offset") and event.buttons() & Qt.LeftButton:
-                self.move(event.globalPosition().toPoint() - self._drag_offset)
-                event.accept()
+        super().mouseMoveEvent(event)
 
     def _fetch_log(self):
         if self._fetching_log:
@@ -196,10 +179,8 @@ class LogWindow(QDialog):
         threading.Thread(target=self._fetch_log_thread, daemon=True).start()
 
     def _fetch_log_thread(self):
-        ip = self.config.get("ip", "127.0.0.1")
-        port = self.config.get("port", "22267")
         try:
-            url = f"http://{ip}:{port}/api/log"
+            url = gyre_api_url(self.config, "log")
             resp = api_request(
                 "GET",
                 url,
@@ -210,7 +191,8 @@ class LogWindow(QDialog):
             if resp.status_code == 200:
                 data = resp.json()
                 if data.get("error"):
-                    log_text = f"读取日志失败: {data.get('error')}"
+                    print(f"[LogWindow] Log API error: {data.get('error')}")
+                    log_text = tr("log_fetch_failed")
                 elif data.get("exists") is False:
                     log_text = f"[{self.current_config}] 暂无可用日志"
                 else:
@@ -224,9 +206,11 @@ class LogWindow(QDialog):
                     message = data.get("error") or data.get("message") or resp.text
                 except Exception:
                     message = resp.text
-                self.log_update_signal.emit(f"无法获取日志，HTTP 状态码: {resp.status_code}\n{message}")
+                print(f"[LogWindow] Log fetch failed HTTP {resp.status_code}: {message}")
+                self.log_update_signal.emit(tr("log_http_failed", status=resp.status_code))
         except Exception as e:
-            self.log_update_signal.emit(f"连接服务器失败: {e}")
+            print(f"[LogWindow] Log connection failed: {e}")
+            self.log_update_signal.emit(tr("log_connect_failed"))
         finally:
             self._fetching_log = False
 
@@ -372,6 +356,7 @@ class LogWindow(QDialog):
 
     def showEvent(self, event):
         super().showEvent(event)
+        schedule_frameless_stabilize(self, self.card, self.topBg, self.stack)
         if not self.poll_timer.isActive():
             self.poll_timer.start(2000)
         self._fetch_log()
