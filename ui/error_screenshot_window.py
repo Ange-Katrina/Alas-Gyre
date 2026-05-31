@@ -1,10 +1,9 @@
 from PySide6.QtCore import Qt, Signal, QSize
-from PySide6.QtGui import QColor, QPixmap
+from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
     QFrame,
-    QGraphicsDropShadowEffect,
     QHBoxLayout,
     QLabel,
     QPushButton,
@@ -14,9 +13,10 @@ from PySide6.QtWidgets import (
 )
 import threading
 
-from .api_client import api_headers, api_request
+from alas_gyre.api.client import api_headers, api_request, gyre_api_url
 from .i18n import tr
-from .main_window import WindowButton
+from .widgets import WindowButton
+from .window_behavior import install_title_bar_drag, schedule_frameless_stabilize
 
 
 MAX_SCREENSHOT_PIXMAP_SIZE = QSize(1600, 1200)
@@ -116,12 +116,10 @@ class ErrorScreenshotPanel(QWidget):
         threading.Thread(target=self._fetch_groups_thread, daemon=True).start()
 
     def _fetch_groups_thread(self):
-        ip = self.config.get("ip", "127.0.0.1")
-        port = self.config.get("port", "22267")
         try:
             resp = api_request(
                 "GET",
-                f"http://{ip}:{port}/api/error_screenshots",
+                gyre_api_url(self.config, "error_screenshots"),
                 params={"limit": 30},
                 headers=api_headers(self.config),
                 timeout=3,
@@ -145,12 +143,16 @@ class ErrorScreenshotPanel(QWidget):
         self.refreshBtn.setEnabled(True)
 
         if not payload.get("_ok"):
-            message = tr("screenshot_fetch_failed", error=payload.get("error", "unknown"))
+            detail = payload.get("error", "unknown")
+            print(f"[ErrorScreenshot] Fetch groups failed: {detail}")
+            message = tr("screenshot_fetch_failed")
             self.statusLabel.setText(message)
+            self.statusLabel.setToolTip(str(detail))
             self._set_placeholder(message)
             return
 
         self.groups = payload.get("groups") or []
+        self.statusLabel.setToolTip("")
         self.groupCombo.blockSignals(True)
         self.groupCombo.clear()
         for group in self.groups:
@@ -222,14 +224,12 @@ class ErrorScreenshotPanel(QWidget):
         threading.Thread(target=self._fetch_image_thread, args=(folder, file_name), daemon=True).start()
 
     def _fetch_image_thread(self, folder, file_name):
-        ip = self.config.get("ip", "127.0.0.1")
-        port = self.config.get("port", "22267")
         error = ""
         data = b""
         try:
             resp = api_request(
                 "GET",
-                f"http://{ip}:{port}/api/error_screenshots/image",
+                gyre_api_url(self.config, "error_screenshots/image"),
                 params={"folder": folder, "file": file_name},
                 headers=api_headers(self.config),
                 timeout=5,
@@ -253,15 +253,18 @@ class ErrorScreenshotPanel(QWidget):
         self._fetching_image_key = None
 
         if error:
-            message = tr("screenshot_image_failed", error=error)
+            print(f"[ErrorScreenshot] Fetch image failed: {error}")
+            message = tr("screenshot_image_failed")
             self.statusLabel.setText(message)
+            self.statusLabel.setToolTip(str(error))
             self._set_placeholder(message)
             return
 
         pixmap = QPixmap()
         if not pixmap.loadFromData(data):
-            message = tr("screenshot_image_failed", error="invalid image data")
+            message = tr("screenshot_invalid_image")
             self.statusLabel.setText(message)
+            self.statusLabel.setToolTip("invalid image data")
             self._set_placeholder(message)
             return
 
@@ -278,6 +281,7 @@ class ErrorScreenshotPanel(QWidget):
         self.current_pixmap = pixmap
         self._loaded_image_key = (folder, file_name)
         self.statusLabel.setText(tr("screenshot_loaded", folder=folder, file=file_name))
+        self.statusLabel.setToolTip("")
         self._update_image_view()
 
     def _set_placeholder(self, text):
@@ -316,10 +320,9 @@ class ErrorScreenshotWindow(QDialog):
         self.resize(760, 520)
         self.setMinimumSize(620, 420)
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog)
-        self.setAttribute(Qt.WA_TranslucentBackground)
 
         main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(30, 20, 30, 30)
+        main_layout.setContentsMargins(0, 0, 0, 0)
 
         self.card = QFrame(self)
         self.card.setObjectName("screenshotCard")
@@ -332,6 +335,7 @@ class ErrorScreenshotWindow(QDialog):
         self.topBg.setObjectName("screenshotTopBg")
         self.topBg.setAttribute(Qt.WA_StyledBackground, True)
         self.topBg.setFixedHeight(30)
+        install_title_bar_drag(self, self.topBg)
         top_layout = QHBoxLayout(self.topBg)
         top_layout.setContentsMargins(20, 0, 8, 0)
         top_layout.setSpacing(8)
@@ -350,11 +354,6 @@ class ErrorScreenshotWindow(QDialog):
         card_layout.addWidget(self.panel, stretch=1)
         main_layout.addWidget(self.card)
 
-        shadow = QGraphicsDropShadowEffect()
-        shadow.setBlurRadius(20)
-        shadow.setOffset(0, 6)
-        shadow.setColor(QColor(0, 0, 0, 80))
-        self.card.setGraphicsEffect(shadow)
 
         self.sizeGrip = QSizeGrip(self.card)
         self.sizeGrip.setFixedSize(18, 18)
@@ -371,6 +370,10 @@ class ErrorScreenshotWindow(QDialog):
                 self.card.height() - self.sizeGrip.height() - 3,
             )
 
+    def showEvent(self, event):
+        super().showEvent(event)
+        schedule_frameless_stabilize(self, self.card, self.topBg, self.panel)
+
     def _center_on_screen(self):
         if self.parent():
             parent_geom = self.parent().geometry()
@@ -379,23 +382,10 @@ class ErrorScreenshotWindow(QDialog):
             self.move(x, y)
 
     def mousePressEvent(self, event):
-        if event.button() == Qt.LeftButton:
-            import sys
-            if sys.platform == "win32":
-                import ctypes
-                ctypes.windll.user32.ReleaseCapture()
-                hwnd = self.winId()
-                ctypes.windll.user32.SendMessageW(int(hwnd), 0x0112, 0xF012, 0)
-            else:
-                self._drag_offset = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
-            event.accept()
+        super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
-        import sys
-        if sys.platform != "win32":
-            if hasattr(self, "_drag_offset") and event.buttons() & Qt.LeftButton:
-                self.move(event.globalPosition().toPoint() - self._drag_offset)
-                event.accept()
+        super().mouseMoveEvent(event)
 
     def fetch_groups(self):
         self.panel.fetch_groups()

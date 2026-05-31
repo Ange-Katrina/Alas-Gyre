@@ -3,7 +3,6 @@ from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import (
     QDialog,
     QFrame,
-    QGraphicsDropShadowEffect,
     QHBoxLayout,
     QLabel,
     QPushButton,
@@ -13,6 +12,7 @@ from PySide6.QtWidgets import (
 )
 
 from .i18n import tr
+from .window_behavior import install_title_bar_drag, schedule_frameless_stabilize
 
 
 class MessageIcon(QWidget):
@@ -104,23 +104,17 @@ class MessageDialog(QDialog):
         self._drag_pos = None
         self.setObjectName("messageDialog")
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog)
-        self.setAttribute(Qt.WA_TranslucentBackground)
         self.setModal(True)
         self.setFixedWidth(420)
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(10, 10, 10, 10)
+        root.setContentsMargins(0, 0, 0, 0)
 
         self.card = QFrame(self)
         self.card.setObjectName("messageCard")
         self.card.setAttribute(Qt.WA_StyledBackground, True)
         root.addWidget(self.card)
 
-        shadow = QGraphicsDropShadowEffect()
-        shadow.setBlurRadius(18)
-        shadow.setOffset(0, 5)
-        shadow.setColor(QColor(0, 0, 0, 95))
-        self.card.setGraphicsEffect(shadow)
 
         layout = QVBoxLayout(self.card)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -130,9 +124,7 @@ class MessageDialog(QDialog):
         self.topBg.setObjectName("messageTopBg")
         self.topBg.setAttribute(Qt.WA_StyledBackground, True)
         self.topBg.setFixedHeight(44)
-        self.topBg.mousePressEvent = self._mouse_press
-        self.topBg.mouseMoveEvent = self._mouse_move
-        self.topBg.mouseReleaseEvent = self._mouse_release
+        install_title_bar_drag(self, self.topBg)
 
         top_layout = QHBoxLayout(self.topBg)
         top_layout.setContentsMargins(20, 0, 6, 0)
@@ -143,10 +135,10 @@ class MessageDialog(QDialog):
         top_layout.addWidget(MessageCloseButton(self.topBg))
         layout.addWidget(self.topBg)
 
-        body = QWidget(self.card)
-        body.setObjectName("messageBodyBg")
-        body.setAttribute(Qt.WA_StyledBackground, True)
-        body_layout = QVBoxLayout(body)
+        self.body = QWidget(self.card)
+        self.body.setObjectName("messageBodyBg")
+        self.body.setAttribute(Qt.WA_StyledBackground, True)
+        body_layout = QVBoxLayout(self.body)
         body_layout.setContentsMargins(20, 18, 20, 18)
         body_layout.setSpacing(18)
 
@@ -183,7 +175,7 @@ class MessageDialog(QDialog):
         button_layout.addWidget(primary_btn)
         body_layout.addLayout(button_layout)
 
-        layout.addWidget(body)
+        layout.addWidget(self.body)
 
     def showEvent(self, event):
         super().showEvent(event)
@@ -191,20 +183,7 @@ class MessageDialog(QDialog):
         if parent:
             center = parent.frameGeometry().center()
             self.move(center - self.rect().center())
-
-    def _mouse_press(self, event):
-        if event.button() == Qt.LeftButton:
-            self._drag_pos = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
-            event.accept()
-
-    def _mouse_move(self, event):
-        if self._drag_pos is not None:
-            self.move(event.globalPosition().toPoint() - self._drag_pos)
-            event.accept()
-
-    def _mouse_release(self, event):
-        self._drag_pos = None
-        event.accept()
+        schedule_frameless_stabilize(self, self.card, self.topBg, self.body)
 
 
 def show_message(parent, title, message, kind="info"):

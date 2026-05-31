@@ -1,0 +1,1296 @@
+#!/bin/sh
+set -eu
+
+GYRE_RUNTIME="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+SCRIPT_PATH="$GYRE_RUNTIME/start_gyre_alas.sh"
+CONF_FILE="$GYRE_RUNTIME/.gyre_runtime.conf"
+LEGACY_ROOT_CACHE="$GYRE_RUNTIME/.gyre_alas_root"
+PID_FILE="$GYRE_RUNTIME/.gyre_alas.pid"
+LOG_FILE="$GYRE_RUNTIME/.gyre_alas.log"
+UPDATER_SCRIPT="$GYRE_RUNTIME/gyre_runtime_updater.py"
+UPDATER_PID_FILE="$GYRE_RUNTIME/.gyre_updater.pid"
+UPDATER_LOG_FILE="$GYRE_RUNTIME/.gyre_updater.log"
+SERVICE_DIR="$GYRE_RUNTIME/service"
+SYSTEMD_SERVICE_NAME="alas-gyre-overlay.service"
+OPENRC_SERVICE_NAME="alas-gyre-overlay"
+ALAS_GYRE_OVERLAY="$GYRE_RUNTIME/overlay"
+ALAS_GYRE_API_TOKEN=__API_TOKEN__
+DEFAULT_GYRE_UPDATE_HOST="0.0.0.0"
+DEFAULT_GYRE_UPDATE_PORT="22268"
+GYRE_UPDATE_HOST="${GYRE_UPDATE_HOST:-$DEFAULT_GYRE_UPDATE_HOST}"
+GYRE_UPDATE_PORT="${GYRE_UPDATE_PORT:-$DEFAULT_GYRE_UPDATE_PORT}"
+ALAS_WEBUI_PORT="${ALAS_WEBUI_PORT:-}"
+GYRE_LANG="${GYRE_LANG:-}"
+MENU_DISCOVERY_DONE=0
+MENU_DISCOVERY_HINT=""
+export ALAS_GYRE_OVERLAY ALAS_GYRE_API_TOKEN
+
+CANDIDATE_FILE="${TMPDIR:-/tmp}/gyre_alas_candidates.$$"
+FOUND_FILE="${TMPDIR:-/tmp}/gyre_alas_found.$$"
+trap 'rm -f "$CANDIDATE_FILE" "$FOUND_FILE"' EXIT INT TERM
+
+C_RESET=""
+C_BOLD=""
+C_DIM=""
+C_RED=""
+C_GREEN=""
+C_YELLOW=""
+C_BLUE=""
+C_MAGENTA=""
+C_CYAN=""
+C_GRAY=""
+
+setup_colors() {
+    case "${GYRE_COLOR:-auto}" in
+        never|no|0)
+            return 0
+            ;;
+        always|yes|1)
+            use_color=1
+            ;;
+        *)
+            if [ -t 1 ] && [ "${NO_COLOR:-}" = "" ] && [ "${TERM:-}" != "dumb" ]; then
+                use_color=1
+            else
+                use_color=0
+            fi
+            ;;
+    esac
+    [ "$use_color" = "1" ] || return 0
+    C_RESET="$(printf '\033[0m')"
+    C_BOLD="$(printf '\033[1m')"
+    C_DIM="$(printf '\033[2m')"
+    C_RED="$(printf '\033[31m')"
+    C_GREEN="$(printf '\033[32m')"
+    C_YELLOW="$(printf '\033[33m')"
+    C_BLUE="$(printf '\033[34m')"
+    C_MAGENTA="$(printf '\033[35m')"
+    C_CYAN="$(printf '\033[36m')"
+    C_GRAY="$(printf '\033[90m')"
+}
+
+setup_colors
+
+print_rule() {
+    printf '%s--------------------------------------------------%s\n' "${C_GRAY}" "${C_RESET}"
+}
+
+print_title() {
+    printf '%s%s%s\n' "${C_BOLD}${C_CYAN}" "$1" "${C_RESET}"
+}
+
+panel_top() {
+    echo
+    print_title "$1"
+    print_rule
+}
+
+panel_bottom() {
+    print_rule
+}
+
+panel_line() {
+    label="$1"
+    value="$2"
+    printf '  %s%s%s : %s\n' "${C_DIM}" "$label" "${C_RESET}" "$value"
+}
+
+menu_group() {
+    printf '\n%s%s%s\n' "${C_BOLD}" "$1" "${C_RESET}"
+}
+
+menu_item() {
+    menu_no="$1"
+    menu_text="$2"
+    menu_kind="${3:-normal}"
+    case "$menu_kind" in
+        good) menu_color="${C_GREEN}" ;;
+        danger) menu_color="${C_RED}" ;;
+        warn) menu_color="${C_YELLOW}" ;;
+        info) menu_color="${C_CYAN}" ;;
+        muted) menu_color="${C_GRAY}" ;;
+        *) menu_color="" ;;
+    esac
+    printf '  %s%2s)%s %s%s%s\n' "${C_GRAY}" "$menu_no" "${C_RESET}" "$menu_color" "$menu_text" "${C_RESET}"
+}
+
+prompt_text() {
+    printf '\n%s>%s %s' "${C_YELLOW}" "${C_RESET}" "$1"
+}
+
+success_msg() {
+    printf '%s[OK]%s %s\n' "${C_GREEN}" "${C_RESET}" "$*"
+}
+
+warn_msg() {
+    printf '%s[WARN]%s %s\n' "${C_YELLOW}" "${C_RESET}" "$*"
+}
+
+error_msg() {
+    printf '%s[ERR]%s %s\n' "${C_RED}" "${C_RESET}" "$*"
+}
+
+
+cleanup_temp() {
+    rm -f "$CANDIDATE_FILE" "$FOUND_FILE" 2>/dev/null || true
+}
+
+is_alas_root() {
+    [ -n "${1:-}" ] || return 1
+    [ -f "$1/gui.py" ] && [ -f "$1/module/webui/app.py" ]
+}
+
+load_config() {
+    env_lang="${GYRE_LANG:-}"
+    env_update_host="${GYRE_UPDATE_HOST:-}"
+    env_update_port="${GYRE_UPDATE_PORT:-}"
+    env_alas_webui_port="${ALAS_WEBUI_PORT:-}"
+    ALAS_ROOT=""
+    GYRE_LANG=""
+    GYRE_UPDATE_HOST="$DEFAULT_GYRE_UPDATE_HOST"
+    GYRE_UPDATE_PORT="$DEFAULT_GYRE_UPDATE_PORT"
+    ALAS_WEBUI_PORT=""
+    if [ -f "$CONF_FILE" ]; then
+        while IFS= read -r line || [ -n "$line" ]; do
+            case "$line" in
+                ALAS_ROOT=*) ALAS_ROOT=${line#ALAS_ROOT=} ;;
+                GYRE_LANG=*) GYRE_LANG=${line#GYRE_LANG=} ;;
+                GYRE_UPDATE_HOST=*) GYRE_UPDATE_HOST=${line#GYRE_UPDATE_HOST=} ;;
+                GYRE_UPDATE_PORT=*) GYRE_UPDATE_PORT=${line#GYRE_UPDATE_PORT=} ;;
+                ALAS_WEBUI_PORT=*) ALAS_WEBUI_PORT=${line#ALAS_WEBUI_PORT=} ;;
+            esac
+        done < "$CONF_FILE"
+    fi
+    if [ -z "$ALAS_ROOT" ] && [ -f "$LEGACY_ROOT_CACHE" ]; then
+        IFS= read -r ALAS_ROOT < "$LEGACY_ROOT_CACHE" || ALAS_ROOT=""
+    fi
+    case "$env_lang" in
+        zh|en) GYRE_LANG="$env_lang" ;;
+    esac
+    [ -n "$env_update_host" ] && GYRE_UPDATE_HOST="$env_update_host"
+    [ -n "$env_update_port" ] && GYRE_UPDATE_PORT="$env_update_port"
+    [ -n "$env_alas_webui_port" ] && ALAS_WEBUI_PORT="$env_alas_webui_port"
+    case "$GYRE_LANG" in
+        zh|en) ;;
+        *) GYRE_LANG="$(default_lang)" ;;
+    esac
+    case "$GYRE_UPDATE_PORT" in
+        ''|*[!0-9]*) GYRE_UPDATE_PORT="$DEFAULT_GYRE_UPDATE_PORT" ;;
+    esac
+    [ -n "$GYRE_UPDATE_HOST" ] || GYRE_UPDATE_HOST="$DEFAULT_GYRE_UPDATE_HOST"
+}
+save_config() {
+    mkdir -p "$GYRE_RUNTIME" 2>/dev/null || true
+    case "${GYRE_LANG:-}" in
+        zh|en) ;;
+        *) GYRE_LANG="$(default_lang)" ;;
+    esac
+    case "$GYRE_UPDATE_PORT" in
+        ''|*[!0-9]*) GYRE_UPDATE_PORT="$DEFAULT_GYRE_UPDATE_PORT" ;;
+    esac
+    [ -n "$GYRE_UPDATE_HOST" ] || GYRE_UPDATE_HOST="$DEFAULT_GYRE_UPDATE_HOST"
+    printf 'ALAS_ROOT=%s
+GYRE_LANG=%s
+GYRE_UPDATE_HOST=%s
+GYRE_UPDATE_PORT=%s
+ALAS_WEBUI_PORT=%s
+' "${ALAS_ROOT:-}" "$GYRE_LANG" "$GYRE_UPDATE_HOST" "$GYRE_UPDATE_PORT" "${ALAS_WEBUI_PORT:-}" > "$CONF_FILE"
+}
+
+save_alas_root() {
+    save_config
+    printf '%s\n' "$ALAS_ROOT" > "$LEGACY_ROOT_CACHE" 2>/dev/null || true
+}
+
+
+locale_is_utf8() {
+    [ "${GYRE_FORCE_ZH:-}" = "1" ] && return 0
+    locale_value="${LC_ALL:-${LC_CTYPE:-${LANG:-}}}"
+    case "$locale_value" in
+        *UTF-8*|*utf-8*|*UTF8*|*utf8*) return 0 ;;
+    esac
+    if command -v locale >/dev/null 2>&1; then
+        charmap="$(locale charmap 2>/dev/null || true)"
+        case "$charmap" in
+            *UTF-8*|*utf-8*|*UTF8*|*utf8*) return 0 ;;
+        esac
+    fi
+    return 1
+}
+
+default_lang() {
+    if [ "${GYRE_FORCE_ZH:-}" = "1" ]; then
+        printf 'zh'
+        return 0
+    fi
+    lang_probe="${LC_ALL:-} ${LC_MESSAGES:-} ${LANGUAGE:-} ${LANG:-} ${LC_CTYPE:-}"
+    case "$lang_probe" in
+        zh*|*' zh'*|*zh_CN*|*zh_SG*|*zh_TW*|*zh_HK*|*zh_MO*|*zh-Hans*|*zh-Hant*)
+            printf 'zh'
+            ;;
+        *)
+            printf 'en'
+            ;;
+    esac
+}
+
+is_zh() {
+    [ "${GYRE_LANG:-}" = "zh" ]
+}
+
+not_configured_text() {
+    if is_zh; then
+        printf '未配置'
+    else
+        printf 'not configured'
+    fi
+}
+
+switch_language() {
+    load_config
+    if [ "$GYRE_LANG" = "zh" ]; then
+        GYRE_LANG="en"
+        save_config
+        echo "[Alas-Gyre] Language switched to English."
+        return 0
+    fi
+    GYRE_LANG="zh"
+    save_config
+    echo "[Alas-Gyre] 已切换为中文。"
+}
+
+add_candidate() {
+    candidate="${1:-}"
+    [ -n "$candidate" ] || return 0
+    [ -d "$candidate" ] || return 0
+    candidate="$(CDPATH= cd -- "$candidate" 2>/dev/null && pwd)" || return 0
+    is_alas_root "$candidate" || return 0
+    grep -Fxq "$candidate" "$CANDIDATE_FILE" 2>/dev/null || printf '%s\n' "$candidate" >> "$CANDIDATE_FILE"
+}
+
+discover_alas_roots() {
+    : > "$CANDIDATE_FILE"
+    : > "$FOUND_FILE"
+    parent="$(dirname -- "$GYRE_RUNTIME")"
+    home_dir="${HOME:-}"
+
+    add_candidate "$GYRE_RUNTIME"
+    add_candidate "$parent"
+    add_candidate "$parent/AzurLaneAutoScript"
+    add_candidate "$parent/AlasApp/AzurLaneAutoScript"
+    add_candidate "$parent/AlasApp_0.4.10_fullcn/AzurLaneAutoScript"
+
+    if [ -n "$home_dir" ]; then
+        add_candidate "$home_dir/AzurLaneAutoScript"
+        add_candidate "$home_dir/AlasApp/AzurLaneAutoScript"
+        add_candidate "$home_dir/AlasApp_0.4.10_fullcn/AzurLaneAutoScript"
+    fi
+
+    for base in "$parent" "$home_dir" /root /opt /srv /app; do
+        [ -n "$base" ] || continue
+        [ -d "$base" ] || continue
+        add_candidate "$base/AzurLaneAutoScript"
+        add_candidate "$base/AlasApp/AzurLaneAutoScript"
+        add_candidate "$base/AlasApp_0.4.10_fullcn/AzurLaneAutoScript"
+        if command -v find >/dev/null 2>&1; then
+            find "$base" -maxdepth 4 -type f -name gui.py 2>/dev/null >> "$FOUND_FILE" || true
+        fi
+    done
+
+    while IFS= read -r gui_file || [ -n "$gui_file" ]; do
+        [ -n "$gui_file" ] || continue
+        add_candidate "$(dirname -- "$gui_file")"
+    done < "$FOUND_FILE"
+}
+
+auto_discover_menu() {
+    [ "${MENU_DISCOVERY_DONE:-0}" = "0" ] || return 0
+    MENU_DISCOVERY_DONE=1
+    MENU_DISCOVERY_HINT=""
+    [ -z "${ALAS_ROOT:-}" ] || return 0
+
+    discover_alas_roots
+    count="$(wc -l < "$CANDIDATE_FILE" | tr -d ' ')"
+    case "$count" in
+        1)
+            IFS= read -r ALAS_ROOT < "$CANDIDATE_FILE" || ALAS_ROOT=""
+            if [ -n "$ALAS_ROOT" ] && is_alas_root "$ALAS_ROOT"; then
+                save_alas_root
+                if is_zh; then
+                    MENU_DISCOVERY_HINT="${C_GREEN}已自动找到并保存 ALAS 目录${C_RESET}"
+                else
+                    MENU_DISCOVERY_HINT="${C_GREEN}Found and saved ALAS root automatically${C_RESET}"
+                fi
+            fi
+            ;;
+        0)
+            if is_zh; then
+                MENU_DISCOVERY_HINT="${C_YELLOW}未自动找到 ALAS；请选择 6 手动输入路径${C_RESET}"
+            else
+                MENU_DISCOVERY_HINT="${C_YELLOW}ALAS was not detected; choose 6 to enter the path manually${C_RESET}"
+            fi
+            ;;
+        *)
+            if is_zh; then
+                MENU_DISCOVERY_HINT="${C_YELLOW}检测到 $count 个 ALAS 候选目录；请选择 6 指定${C_RESET}"
+            else
+                MENU_DISCOVERY_HINT="${C_YELLOW}Detected $count ALAS candidates; choose 6 to select one${C_RESET}"
+            fi
+            ;;
+    esac
+}
+
+print_candidates() {
+    index=1
+    while IFS= read -r candidate || [ -n "$candidate" ]; do
+        [ -n "$candidate" ] || continue
+        printf '  %s) %s\n' "$index" "$candidate"
+        index=$((index + 1))
+    done < "$CANDIDATE_FILE"
+}
+
+choose_alas_root() {
+    load_config
+    echo
+    echo "========================================"
+    if is_zh; then
+        echo " Alas-Gyre Overlay 初始化"
+        echo "========================================"
+        echo "ALAS 根目录必须包含：gui.py 和 module/webui/app.py"
+        echo
+        if [ -s "$CANDIDATE_FILE" ]; then
+            echo "检测到候选目录："
+            print_candidates
+            echo
+        else
+            echo "未自动检测到 ALAS 根目录。"
+            echo
+        fi
+    else
+        echo " Alas-Gyre Overlay Init"
+        echo "========================================"
+        echo "ALAS root must contain: gui.py and module/webui/app.py"
+        echo
+        if [ -s "$CANDIDATE_FILE" ]; then
+            echo "Detected candidates:"
+            print_candidates
+            echo
+        else
+            echo "No ALAS root was detected automatically."
+            echo
+        fi
+    fi
+    if [ ! -t 0 ]; then
+        if is_zh; then
+            echo "非交互 shell。请设置 ALAS_ROOT=/path/to/AzurLaneAutoScript，或写入 $CONF_FILE。" >&2
+        else
+            echo "Non-interactive shell. Set ALAS_ROOT=/path/to/AzurLaneAutoScript or write ALAS_ROOT to $CONF_FILE." >&2
+        fi
+        return 1
+    fi
+    while :; do
+        if is_zh; then
+            printf '请选择序号或输入 ALAS 根目录路径 [q 退出]: '
+        else
+            printf 'Select number or enter ALAS root path [q to quit]: '
+        fi
+        IFS= read -r answer || return 1
+        answer="$(printf '%s' "$answer" | tr -d '\r')"
+        case "$answer" in
+            q|Q|quit|exit) return 1 ;;
+            '') continue ;;
+            *[!0-9]*) selected="$answer" ;;
+            *)
+                selected="$(sed -n "${answer}p" "$CANDIDATE_FILE" 2>/dev/null || true)"
+                [ -n "$selected" ] || selected="$answer"
+                ;;
+        esac
+        if is_alas_root "$selected"; then
+            ALAS_ROOT="$(CDPATH= cd -- "$selected" && pwd)"
+            save_alas_root
+            if is_zh; then
+                echo "[Alas-Gyre] 已保存 ALAS 根目录：$ALAS_ROOT"
+            else
+                echo "[Alas-Gyre] Saved ALAS root: $ALAS_ROOT"
+            fi
+            return 0
+        fi
+        if is_zh; then
+            echo "无效的 ALAS 根目录：$selected"
+        else
+            echo "Invalid ALAS root: $selected"
+        fi
+    done
+}
+resolve_alas_root() {
+    allow_prompt="${1:-yes}"
+    env_root="${ALAS_ROOT:-}"
+    load_config
+
+    if [ -n "$env_root" ]; then
+        if is_alas_root "$env_root"; then
+            ALAS_ROOT="$(CDPATH= cd -- "$env_root" && pwd)"
+            save_alas_root
+            echo "[Alas-Gyre] ALAS root: $ALAS_ROOT"
+            return 0
+        fi
+        echo "[Alas-Gyre] Ignoring invalid ALAS_ROOT: $env_root" >&2
+    fi
+
+    if [ -n "$ALAS_ROOT" ] && is_alas_root "$ALAS_ROOT"; then
+        ALAS_ROOT="$(CDPATH= cd -- "$ALAS_ROOT" && pwd)"
+        echo "[Alas-Gyre] ALAS root: $ALAS_ROOT"
+        return 0
+    fi
+
+    discover_alas_roots
+    count="$(wc -l < "$CANDIDATE_FILE" | tr -d ' ')"
+    if [ "$count" = "1" ]; then
+        IFS= read -r ALAS_ROOT < "$CANDIDATE_FILE"
+        save_alas_root
+        echo "[Alas-Gyre] Found ALAS root: $ALAS_ROOT"
+        return 0
+    fi
+
+    if [ "$allow_prompt" = "yes" ]; then
+        choose_alas_root
+        return $?
+    fi
+
+    if [ "$count" = "0" ]; then
+        echo "[Alas-Gyre] ALAS root not configured and not detected." >&2
+    else
+        echo "[Alas-Gyre] Multiple ALAS roots detected. Run this script interactively and choose one." >&2
+    fi
+    return 1
+}
+
+get_pid() {
+    pid=""
+    if [ -f "$PID_FILE" ]; then
+        IFS= read -r pid < "$PID_FILE" || pid=""
+    fi
+    case "$pid" in
+        ''|*[!0-9]*) return 1 ;;
+    esac
+    printf '%s\n' "$pid"
+    return 0
+}
+
+is_managed_running() {
+    pid="$(get_pid 2>/dev/null || true)"
+    [ -n "$pid" ] || return 1
+    kill -0 "$pid" 2>/dev/null
+}
+
+cleanup_stale_pid() {
+    if [ -f "$PID_FILE" ] && ! is_managed_running; then
+        rm -f "$PID_FILE" 2>/dev/null || true
+    fi
+}
+
+status_line() {
+    if is_managed_running; then
+        pid="$(get_pid)"
+        if is_zh; then
+            printf '%s[运行中 pid=%s]%s' "${C_GREEN}" "$pid" "${C_RESET}"
+        else
+            printf '%s[RUNNING pid=%s]%s' "${C_GREEN}" "$pid" "${C_RESET}"
+        fi
+    else
+        if is_zh; then
+            printf '%s[已停止]%s' "${C_RED}" "${C_RESET}"
+        else
+            printf '%s[STOPPED]%s' "${C_RED}" "${C_RESET}"
+        fi
+    fi
+}
+
+get_updater_pid() {
+    pid=""
+    if [ -f "$UPDATER_PID_FILE" ]; then
+        IFS= read -r pid < "$UPDATER_PID_FILE" || pid=""
+    fi
+    case "$pid" in
+        ''|*[!0-9]*) return 1 ;;
+    esac
+    printf '%s
+' "$pid"
+    return 0
+}
+
+is_updater_running() {
+    pid="$(get_updater_pid 2>/dev/null || true)"
+    [ -n "$pid" ] || return 1
+    kill -0 "$pid" 2>/dev/null
+}
+
+cleanup_stale_updater_pid() {
+    if [ -f "$UPDATER_PID_FILE" ] && ! is_updater_running; then
+        rm -f "$UPDATER_PID_FILE" 2>/dev/null || true
+    fi
+}
+
+updater_token_matches() {
+    py="$(find_updater_python 2>/dev/null || true)"
+    [ -n "$py" ] || return 1
+    GYRE_CHECK_PORT="$GYRE_UPDATE_PORT" ALAS_GYRE_API_TOKEN="$ALAS_GYRE_API_TOKEN" "$py" -c '
+import os
+import sys
+try:
+    from urllib import request, error
+    port = os.environ.get("GYRE_CHECK_PORT", "22268")
+    token = os.environ.get("ALAS_GYRE_API_TOKEN", "")
+    req = request.Request(
+        "http://127.0.0.1:%s/runtime/info" % port,
+        headers={"X-Alas-Gyre-Token": token},
+    )
+    try:
+        with request.urlopen(req, timeout=2) as resp:
+            sys.exit(0 if resp.getcode() == 200 else 1)
+    except error.HTTPError as exc:
+        sys.exit(2 if exc.code == 401 else 1)
+except Exception:
+    sys.exit(1)
+' >/dev/null 2>&1
+}
+
+is_runtime_updater_pid() {
+    pid="$1"
+    cmd="$(pid_cmdline "$pid")"
+    case "$cmd" in
+        *gyre_runtime_updater.py*)
+            return 0
+            ;;
+    esac
+    return 1
+}
+
+adopt_or_report_updater_port() {
+    pids="$(port_listener_pids "$GYRE_UPDATE_PORT" 2>/dev/null || true)"
+    [ -n "$pids" ] || return 1
+    for pid in $pids; do
+        [ -n "$pid" ] || continue
+        if is_runtime_updater_pid "$pid"; then
+            printf '%s\n' "$pid" > "$UPDATER_PID_FILE" 2>/dev/null || true
+            if updater_token_matches; then
+                return 0
+            fi
+            warn_msg "Existing runtime updater uses an old token; restarting it."
+            stop_updater
+            return 1
+        fi
+    done
+    warn_msg "Runtime update port $GYRE_UPDATE_PORT is already in use by pid(s): $pids"
+    warn_msg "Refusing to start another updater. Change GYRE_UPDATE_PORT in .gyre_runtime.conf if needed."
+    return 2
+}
+
+updater_status_line() {
+    if is_updater_running; then
+        pid="$(get_updater_pid)"
+        if is_zh; then
+            printf '%s[运行中 pid=%s] %s:%s%s' "${C_GREEN}" "$pid" "$GYRE_UPDATE_HOST" "$GYRE_UPDATE_PORT" "${C_RESET}"
+        else
+            printf '%s[RUNNING pid=%s] %s:%s%s' "${C_GREEN}" "$pid" "$GYRE_UPDATE_HOST" "$GYRE_UPDATE_PORT" "${C_RESET}"
+        fi
+    else
+        if is_zh; then
+            printf '%s[已停止] %s:%s%s' "${C_RED}" "$GYRE_UPDATE_HOST" "$GYRE_UPDATE_PORT" "${C_RESET}"
+        else
+            printf '%s[STOPPED] %s:%s%s' "${C_RED}" "$GYRE_UPDATE_HOST" "$GYRE_UPDATE_PORT" "${C_RESET}"
+        fi
+    fi
+}
+
+find_updater_python() {
+    if [ -n "${ALAS_ROOT:-}" ]; then
+        for py in             "$ALAS_ROOT/.pixi/envs/default/bin/python"             "$ALAS_ROOT/.venv/bin/python"             "$ALAS_ROOT/venv/bin/python"             "$ALAS_ROOT/toolkit/python"             "$ALAS_ROOT/toolkit/python.exe"
+        do
+            [ -x "$py" ] && { printf '%s
+' "$py"; return 0; }
+        done
+    fi
+    if command -v python3 >/dev/null 2>&1; then
+        command -v python3
+        return 0
+    fi
+    if command -v python >/dev/null 2>&1; then
+        command -v python
+        return 0
+    fi
+    return 1
+}
+
+start_updater() {
+    load_config
+    cleanup_stale_updater_pid
+    if is_updater_running; then
+        if updater_token_matches; then
+            return 0
+        fi
+        warn_msg "Runtime updater token does not match current launcher; restarting it."
+        stop_updater
+    fi
+    if adopt_or_report_updater_port; then
+        return 0
+    else
+        adopt_status=$?
+        [ "$adopt_status" = "2" ] && return 1
+    fi
+    if [ ! -f "$UPDATER_SCRIPT" ]; then
+        warn_msg "gyre_runtime_updater.py not found; runtime update service disabled."
+        return 1
+    fi
+    py="$(find_updater_python 2>/dev/null || true)"
+    if [ -z "$py" ]; then
+        warn_msg "Python not found; runtime update service disabled."
+        return 1
+    fi
+    mkdir -p "$GYRE_RUNTIME" 2>/dev/null || true
+    : >> "$UPDATER_LOG_FILE" 2>/dev/null || true
+    export ALAS_GYRE_API_TOKEN GYRE_UPDATE_HOST GYRE_UPDATE_PORT
+    nohup "$py" "$UPDATER_SCRIPT" --runtime "$GYRE_RUNTIME" --host "$GYRE_UPDATE_HOST" --port "$GYRE_UPDATE_PORT" >> "$UPDATER_LOG_FILE" 2>&1 &
+    updater_pid=$!
+    printf '%s
+' "$updater_pid" > "$UPDATER_PID_FILE"
+    sleep 1
+    if is_updater_running; then
+        return 0
+    fi
+    rm -f "$UPDATER_PID_FILE" 2>/dev/null || true
+    warn_msg "Runtime update service failed to start. Log: $UPDATER_LOG_FILE"
+    return 1
+}
+
+stop_updater() {
+    if ! is_updater_running; then
+        cleanup_stale_updater_pid
+        return 0
+    fi
+    pid="$(get_updater_pid)"
+    kill "$pid" 2>/dev/null || true
+    i=0
+    while [ "$i" -lt 5 ]; do
+        if ! kill -0 "$pid" 2>/dev/null; then
+            rm -f "$UPDATER_PID_FILE" 2>/dev/null || true
+            return 0
+        fi
+        i=$((i + 1))
+        sleep 1
+    done
+    kill -KILL "$pid" 2>/dev/null || true
+    sleep 1
+    rm -f "$UPDATER_PID_FILE" 2>/dev/null || true
+}
+
+restart_updater() {
+    stop_updater
+    start_updater
+}
+
+show_updater_status() {
+    load_config
+    cleanup_stale_updater_pid
+    panel_top "Alas-Gyre Runtime Updater"
+    panel_line "Updater" "$(updater_status_line)"
+    panel_line "Remote" "LAN access is enabled by default. Do not expose this port to the public Internet."
+    panel_line "Script" "$UPDATER_SCRIPT"
+    panel_line "PID" "$UPDATER_PID_FILE"
+    panel_line "Log" "$UPDATER_LOG_FILE"
+    panel_bottom
+    if [ -f "$UPDATER_LOG_FILE" ]; then
+        echo
+        printf '  %sLast 30 updater log lines%s\n' "${C_BOLD}${C_YELLOW}" "${C_RESET}"
+        tail -n 30 "$UPDATER_LOG_FILE" 2>/dev/null || true
+    fi
+}
+
+
+detect_alas_webui_port() {
+    if [ -n "${ALAS_WEBUI_PORT:-}" ]; then
+        case "$ALAS_WEBUI_PORT" in
+            *[!0-9]*|'') ;;
+            *) printf '%s\n' "$ALAS_WEBUI_PORT"; return 0 ;;
+        esac
+    fi
+    if [ -n "${ALAS_ROOT:-}" ]; then
+        for f in "$ALAS_ROOT/config/deploy.yaml" "$ALAS_ROOT/config/deploy.template.yaml"; do
+            [ -f "$f" ] || continue
+            port="$(sed -n 's/^[[:space:]]*WebuiPort:[[:space:]]*\([0-9][0-9]*\).*/\1/p' "$f" 2>/dev/null | sed -n '1p')"
+            case "$port" in
+                *[!0-9]*|'') ;;
+                *) printf '%s\n' "$port"; return 0 ;;
+            esac
+        done
+    fi
+    printf '22267\n'
+}
+
+port_listener_pids() {
+    port="$1"
+    if command -v ss >/dev/null 2>&1; then
+        ss -ltnp 2>/dev/null | awk -v p=":$port" '$4 ~ p"$" {print}' | sed -n 's/.*pid=\([0-9][0-9]*\).*/\1/p'
+    elif command -v netstat >/dev/null 2>&1; then
+        netstat -ltnp 2>/dev/null | awk -v p=":$port" '$4 ~ p"$" {print $7}' | sed -n 's#^\([0-9][0-9]*\)/.*#\1#p'
+    elif command -v lsof >/dev/null 2>&1; then
+        lsof -tiTCP:"$port" -sTCP:LISTEN 2>/dev/null || true
+    elif command -v fuser >/dev/null 2>&1; then
+        fuser -n tcp "$port" 2>/dev/null | tr ' ' '\n' | sed -n 's/[^0-9]//gp'
+    fi | sort -u
+}
+
+pid_cmdline() {
+    pid="$1"
+    if [ -r "/proc/$pid/cmdline" ]; then
+        tr '\000' ' ' < "/proc/$pid/cmdline" 2>/dev/null || true
+    fi
+}
+
+pid_cwd() {
+    pid="$1"
+    if [ -e "/proc/$pid/cwd" ] && command -v readlink >/dev/null 2>&1; then
+        readlink "/proc/$pid/cwd" 2>/dev/null || true
+    fi
+}
+
+is_safe_alas_port_pid() {
+    pid="$1"
+    managed="$(get_pid 2>/dev/null || true)"
+    [ -n "$managed" ] && [ "$pid" = "$managed" ] && return 0
+    cmd="$(pid_cmdline "$pid")"
+    cwd="$(pid_cwd "$pid")"
+    root="${ALAS_ROOT:-}"
+    if [ -n "$root" ]; then
+        case " $cmd $cwd " in
+            *"$root"*) return 0 ;;
+        esac
+    fi
+    case "$cmd" in
+        *gui.py*AzurLaneAutoScript*|*AzurLaneAutoScript*gui.py*) return 0 ;;
+    esac
+    return 1
+}
+
+stop_port_pid() {
+    pid="$1"
+    reason="$2"
+    echo "[Alas-Gyre] Stopping process using $reason. pid=$pid"
+    kill "$pid" 2>/dev/null || true
+    i=0
+    while [ "$i" -lt 8 ]; do
+        if ! kill -0 "$pid" 2>/dev/null; then
+            return 0
+        fi
+        i=$((i + 1))
+        sleep 1
+    done
+    echo "[Alas-Gyre] Process pid=$pid did not exit; sending KILL."
+    kill -KILL "$pid" 2>/dev/null || true
+    sleep 1
+}
+
+ensure_alas_port_free() {
+    port="$(detect_alas_webui_port)"
+    ALAS_WEBUI_PORT="$port"
+    pids="$(port_listener_pids "$port" 2>/dev/null || true)"
+    [ -n "$pids" ] || return 0
+    for pid in $pids; do
+        [ -n "$pid" ] || continue
+        if is_safe_alas_port_pid "$pid"; then
+            stop_port_pid "$pid" "ALAS WebUI port $port"
+        else
+            cmd="$(pid_cmdline "$pid")"
+            echo "[Alas-Gyre] ALAS WebUI port $port is already in use by pid=$pid." >&2
+            [ -n "$cmd" ] && echo "[Alas-Gyre] Command: $cmd" >&2
+            echo "[Alas-Gyre] Refusing to kill an unrelated process automatically." >&2
+            echo "[Alas-Gyre] Stop that process manually, or set ALAS_WEBUI_PORT to another port." >&2
+            return 1
+        fi
+    done
+    sleep 1
+    if [ -n "$(port_listener_pids "$port" 2>/dev/null || true)" ]; then
+        echo "[Alas-Gyre] ALAS WebUI port $port is still in use after cleanup." >&2
+        return 1
+    fi
+    return 0
+}
+
+prepare_overlay_env() {
+    export ALAS_ROOT ALAS_GYRE_OVERLAY ALAS_GYRE_API_TOKEN
+    if [ "${PYTHONPATH:-}" ]; then
+        export PYTHONPATH="$ALAS_GYRE_OVERLAY:$PYTHONPATH"
+    else
+        export PYTHONPATH="$ALAS_GYRE_OVERLAY"
+    fi
+}
+
+run_alas_foreground() {
+    allow_prompt="${1:-yes}"
+    resolve_alas_root "$allow_prompt" || return 1
+    cleanup_temp
+    ensure_alas_port_free || return 1
+    start_updater || true
+    prepare_overlay_env
+    printf '%s\n' "$$" > "$PID_FILE" 2>/dev/null || true
+    cd "$ALAS_ROOT" || return 1
+    echo "[Alas-Gyre] Starting ALAS with Overlay. Root: $ALAS_ROOT"
+
+    if [ -f "./run_alas.sh" ]; then
+        if [ -x "./run_alas.sh" ]; then
+            exec ./run_alas.sh
+        else
+            exec sh ./run_alas.sh
+        fi
+    elif command -v pixi >/dev/null 2>&1 && [ -f "./pixi.toml" ]; then
+        exec pixi run python gui.py
+    elif [ -x "./.pixi/envs/default/bin/python" ]; then
+        exec ./.pixi/envs/default/bin/python gui.py
+    elif [ -x "./.venv/bin/python" ]; then
+        exec ./.venv/bin/python gui.py
+    elif [ -x "./venv/bin/python" ]; then
+        exec ./venv/bin/python gui.py
+    elif [ -x "./toolkit/python" ]; then
+        exec ./toolkit/python gui.py
+    elif [ -x "./toolkit/python.exe" ]; then
+        exec ./toolkit/python.exe gui.py
+    else
+        echo "[Alas-Gyre] ALAS Python environment not found; falling back to python3." >&2
+        exec python3 gui.py
+    fi
+}
+
+start_background() {
+    cleanup_stale_pid
+    if is_managed_running; then
+        pid="$(get_pid)"
+        echo "[Alas-Gyre] ALAS is already running under Gyre. pid=$pid"
+        return 0
+    fi
+    resolve_alas_root yes || return 1
+    cleanup_temp
+    ensure_alas_port_free || return 1
+    mkdir -p "$GYRE_RUNTIME" 2>/dev/null || true
+    : >> "$LOG_FILE" 2>/dev/null || true
+    echo "[Alas-Gyre] Starting ALAS in background..."
+    nohup sh "$SCRIPT_PATH" __gyre_service_run >> "$LOG_FILE" 2>&1 &
+    bg_pid=$!
+    printf '%s\n' "$bg_pid" > "$PID_FILE"
+    sleep 2
+    if is_managed_running; then
+        echo "[Alas-Gyre] Started. pid=$bg_pid"
+        echo "[Alas-Gyre] Log: $LOG_FILE"
+        return 0
+    fi
+    echo "[Alas-Gyre] Start failed or exited quickly. Check log: $LOG_FILE" >&2
+    rm -f "$PID_FILE" 2>/dev/null || true
+    if [ -f "$LOG_FILE" ]; then
+        tail -n 40 "$LOG_FILE" 2>/dev/null || true
+    fi
+    return 1
+}
+
+stop_managed_alas() {
+    if ! is_managed_running; then
+        cleanup_stale_pid
+        echo "[Alas-Gyre] No Gyre-managed ALAS is running."
+        return 0
+    fi
+    pid="$(get_pid)"
+    echo "[Alas-Gyre] Stopping Gyre-managed ALAS. pid=$pid"
+    kill "$pid" 2>/dev/null || true
+    i=0
+    while [ "$i" -lt 10 ]; do
+        if ! kill -0 "$pid" 2>/dev/null; then
+            rm -f "$PID_FILE" 2>/dev/null || true
+            echo "[Alas-Gyre] Stopped."
+            return 0
+        fi
+        i=$((i + 1))
+        sleep 1
+    done
+    echo "[Alas-Gyre] Process did not exit after TERM; sending KILL."
+    kill -KILL "$pid" 2>/dev/null || true
+    sleep 1
+    rm -f "$PID_FILE" 2>/dev/null || true
+    echo "[Alas-Gyre] Stopped."
+}
+
+restart_background() {
+    stop_managed_alas
+    start_background
+}
+
+show_status() {
+    cleanup_stale_pid
+    cleanup_stale_updater_pid
+    load_config
+    if is_zh; then
+        panel_top "Alas-Gyre Overlay 状态"
+        panel_line "状态" "$(status_line)"
+        if [ -n "$ALAS_ROOT" ]; then
+            panel_line "ALAS" "$ALAS_ROOT"
+        else
+            panel_line "ALAS" "${C_RED}未配置${C_RESET}"
+        fi
+        panel_line "Runtime" "$GYRE_RUNTIME"
+        panel_line "Overlay" "$ALAS_GYRE_OVERLAY"
+        panel_line "PID" "$PID_FILE"
+        panel_line "日志" "$LOG_FILE"
+        panel_line "Updater" "$(updater_status_line)"
+        panel_line "远程更新" "默认支持局域网访问；请勿将更新端口暴露到公网。"
+        panel_line "Updater log" "$UPDATER_LOG_FILE"
+        panel_line "语言" "${C_CYAN}中文${C_RESET}"
+        panel_bottom
+    else
+        panel_top "Alas-Gyre Overlay Status"
+        panel_line "Status" "$(status_line)"
+        if [ -n "$ALAS_ROOT" ]; then
+            panel_line "ALAS" "$ALAS_ROOT"
+        else
+            panel_line "ALAS" "${C_RED}not configured${C_RESET}"
+        fi
+        panel_line "Runtime" "$GYRE_RUNTIME"
+        panel_line "Overlay" "$ALAS_GYRE_OVERLAY"
+        panel_line "PID" "$PID_FILE"
+        panel_line "Log" "$LOG_FILE"
+        panel_line "Updater" "$(updater_status_line)"
+        panel_line "Remote update" "LAN access is enabled by default. Do not expose this port to the public Internet."
+        panel_line "Updater log" "$UPDATER_LOG_FILE"
+        panel_line "Language" "${C_CYAN} English${C_RESET}"
+        panel_bottom
+    fi
+}
+select_alas_root() {
+    load_config
+    if is_managed_running; then
+        if is_zh; then
+            echo "[Alas-Gyre] 修改 ALAS 目录前，请先停止由 Gyre 管理的 ALAS。"
+        else
+            echo "[Alas-Gyre] Stop the Gyre-managed ALAS before changing ALAS root."
+        fi
+        return 1
+    fi
+    discover_alas_roots
+    if choose_alas_root; then
+        MENU_DISCOVERY_HINT=""
+        return 0
+    fi
+    return 1
+}
+shell_quote() {
+    printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\''/g")"
+}
+
+write_systemd_service() {
+    target="$1"
+    mkdir -p "$(dirname -- "$target")"
+    script_q="$(shell_quote "$SCRIPT_PATH")"
+    cat > "$target" <<EOF
+[Unit]
+Description=Alas-Gyre Overlay ALAS launcher
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/bin/sh -c 'exec "\$1" __gyre_service_run' sh $script_q
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+}
+
+write_openrc_service() {
+    target="$1"
+    mkdir -p "$(dirname -- "$target")"
+    cat > "$target" <<EOF
+#!/sbin/openrc-run
+description="Alas-Gyre Overlay ALAS launcher"
+command="/bin/sh"
+command_args="$SCRIPT_PATH __gyre_service_run"
+command_background="yes"
+pidfile="$PID_FILE"
+output_log="$LOG_FILE"
+error_log="$LOG_FILE"
+
+depend() {
+    need localmount
+    after net
+}
+EOF
+    chmod +x "$target" 2>/dev/null || true
+}
+
+generate_service_files() {
+    mkdir -p "$SERVICE_DIR"
+    write_systemd_service "$SERVICE_DIR/$SYSTEMD_SERVICE_NAME"
+    write_openrc_service "$SERVICE_DIR/$OPENRC_SERVICE_NAME"
+}
+
+detect_service_manager() {
+    if command -v systemctl >/dev/null 2>&1 && [ -d /etc/systemd/system ]; then
+        echo systemd
+    elif command -v rc-update >/dev/null 2>&1 || [ -x /sbin/openrc-run ]; then
+        echo openrc
+    else
+        echo none
+    fi
+}
+
+is_root() {
+    [ "$(id -u 2>/dev/null || echo 1)" = "0" ]
+}
+
+install_autostart() {
+    resolve_alas_root yes || return 1
+    cleanup_temp
+    generate_service_files
+    manager="$(detect_service_manager)"
+    echo "[Alas-Gyre] Service files generated in: $SERVICE_DIR"
+
+    if ! is_root; then
+        echo "[Alas-Gyre] Root permission is required to install autostart."
+        if [ "$manager" = "systemd" ] || [ "$manager" = "none" ]; then
+            echo "systemd manual install:"
+            echo "  sudo cp $(shell_quote "$SERVICE_DIR/$SYSTEMD_SERVICE_NAME") /etc/systemd/system/$SYSTEMD_SERVICE_NAME"
+            echo "  sudo systemctl daemon-reload"
+            echo "  sudo systemctl enable $SYSTEMD_SERVICE_NAME"
+        fi
+        if [ "$manager" = "openrc" ] || [ "$manager" = "none" ]; then
+            echo "OpenRC manual install:"
+            echo "  sudo cp $(shell_quote "$SERVICE_DIR/$OPENRC_SERVICE_NAME") /etc/init.d/$OPENRC_SERVICE_NAME"
+            echo "  sudo chmod +x /etc/init.d/$OPENRC_SERVICE_NAME"
+            echo "  sudo rc-update add $OPENRC_SERVICE_NAME default"
+        fi
+        return 0
+    fi
+
+    case "$manager" in
+        systemd)
+            cp "$SERVICE_DIR/$SYSTEMD_SERVICE_NAME" "/etc/systemd/system/$SYSTEMD_SERVICE_NAME"
+            systemctl daemon-reload
+            systemctl enable "$SYSTEMD_SERVICE_NAME"
+            echo "[Alas-Gyre] systemd autostart installed: $SYSTEMD_SERVICE_NAME"
+            echo "[Alas-Gyre] Start now: systemctl start $SYSTEMD_SERVICE_NAME"
+            ;;
+        openrc)
+            cp "$SERVICE_DIR/$OPENRC_SERVICE_NAME" "/etc/init.d/$OPENRC_SERVICE_NAME"
+            chmod +x "/etc/init.d/$OPENRC_SERVICE_NAME"
+            rc-update add "$OPENRC_SERVICE_NAME" default
+            echo "[Alas-Gyre] OpenRC autostart installed: $OPENRC_SERVICE_NAME"
+            echo "[Alas-Gyre] Start now: rc-service $OPENRC_SERVICE_NAME start"
+            ;;
+        *)
+            echo "[Alas-Gyre] No supported service manager detected. Service files remain in $SERVICE_DIR" >&2
+            return 1
+            ;;
+    esac
+}
+
+uninstall_autostart() {
+    manager="$(detect_service_manager)"
+    generate_service_files
+    if ! is_root; then
+        echo "[Alas-Gyre] Root permission is required to uninstall autostart."
+        echo "systemd manual uninstall:"
+        echo "  sudo systemctl disable $SYSTEMD_SERVICE_NAME"
+        echo "  sudo rm -f /etc/systemd/system/$SYSTEMD_SERVICE_NAME"
+        echo "  sudo systemctl daemon-reload"
+        echo "OpenRC manual uninstall:"
+        echo "  sudo rc-update del $OPENRC_SERVICE_NAME default"
+        echo "  sudo rm -f /etc/init.d/$OPENRC_SERVICE_NAME"
+        return 0
+    fi
+
+    if [ "$manager" = "systemd" ] || [ -f "/etc/systemd/system/$SYSTEMD_SERVICE_NAME" ]; then
+        systemctl disable "$SYSTEMD_SERVICE_NAME" 2>/dev/null || true
+        rm -f "/etc/systemd/system/$SYSTEMD_SERVICE_NAME"
+        systemctl daemon-reload 2>/dev/null || true
+        echo "[Alas-Gyre] systemd autostart removed."
+    fi
+    if [ "$manager" = "openrc" ] || [ -f "/etc/init.d/$OPENRC_SERVICE_NAME" ]; then
+        rc-update del "$OPENRC_SERVICE_NAME" default 2>/dev/null || true
+        rm -f "/etc/init.d/$OPENRC_SERVICE_NAME"
+        echo "[Alas-Gyre] OpenRC autostart removed."
+    fi
+}
+
+show_paths_and_logs() {
+    load_config
+    if is_zh; then
+        panel_top "Alas-Gyre Overlay 文件"
+        panel_line "Runtime" "$GYRE_RUNTIME"
+        panel_line "配置" "$CONF_FILE"
+        panel_line "旧缓存" "$LEGACY_ROOT_CACHE"
+        panel_line "PID" "$PID_FILE"
+        panel_line "日志" "$LOG_FILE"
+        panel_line "服务" "$SERVICE_DIR"
+        panel_line "更新监听" "$GYRE_UPDATE_HOST:$GYRE_UPDATE_PORT"
+        panel_line "远程更新" "默认支持局域网访问；请勿将更新端口暴露到公网。"
+        panel_line "ALAS" "${ALAS_ROOT:-${C_RED}未配置${C_RESET}}"
+        panel_bottom
+        if [ -f "$LOG_FILE" ]; then
+            echo
+            printf '  %s最近 40 行日志%s\n' "${C_BOLD}${C_YELLOW}" "${C_RESET}"
+            tail -n 40 "$LOG_FILE" 2>/dev/null || true
+        fi
+    else
+        panel_top "Alas-Gyre Overlay Files"
+        panel_line "Runtime" "$GYRE_RUNTIME"
+        panel_line "Config" "$CONF_FILE"
+        panel_line "Legacy" "$LEGACY_ROOT_CACHE"
+        panel_line "PID" "$PID_FILE"
+        panel_line "Log" "$LOG_FILE"
+        panel_line "Updater PID" "$UPDATER_PID_FILE"
+        panel_line "Updater log" "$UPDATER_LOG_FILE"
+        panel_line "Service" "$SERVICE_DIR"
+        panel_line "Update listen" "$GYRE_UPDATE_HOST:$GYRE_UPDATE_PORT"
+        panel_line "Remote update" "LAN access is enabled by default. Do not expose this port to the public Internet."
+        panel_line "ALAS" "${ALAS_ROOT:-${C_RED}not configured${C_RESET}}"
+        panel_bottom
+        if [ -f "$LOG_FILE" ]; then
+            echo
+            printf '  %sLast 40 log lines%s\n' "${C_BOLD}${C_YELLOW}" "${C_RESET}"
+            tail -n 40 "$LOG_FILE" 2>/dev/null || true
+        fi
+    fi
+}
+pause_menu() {
+    load_config
+    if [ -t 0 ]; then
+        echo
+        if is_zh; then
+            printf '按 Enter 继续...'
+        else
+            printf 'Press Enter to continue...'
+        fi
+        IFS= read -r _dummy || true
+    fi
+}
+show_menu() {
+    while :; do
+        cleanup_stale_pid
+        cleanup_stale_updater_pid
+        load_config
+        auto_discover_menu
+        if is_zh; then
+            panel_top "Alas-Gyre Overlay 管理面板"
+            panel_line "状态" "$(status_line)"
+            if [ -n "$ALAS_ROOT" ]; then
+                panel_line "ALAS" "$ALAS_ROOT"
+            else
+                panel_line "ALAS" "${C_RED}未配置${C_RESET}"
+            fi
+            panel_line "语言" "${C_CYAN}中文${C_RESET}"
+            panel_line "Updater" "$(updater_status_line)"
+            [ -n "$MENU_DISCOVERY_HINT" ] && panel_line "提示" "$MENU_DISCOVERY_HINT"
+            panel_bottom
+
+            menu_group "启动控制"
+            menu_item 1 "启动 ALAS（前台）" good
+            menu_item 2 "启动 ALAS（后台）" good
+            menu_item 3 "停止 ALAS" danger
+            menu_item 4 "重启 ALAS" warn
+
+            menu_group "配置与诊断"
+            menu_item 5 "查看状态" info
+            menu_item 6 "自动搜索/选择 ALAS 目录" info
+            menu_item 9 "查看日志/路径" info
+
+            menu_group "系统服务"
+            menu_item 7 "安装开机自启动" good
+            menu_item 8 "卸载开机自启动" danger
+
+            menu_group "更新服务"
+            menu_item 11 "查看更新服务状态" info
+            menu_item 12 "启动更新服务" good
+            menu_item 13 "停止更新服务" danger
+            menu_item 14 "重启更新服务" warn
+
+            menu_group "其他"
+            menu_item 10 "切换语言 / Switch language" warn
+            menu_item 0 "退出" muted
+            prompt_text "请选择："
+        else
+            panel_top "Alas-Gyre Overlay Manager"
+            panel_line "Status" "$(status_line)"
+            if [ -n "$ALAS_ROOT" ]; then
+                panel_line "ALAS" "$ALAS_ROOT"
+            else
+                panel_line "ALAS" "${C_RED}not configured${C_RESET}"
+            fi
+            panel_line "Language" "${C_CYAN} English${C_RESET}"
+            panel_line "Updater" "$(updater_status_line)"
+            [ -n "$MENU_DISCOVERY_HINT" ] && panel_line "Hint" "$MENU_DISCOVERY_HINT"
+            panel_bottom
+
+            menu_group "Start / Control"
+            menu_item 1 "Start ALAS foreground" good
+            menu_item 2 "Start ALAS background" good
+            menu_item 3 "Stop ALAS" danger
+            menu_item 4 "Restart ALAS" warn
+
+            menu_group "Config / Diagnostics"
+            menu_item 5 "Show status" info
+            menu_item 6 "Auto search/select ALAS root" info
+            menu_item 9 "Show logs/paths" info
+
+            menu_group "System service"
+            menu_item 7 "Install autostart" good
+            menu_item 8 "Uninstall autostart" danger
+
+            menu_group "Runtime updater"
+            menu_item 11 "Show updater status" info
+            menu_item 12 "Start updater" good
+            menu_item 13 "Stop updater" danger
+            menu_item 14 "Restart updater" warn
+
+            menu_group "Other"
+            menu_item 10 "Switch language" warn
+            menu_item 0 "Exit" muted
+            prompt_text "Choose:"
+        fi
+        IFS= read -r choice || exit 1
+        choice="$(printf '%s' "$choice" | tr -d '\r')"
+        case "$choice" in
+            1) run_alas_foreground yes ;;
+            2) start_background; pause_menu ;;
+            3) stop_managed_alas; pause_menu ;;
+            4) restart_background; pause_menu ;;
+            5) show_status; pause_menu ;;
+            6) select_alas_root; pause_menu ;;
+            7) install_autostart; pause_menu ;;
+            8) uninstall_autostart; pause_menu ;;
+            9) show_paths_and_logs; pause_menu ;;
+            10) switch_language; pause_menu ;;
+            11) show_updater_status; pause_menu ;;
+            12) start_updater; show_updater_status; pause_menu ;;
+            13) stop_updater; show_updater_status; pause_menu ;;
+            14) restart_updater; show_updater_status; pause_menu ;;
+            0|q|Q|quit|exit) exit 0 ;;
+            *)
+                if is_zh; then
+                    error_msg "无效选项：$choice"
+                else
+                    error_msg "Invalid choice: $choice"
+                fi
+                pause_menu
+                ;;
+        esac
+    done
+}
+case "${1:-}" in
+    __gyre_service_run)
+        shift || true
+        run_alas_foreground no
+        ;;
+    *)
+        # Keep the runtime updater available by default.  This lets the desktop
+        # client update gyre_runtime later without requiring an SSH/menu visit.
+        start_updater >/dev/null 2>&1 || true
+        show_menu
+        ;;
+esac

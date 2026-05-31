@@ -1,0 +1,839 @@
+@echo off
+setlocal EnableExtensions EnableDelayedExpansion
+chcp 65001 <nul >nul 2>nul
+
+set "GYRE_RUNTIME=%~dp0"
+for %%I in ("!GYRE_RUNTIME!.") do set "GYRE_RUNTIME=%%~fI"
+set "SCRIPT_PATH=!GYRE_RUNTIME!\start_gyre_alas.bat"
+set "CONF_FILE=!GYRE_RUNTIME!\.gyre_runtime.conf"
+set "ALAS_ROOT_CACHE=!GYRE_RUNTIME!\.gyre_alas_root"
+set "PID_FILE=!GYRE_RUNTIME!\.gyre_alas.pid"
+set "LOG_FILE=!GYRE_RUNTIME!\.gyre_alas.log"
+set "ALAS_RUNNER=!GYRE_RUNTIME!\.gyre_run_alas.cmd"
+set "UPDATER_SCRIPT=!GYRE_RUNTIME!\gyre_runtime_updater.py"
+set "UPDATER_PID_FILE=!GYRE_RUNTIME!\.gyre_updater.pid"
+set "UPDATER_LOG_FILE=!GYRE_RUNTIME!\.gyre_updater.log"
+set "UPDATER_RUNNER=!GYRE_RUNTIME!\.gyre_run_updater.cmd"
+set "CAND_FILE=!TEMP!\gyre_alas_candidates_%RANDOM%_%RANDOM%.txt"
+set "ALAS_GYRE_OVERLAY=!GYRE_RUNTIME!\overlay"
+set "ALAS_GYRE_API_TOKEN=__API_TOKEN__"
+set "GYRE_UPDATE_HOST=0.0.0.0"
+set "GYRE_UPDATE_PORT=22268"
+set "ALAS_WEBUI_PORT="
+set "GYRE_LANG="
+
+call :load_config
+call :detect_language
+
+if /i "%~1"=="__gyre_service_run" (
+    shift
+    call :run_alas_core
+    exit /b !ERRORLEVEL!
+)
+
+if /i "%~1"=="--background" (
+    call :start_background
+    exit /b !ERRORLEVEL!
+)
+if /i "%~1"=="--stop" (
+    call :stop_managed
+    exit /b !ERRORLEVEL!
+)
+if /i "%~1"=="--status" (
+    call :show_status
+    exit /b !ERRORLEVEL!
+)
+if /i "%~1"=="--restart-updater" (
+    call :restart_updater
+    exit /b !ERRORLEVEL!
+)
+
+rem Keep Runtime API available by default once the launcher is opened.
+rem This lets the desktop client update gyre_runtime later without another
+rem manual visit to this menu. Failures are non-blocking and still visible
+rem from the menu/status/log.
+call :start_updater >nul 2>nul
+
+:menu
+call :prepare_status
+if /i "!GYRE_LANG!"=="en" goto :menu_en
+cls
+echo(
+echo(Alas-Gyre Overlay Windows Manager
+echo(--------------------------------------------------
+echo(  Managed ALAS : !ALAS_STATE!
+echo(  Runtime API  : !UPDATER_STATE!
+echo(  ALAS root    : !ALAS_ROOT_DISPLAY!
+echo(  Update port  : !GYRE_UPDATE_HOST!:!GYRE_UPDATE_PORT!
+echo(  Remote update: LAN access enabled by default; do not expose publicly
+echo(--------------------------------------------------
+echo(
+echo(Startup
+echo(   1^) Start ALAS foreground
+echo(   2^) Start ALAS background
+echo(   3^) Stop managed ALAS
+echo(   4^) Restart managed ALAS
+echo(
+echo(Config / diagnostics
+echo(   5^) Show status
+echo(   6^) Auto search / select ALAS root
+echo(   9^) Show log and config paths
+echo(
+echo(Runtime updater
+echo(   7^) Start updater
+echo(   8^) Stop updater
+echo(  11^) Show updater status
+echo(  12^) Restart updater
+echo(
+echo(Other
+echo(   0^) Exit
+echo(
+set "CHOICE="
+set /p CHOICE=^> Select: 
+if errorlevel 1 exit /b 0
+if "%CHOICE%"=="1" goto :menu_start_foreground
+if "%CHOICE%"=="2" goto :menu_start_background
+if "%CHOICE%"=="3" goto :menu_stop_managed
+if "%CHOICE%"=="4" goto :menu_restart_managed
+if "%CHOICE%"=="5" goto :menu_show_status
+if "%CHOICE%"=="6" goto :menu_select_root
+if "%CHOICE%"=="7" goto :menu_start_updater
+if "%CHOICE%"=="8" goto :menu_stop_updater
+if "%CHOICE%"=="9" goto :menu_show_paths
+if "%CHOICE%"=="11" goto :menu_show_updater
+if "%CHOICE%"=="12" goto :menu_restart_updater
+if "%CHOICE%"=="0" exit /b 0
+goto :menu
+
+:menu_en
+cls
+echo(
+echo(Alas-Gyre Overlay Manager for Windows
+echo(--------------------------------------------------
+echo(  Managed ALAS : !ALAS_STATE!
+echo(  Runtime API  : !UPDATER_STATE!
+echo(  ALAS root    : !ALAS_ROOT_DISPLAY!
+echo(  Update port  : !GYRE_UPDATE_HOST!:!GYRE_UPDATE_PORT!
+echo(  Remote update: LAN access enabled by default; do not expose publicly
+echo(--------------------------------------------------
+echo(
+echo(Startup
+echo(   1^) Start ALAS foreground
+echo(   2^) Start ALAS background
+echo(   3^) Stop managed ALAS
+echo(   4^) Restart managed ALAS
+echo(
+echo(Config / diagnostics
+echo(   5^) Show status
+echo(   6^) Auto search / select ALAS root
+echo(   9^) Show log and config paths
+echo(
+echo(Runtime updater
+echo(   7^) Start updater
+echo(   8^) Stop updater
+echo(  11^) Show updater status
+echo(  12^) Restart updater
+echo(
+echo(Other
+echo(   0^) Exit
+echo(
+set "CHOICE="
+set /p CHOICE=^> Select: 
+if errorlevel 1 exit /b 0
+if "%CHOICE%"=="1" goto :menu_start_foreground
+if "%CHOICE%"=="2" goto :menu_start_background
+if "%CHOICE%"=="3" goto :menu_stop_managed
+if "%CHOICE%"=="4" goto :menu_restart_managed
+if "%CHOICE%"=="5" goto :menu_show_status
+if "%CHOICE%"=="6" goto :menu_select_root
+if "%CHOICE%"=="7" goto :menu_start_updater
+if "%CHOICE%"=="8" goto :menu_stop_updater
+if "%CHOICE%"=="9" goto :menu_show_paths
+if "%CHOICE%"=="11" goto :menu_show_updater
+if "%CHOICE%"=="12" goto :menu_restart_updater
+if "%CHOICE%"=="0" exit /b 0
+goto :menu
+
+:menu_start_foreground
+call :start_foreground
+goto :menu
+
+:menu_start_background
+call :start_background
+pause
+goto :menu
+
+:menu_stop_managed
+call :stop_managed
+pause
+goto :menu
+
+:menu_restart_managed
+call :restart_managed
+pause
+goto :menu
+
+:menu_show_status
+call :show_status
+pause
+goto :menu
+
+:menu_select_root
+call :select_alas_root
+pause
+goto :menu
+
+:menu_start_updater
+call :start_updater
+pause
+goto :menu
+
+:menu_stop_updater
+call :stop_updater
+pause
+goto :menu
+
+:menu_show_updater
+call :show_updater_status
+pause
+goto :menu
+
+:menu_restart_updater
+call :restart_updater
+pause
+goto :menu
+
+:menu_show_paths
+call :show_paths
+pause
+goto :menu
+
+:load_config
+if exist "!CONF_FILE!" (
+    for /f "usebackq tokens=1,* delims==" %%A in ("!CONF_FILE!") do (
+        if /i "%%A"=="ALAS_ROOT" set "ALAS_ROOT=%%B"
+        if /i "%%A"=="GYRE_UPDATE_HOST" set "GYRE_UPDATE_HOST=%%B"
+        if /i "%%A"=="GYRE_UPDATE_PORT" set "GYRE_UPDATE_PORT=%%B"
+        if /i "%%A"=="ALAS_WEBUI_PORT" set "ALAS_WEBUI_PORT=%%B"
+        if /i "%%A"=="GYRE_LANG" set "GYRE_LANG=%%B"
+    )
+)
+if not defined ALAS_ROOT if exist "!ALAS_ROOT_CACHE!" set /p ALAS_ROOT=<"!ALAS_ROOT_CACHE!"
+exit /b 0
+
+:detect_language
+if defined GYRE_LANG exit /b 0
+for /f "usebackq delims=" %%L in (`powershell -NoProfile -ExecutionPolicy Bypass -Command "try { $names=@([Globalization.CultureInfo]::CurrentUICulture.Name,[Globalization.CultureInfo]::CurrentCulture.Name); if ($names -match '^zh') { 'zh' } else { 'en' } } catch { 'en' }" ^<nul 2^>nul`) do set "GYRE_LANG=%%L"
+if not defined GYRE_LANG set "GYRE_LANG=en"
+exit /b 0
+
+:save_config
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$enc=New-Object System.Text.UTF8Encoding($false); $nl=[Environment]::NewLine; $content='ALAS_ROOT='+$env:ALAS_ROOT+$nl+'GYRE_UPDATE_HOST='+$env:GYRE_UPDATE_HOST+$nl+'GYRE_UPDATE_PORT='+$env:GYRE_UPDATE_PORT+$nl+'ALAS_WEBUI_PORT='+$env:ALAS_WEBUI_PORT+$nl+'GYRE_LANG='+$env:GYRE_LANG+$nl; [System.IO.File]::WriteAllText($env:CONF_FILE,$content,$enc); [System.IO.File]::WriteAllText($env:ALAS_ROOT_CACHE,$env:ALAS_ROOT,$enc)" <nul >nul 2>nul
+exit /b !ERRORLEVEL!
+
+:is_alas_root
+if "%~1"=="" exit /b 1
+if exist "%~1\gui.py" if exist "%~1\module\webui\app.py" exit /b 0
+exit /b 1
+
+:get_managed_pid
+set "MANAGED_PID="
+if exist "!PID_FILE!" set /p MANAGED_PID=<"!PID_FILE!"
+exit /b 0
+
+:get_updater_pid
+set "UPDATER_PID="
+if exist "!UPDATER_PID_FILE!" set /p UPDATER_PID=<"!UPDATER_PID_FILE!"
+exit /b 0
+
+:is_pid_running
+if "%~1"=="" exit /b 1
+tasklist /FI "PID eq %~1" /NH 2>nul | findstr /R /C:"[ ][ ]*%~1[ ][ ]*" >nul
+exit /b !ERRORLEVEL!
+
+:updater_token_matches
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$port=[int]$env:GYRE_UPDATE_PORT; $token=[string]$env:ALAS_GYRE_API_TOKEN; try { $resp=Invoke-WebRequest -UseBasicParsing -Uri ('http://127.0.0.1:'+$port+'/runtime/info') -Headers @{'X-Alas-Gyre-Token'=$token} -TimeoutSec 2; if ($resp.StatusCode -eq 200) { exit 0 }; exit 1 } catch { if ($_.Exception.Response -and [int]$_.Exception.Response.StatusCode -eq 401) { exit 2 }; exit 1 }" <nul >nul 2>nul
+exit /b !ERRORLEVEL!
+
+:get_update_port_pid
+set "UPDATER_PORT_PID="
+for /f "usebackq delims=" %%P in (`powershell -NoProfile -ExecutionPolicy Bypass -Command "try { Get-NetTCPConnection -LocalPort $env:GYRE_UPDATE_PORT -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty OwningProcess } catch { try { $port=[int]$env:GYRE_UPDATE_PORT; $pattern=':'+[string]$port+'\s+.*LISTENING\s+(\d+)\s*$'; $line=netstat -ano -p tcp 2>$null | Select-String -Pattern $pattern | Select-Object -First 1; if ($line) { [regex]::Match($line.Line,'(\d+)\s*$').Groups[1].Value } } catch {} }" ^<nul 2^>nul`) do set "UPDATER_PORT_PID=%%P"
+exit /b 0
+
+:is_runtime_updater_pid
+set "CHECK_PID=%~1"
+if not defined CHECK_PID exit /b 1
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$check=[int]$env:CHECK_PID; try { $p=Get-CimInstance Win32_Process -Filter ('ProcessId='+$check) -ErrorAction SilentlyContinue; if (-not $p) { $p=Get-WmiObject Win32_Process -Filter ('ProcessId='+$check) -ErrorAction SilentlyContinue }; $cmd=[string]$p.CommandLine; if ($cmd -like '*gyre_runtime_updater.py*') { exit 0 }; exit 1 } catch { exit 1 }" <nul >nul 2>nul
+exit /b !ERRORLEVEL!
+
+:adopt_or_report_updater_port
+call :get_update_port_pid
+if not defined UPDATER_PORT_PID exit /b 1
+call :is_runtime_updater_pid "!UPDATER_PORT_PID!"
+if not errorlevel 1 (
+    > "!UPDATER_PID_FILE!" echo(!UPDATER_PORT_PID!
+    call :updater_token_matches
+    if not errorlevel 1 exit /b 0
+    echo([WARN] Existing runtime updater uses an old token; restarting it.
+    call :stop_updater
+    exit /b 1
+)
+echo([WARN] Runtime update port !GYRE_UPDATE_PORT! is already in use by pid=!UPDATER_PORT_PID!.
+echo([WARN] Refusing to start another updater. Change GYRE_UPDATE_PORT in .gyre_runtime.conf if needed.
+exit /b 2
+
+:prepare_status
+set "TXT_STOPPED=STOPPED"
+set "TXT_RUNNING=RUNNING"
+set "TXT_NOT_CONFIGURED=not configured"
+if /i "!GYRE_LANG!"=="en" (
+    set "TXT_STOPPED=STOPPED"
+    set "TXT_RUNNING=RUNNING"
+    set "TXT_NOT_CONFIGURED=not configured"
+)
+set "ALAS_STATE=!TXT_STOPPED!"
+set "UPDATER_STATE=!TXT_STOPPED!"
+if defined ALAS_ROOT (
+    set "ALAS_ROOT_DISPLAY=!ALAS_ROOT!"
+) else (
+    set "ALAS_ROOT_DISPLAY=!TXT_NOT_CONFIGURED!"
+)
+call :get_managed_pid
+if defined MANAGED_PID (
+    call :is_pid_running "!MANAGED_PID!"
+    if errorlevel 1 (
+        del "!PID_FILE!" >nul 2>nul
+        set "MANAGED_PID="
+    ) else (
+        set "ALAS_STATE=!TXT_RUNNING! pid=!MANAGED_PID!"
+    )
+)
+call :get_updater_pid
+if defined UPDATER_PID (
+    call :is_pid_running "!UPDATER_PID!"
+    if errorlevel 1 (
+        del "!UPDATER_PID_FILE!" >nul 2>nul
+        set "UPDATER_PID="
+    ) else (
+        set "UPDATER_STATE=!TXT_RUNNING! pid=!UPDATER_PID!"
+    )
+)
+exit /b 0
+
+:show_status
+call :prepare_status
+if /i "!GYRE_LANG!"=="en" goto :show_status_en
+echo(
+echo([Status]
+echo(Managed ALAS : !ALAS_STATE!
+echo(Runtime API  : !UPDATER_STATE!
+echo(ALAS root    : !ALAS_ROOT_DISPLAY!
+echo(Runtime dir  : !GYRE_RUNTIME!
+echo(Overlay dir  : !ALAS_GYRE_OVERLAY!
+echo(Update port  : !GYRE_UPDATE_HOST!:!GYRE_UPDATE_PORT!
+echo(Remote update: LAN access enabled by default. Do not expose this port to the public Internet.
+echo(
+exit /b 0
+
+:show_status_en
+echo(
+echo([Status]
+echo(Managed ALAS : !ALAS_STATE!
+echo(Runtime API  : !UPDATER_STATE!
+echo(ALAS root    : !ALAS_ROOT_DISPLAY!
+echo(Runtime dir  : !GYRE_RUNTIME!
+echo(Overlay dir  : !ALAS_GYRE_OVERLAY!
+echo(Update port  : !GYRE_UPDATE_HOST!:!GYRE_UPDATE_PORT!
+echo(Remote update: LAN access enabled by default. Do not expose this port to the public Internet.
+echo(
+exit /b 0
+
+:show_updater_status
+call :prepare_status
+echo(
+echo([Runtime updater]
+echo(Status       : !UPDATER_STATE!
+echo(Update port  : !GYRE_UPDATE_HOST!:!GYRE_UPDATE_PORT!
+echo(Remote update: LAN access enabled by default. Exposing 22268 to the public Internet is not recommended.
+echo(PID file     : !UPDATER_PID_FILE!
+echo(Log          : !UPDATER_LOG_FILE!
+echo(Script       : !UPDATER_SCRIPT!
+echo(
+if exist "!UPDATER_LOG_FILE!" (
+    echo(Last updater log lines:
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "try { Get-Content -LiteralPath $env:UPDATER_LOG_FILE -Tail 30 } catch {}" <nul
+)
+exit /b 0
+
+:show_paths
+if /i "!GYRE_LANG!"=="en" goto :show_paths_en
+echo(
+echo([Paths]
+echo(Runtime dir        : !GYRE_RUNTIME!
+echo(Config file        : !CONF_FILE!
+echo(ALAS root cache    : !ALAS_ROOT_CACHE!
+echo(ALAS PID file      : !PID_FILE!
+echo(ALAS log           : !LOG_FILE!
+echo(Updater PID file   : !UPDATER_PID_FILE!
+echo(Updater log        : !UPDATER_LOG_FILE!
+echo(Updater script     : !UPDATER_SCRIPT!
+echo(Update listen      : !GYRE_UPDATE_HOST!:!GYRE_UPDATE_PORT!
+echo(Remote update      : LAN access enabled by default. Do not expose this port to the public Internet.
+echo(
+if exist "!LOG_FILE!" echo(Hint: notepad "!LOG_FILE!"
+if exist "!UPDATER_LOG_FILE!" echo(Hint: notepad "!UPDATER_LOG_FILE!"
+exit /b 0
+
+:show_paths_en
+echo(
+echo([Paths]
+echo(Runtime dir       : !GYRE_RUNTIME!
+echo(Config file       : !CONF_FILE!
+echo(ALAS root cache   : !ALAS_ROOT_CACHE!
+echo(Managed ALAS pid  : !PID_FILE!
+echo(Managed ALAS log  : !LOG_FILE!
+echo(Updater pid       : !UPDATER_PID_FILE!
+echo(Updater log       : !UPDATER_LOG_FILE!
+echo(Updater script    : !UPDATER_SCRIPT!
+echo(Update listen     : !GYRE_UPDATE_HOST!:!GYRE_UPDATE_PORT!
+echo(Remote update     : LAN access enabled by default. Do not expose this port to the public Internet.
+echo(
+if exist "!LOG_FILE!" echo(Tip: notepad "!LOG_FILE!"
+if exist "!UPDATER_LOG_FILE!" echo(Tip: notepad "!UPDATER_LOG_FILE!"
+exit /b 0
+
+:add_candidate
+set "CAND=%~1"
+if not defined CAND exit /b 0
+for %%I in ("!CAND!") do set "CAND=%%~fI"
+call :is_alas_root "!CAND!"
+if errorlevel 1 exit /b 0
+if exist "!CAND_FILE!" (
+    findstr /I /X /C:"!CAND!" "!CAND_FILE!" >nul 2>nul && exit /b 0
+)
+>> "!CAND_FILE!" echo(!CAND!
+exit /b 0
+
+:find_candidates
+if exist "!CAND_FILE!" del "!CAND_FILE!" >nul 2>nul
+call :add_candidate "!ALAS_ROOT!"
+call :add_candidate "!GYRE_RUNTIME!"
+call :add_candidate "!GYRE_RUNTIME!\.."
+call :add_candidate "!GYRE_RUNTIME!\..\AzurLaneAutoScript"
+call :add_candidate "!GYRE_RUNTIME!\..\AlasApp\AzurLaneAutoScript"
+call :add_candidate "!USERPROFILE!\AzurLaneAutoScript"
+call :add_candidate "!USERPROFILE!\Desktop\AzurLaneAutoScript"
+call :add_candidate "!USERPROFILE!\Desktop\UI2\AlasApp_0.4.10_fullcn\AzurLaneAutoScript"
+for %%D in (C D E F G H) do (
+    call :add_candidate "%%D:\AzurLaneAutoScript"
+    call :add_candidate "%%D:\AlasApp\AzurLaneAutoScript"
+)
+exit /b 0
+
+:auto_resolve_alas_root
+if defined ALAS_ROOT (
+    call :is_alas_root "!ALAS_ROOT!"
+    if not errorlevel 1 (
+        for %%I in ("!ALAS_ROOT!") do set "ALAS_ROOT=%%~fI"
+        call :save_config
+        exit /b 0
+    )
+    set "ALAS_ROOT="
+)
+call :find_candidates
+for /f "usebackq delims=" %%P in ("!CAND_FILE!") do (
+    set "ALAS_ROOT=%%P"
+    call :save_config
+    del "!CAND_FILE!" >nul 2>nul
+    exit /b 0
+)
+del "!CAND_FILE!" >nul 2>nul
+exit /b 1
+
+:resolve_alas_root
+call :auto_resolve_alas_root
+if not errorlevel 1 exit /b 0
+echo(
+if /i "!GYRE_LANG!"=="en" (
+    echo([Alas-Gyre] ALAS root was not found automatically.
+    echo(Enter the directory containing gui.py and module\webui\app.py.
+    echo(Press Enter to cancel.
+) else call :zh_resolve_help
+echo(
+set "ALAS_ROOT_INPUT="
+set "ALAS_ROOT_PROMPT=ALAS root> "
+if /i "!GYRE_LANG!"=="zh" set "ALAS_ROOT_PROMPT=ALAS root> "
+set /p ALAS_ROOT_INPUT=!ALAS_ROOT_PROMPT!
+if not defined ALAS_ROOT_INPUT exit /b 1
+for %%I in ("!ALAS_ROOT_INPUT!") do set "ALAS_ROOT=%%~fI"
+call :is_alas_root "!ALAS_ROOT!"
+if errorlevel 1 (
+    if /i "!GYRE_LANG!"=="en" (
+        echo(Invalid ALAS root: !ALAS_ROOT!
+    ) else call :zh_invalid_alas_root "!ALAS_ROOT!"
+    set "ALAS_ROOT="
+    exit /b 1
+)
+call :save_config
+if /i "!GYRE_LANG!"=="en" (
+    echo([Alas-Gyre] ALAS root: !ALAS_ROOT!
+) else call :zh_alas_root "!ALAS_ROOT!"
+exit /b 0
+:select_alas_root
+call :prepare_status
+if defined MANAGED_PID (
+    if /i "!GYRE_LANG!"=="en" (
+        echo(Managed ALAS is running. Stop it before changing ALAS root.
+    ) else call :zh_managed_running_change_root
+    exit /b 1
+)
+echo(
+if /i "!GYRE_LANG!"=="en" (
+    echo([ALAS root selection]
+) else call :zh_select_title
+call :find_candidates
+set /a CAND_COUNT=0
+if exist "!CAND_FILE!" (
+    for /f "usebackq delims=" %%P in ("!CAND_FILE!") do (
+        set /a CAND_COUNT+=1
+        set "CAND_!CAND_COUNT!=%%P"
+        echo(  !CAND_COUNT!^) %%P
+    )
+)
+if !CAND_COUNT! EQU 0 (
+    if /i "!GYRE_LANG!"=="en" (
+        echo(  No candidate found.
+    ) else call :zh_no_candidate
+)
+echo(
+if /i "!GYRE_LANG!"=="en" (
+    echo(Enter a number from the list, or paste an ALAS root path.
+    echo(Press Enter to cancel.
+) else call :zh_select_help
+set "PICK="
+set "PICK_PROMPT=ALAS root> "
+if /i "!GYRE_LANG!"=="zh" set "PICK_PROMPT=ALAS root> "
+set /p PICK=!PICK_PROMPT!
+if not defined PICK (
+    del "!CAND_FILE!" >nul 2>nul
+    exit /b 1
+)
+echo(!PICK!| findstr /R "^[0-9][0-9]*$" >nul
+if not errorlevel 1 (
+    call set "ALAS_ROOT=%%CAND_!PICK!%%"
+) else (
+    for %%I in ("!PICK!") do set "ALAS_ROOT=%%~fI"
+)
+del "!CAND_FILE!" >nul 2>nul
+call :is_alas_root "!ALAS_ROOT!"
+if errorlevel 1 (
+    if /i "!GYRE_LANG!"=="en" (
+        echo(Invalid ALAS root: !ALAS_ROOT!
+    ) else call :zh_invalid_alas_root "!ALAS_ROOT!"
+    set "ALAS_ROOT="
+    exit /b 1
+)
+call :save_config
+if /i "!GYRE_LANG!"=="en" (
+    echo([Alas-Gyre] ALAS root saved: !ALAS_ROOT!
+) else call :zh_alas_root_saved "!ALAS_ROOT!"
+exit /b 0
+
+:zh_resolve_help
+call :print_utf8_b64 "W0FsYXMtR3lyZV0g5pyq6IO96Ieq5Yqo5om+5YiwIEFMQVMg55uu5b2V44CC" "[Alas-Gyre] ALAS root was not found automatically."
+call :print_utf8_b64 "6K+36L6T5YWl5YyF5ZCrIGd1aS5weSDlkowgbW9kdWxlXHdlYnVpXGFwcC5weSDnmoTnm67lvZXjgII=" "Enter the directory containing gui.py and module\webui\app.py."
+call :print_utf8_b64 "55u05o6l5Zue6L2m5Y+W5raI44CC" "Press Enter to cancel."
+exit /b 0
+
+:zh_invalid_alas_root
+call :print_utf8_b64 "5peg5pWI55qEIEFMQVMg55uu5b2V" "Invalid ALAS root"
+echo(          %~1
+exit /b 0
+
+:zh_alas_root
+call :print_utf8_b64 "W0FsYXMtR3lyZV0gQUxBUyDnm67lvZU=" "[Alas-Gyre] ALAS root"
+echo(          %~1
+exit /b 0
+
+:zh_managed_running_change_root
+call :print_utf8_b64 "R3lyZSDnrqHnkIbnmoQgQUxBUyDmraPlnKjov5DooYzvvIzor7flhYjlgZzmraLlkI7lho3kv67mlLnnm67lvZXjgII=" "Managed ALAS is running. Stop it before changing ALAS root."
+exit /b 0
+
+:zh_select_title
+call :print_utf8_b64 "W+mAieaLqSBBTEFTIOebruW9lV0=" "[ALAS root selection]"
+exit /b 0
+
+:zh_no_candidate
+call :print_utf8_b64 "ICDmnKrmib7liLDlgJnpgInnm67lvZXjgII=" "  No candidate found."
+exit /b 0
+
+:zh_select_help
+call :print_utf8_b64 "6L6T5YWl5YiX6KGo57yW5Y+377yM5oiW55u05o6l57KY6LS0IEFMQVMg55uu5b2V44CC" "Enter a number from the list, or paste an ALAS root path."
+call :print_utf8_b64 "55u05o6l5Zue6L2m5Y+W5raI44CC" "Press Enter to cancel."
+exit /b 0
+
+:zh_alas_root_saved
+call :print_utf8_b64 "W0FsYXMtR3lyZV0gQUxBUyDnm67lvZXlt7Lkv53lrZg=" "[Alas-Gyre] ALAS root saved"
+echo(          %~1
+exit /b 0
+
+:print_utf8_b64
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$b='%~1'; $fallback='%~2'; try { [Console]::OutputEncoding=[System.Text.Encoding]::UTF8; [Console]::WriteLine([System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($b))) } catch { [Console]::WriteLine($fallback); exit 1 }" <nul 2>nul
+if errorlevel 1 echo(%~2
+exit /b 0
+
+:find_python
+set "GYRE_PYTHON="
+if defined ALAS_ROOT (
+    if exist "!ALAS_ROOT!\toolkit\python.exe" (
+        set "GYRE_PYTHON=!ALAS_ROOT!\toolkit\python.exe"
+        exit /b 0
+    )
+    if exist "!ALAS_ROOT!\.pixi\envs\default\python.exe" (
+        set "GYRE_PYTHON=!ALAS_ROOT!\.pixi\envs\default\python.exe"
+        exit /b 0
+    )
+    if exist "!ALAS_ROOT!\.venv\Scripts\python.exe" (
+        set "GYRE_PYTHON=!ALAS_ROOT!\.venv\Scripts\python.exe"
+        exit /b 0
+    )
+    if exist "!ALAS_ROOT!\venv\Scripts\python.exe" (
+        set "GYRE_PYTHON=!ALAS_ROOT!\venv\Scripts\python.exe"
+        exit /b 0
+    )
+)
+where python >nul 2>nul
+if not errorlevel 1 (
+    set "GYRE_PYTHON=python"
+    exit /b 0
+)
+where py >nul 2>nul
+if not errorlevel 1 (
+    set "GYRE_PYTHON=py"
+    exit /b 0
+)
+exit /b 1
+
+:start_cmd_hidden
+set "GYRE_CMD_PATH=%~1"
+set "GYRE_LOG_PATH=%~2"
+set "GYRE_PID_PATH=%~3"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$q=[char]34; $cmdLine=$q+$env:GYRE_CMD_PATH+$q; $p=Start-Process -FilePath $env:ComSpec -ArgumentList @('/d','/c',$cmdLine) -WindowStyle Hidden -PassThru; Set-Content -LiteralPath $env:GYRE_PID_PATH -Value $p.Id" <nul >nul 2>nul
+set "START_RESULT=!ERRORLEVEL!"
+set "GYRE_CMD_PATH="
+set "GYRE_LOG_PATH="
+set "GYRE_PID_PATH="
+exit /b !START_RESULT!
+
+:start_updater
+call :get_updater_pid
+if defined UPDATER_PID (
+    call :is_pid_running "!UPDATER_PID!"
+    if not errorlevel 1 (
+        call :updater_token_matches
+        if not errorlevel 1 exit /b 0
+        echo([WARN] Runtime updater token does not match current launcher; restarting it.
+        call :stop_updater
+    )
+    del "!UPDATER_PID_FILE!" >nul 2>nul
+)
+call :adopt_or_report_updater_port
+if not errorlevel 1 exit /b 0
+if errorlevel 2 exit /b 1
+if not exist "!UPDATER_SCRIPT!" (
+    echo([WARN] Missing runtime updater script: !UPDATER_SCRIPT!
+    exit /b 1
+)
+call :find_python
+if errorlevel 1 (
+    echo([WARN] Python was not found. Runtime updater was not started.
+    exit /b 1
+)
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$q=[char]34; $lines=@(); $lines += '@echo off'; $lines += ('set '+$q+'ALAS_GYRE_API_TOKEN='+$env:ALAS_GYRE_API_TOKEN+$q); $lines += ('set '+$q+'GYRE_UPDATE_HOST='+$env:GYRE_UPDATE_HOST+$q); $lines += ('set '+$q+'GYRE_UPDATE_PORT='+$env:GYRE_UPDATE_PORT+$q); $lines += ('cd /d '+$q+$env:GYRE_RUNTIME+$q); $lines += ($q+$env:GYRE_PYTHON+$q+' '+$q+$env:UPDATER_SCRIPT+$q+' --runtime '+$q+$env:GYRE_RUNTIME+$q+' --host '+$q+$env:GYRE_UPDATE_HOST+$q+' --port '+$q+$env:GYRE_UPDATE_PORT+$q+' >> '+$q+$env:UPDATER_LOG_FILE+$q+' 2>&1'); [System.IO.File]::WriteAllLines($env:UPDATER_RUNNER,[string[]]$lines,[System.Text.Encoding]::ASCII)" <nul >nul 2>nul
+if errorlevel 1 (
+    echo([WARN] Failed to write updater runner: !UPDATER_RUNNER!
+    exit /b 1
+)
+call :start_cmd_hidden "!UPDATER_RUNNER!" "!UPDATER_LOG_FILE!" "!UPDATER_PID_FILE!"
+if errorlevel 1 (
+    echo([WARN] Runtime updater failed to start. Check PowerShell policy or log.
+    exit /b 1
+)
+timeout /t 1 /nobreak >nul 2>nul
+call :get_updater_pid
+if defined UPDATER_PID (
+    call :is_pid_running "!UPDATER_PID!"
+    if not errorlevel 1 (
+        echo([Alas-Gyre] Runtime updater: !GYRE_UPDATE_HOST!:!GYRE_UPDATE_PORT! pid=!UPDATER_PID!
+        exit /b 0
+    )
+)
+echo([WARN] Runtime updater exited immediately. Check !UPDATER_LOG_FILE!
+exit /b 1
+
+:stop_updater
+call :get_updater_pid
+if not defined UPDATER_PID (
+    echo(Runtime updater is not running.
+    exit /b 0
+)
+call :is_pid_running "!UPDATER_PID!"
+if errorlevel 1 (
+    del "!UPDATER_PID_FILE!" >nul 2>nul
+    echo(Runtime updater PID is stale and has been cleaned.
+    exit /b 0
+)
+taskkill /PID !UPDATER_PID! /T /F >nul 2>nul
+del "!UPDATER_PID_FILE!" >nul 2>nul
+echo(Runtime updater stopped.
+exit /b 0
+
+:restart_updater
+call :stop_updater
+call :start_updater
+exit /b !ERRORLEVEL!
+
+:get_alas_webui_port
+if defined ALAS_WEBUI_PORT for /f "delims=0123456789" %%X in ("!ALAS_WEBUI_PORT!") do set "ALAS_WEBUI_PORT="
+if defined ALAS_WEBUI_PORT exit /b 0
+set "ALAS_WEBUI_PORT=22267"
+if not defined ALAS_ROOT exit /b 0
+if not exist "!ALAS_ROOT!\config\deploy.yaml" exit /b 0
+for /f "usebackq delims=" %%P in (`powershell -NoProfile -ExecutionPolicy Bypass -Command "$path=Join-Path $env:ALAS_ROOT 'config\deploy.yaml'; try { $m=Select-String -LiteralPath $path -Pattern '^\s*WebuiPort:\s*(\d+)' | Select-Object -First 1; if ($m) { $m.Matches[0].Groups[1].Value } } catch {}" ^<nul 2^>nul`) do set "ALAS_WEBUI_PORT=%%P"
+exit /b 0
+
+:get_port_pid
+set "PORT_PID="
+call :get_alas_webui_port
+for /f "usebackq delims=" %%P in (`powershell -NoProfile -ExecutionPolicy Bypass -Command "try { Get-NetTCPConnection -LocalPort $env:ALAS_WEBUI_PORT -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty OwningProcess } catch { try { $port=[int]$env:ALAS_WEBUI_PORT; $pattern=':'+[string]$port+'\s+.*LISTENING\s+(\d+)\s*$'; $line=netstat -ano -p tcp 2>$null | Select-String -Pattern $pattern | Select-Object -First 1; if ($line) { [regex]::Match($line.Line,'(\d+)\s*$').Groups[1].Value } } catch {} }" ^<nul 2^>nul`) do set "PORT_PID=%%P"
+exit /b 0
+
+:is_safe_port_pid
+set "CHECK_PID=%~1"
+if not defined CHECK_PID exit /b 1
+call :get_managed_pid
+if defined MANAGED_PID if "!CHECK_PID!"=="!MANAGED_PID!" exit /b 0
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$check=[int]$env:CHECK_PID; $root=[string]$env:ALAS_ROOT; try { $p=Get-CimInstance Win32_Process -Filter ('ProcessId='+$check) -ErrorAction SilentlyContinue; if (-not $p) { $p=Get-WmiObject Win32_Process -Filter ('ProcessId='+$check) -ErrorAction SilentlyContinue }; $cmd=[string]$p.CommandLine; if ($root -and $cmd -and $cmd.IndexOf($root,[StringComparison]::OrdinalIgnoreCase) -ge 0) { exit 0 }; if ($cmd -like '*gui.py*' -and $cmd -like '*AzurLaneAutoScript*') { exit 0 }; exit 1 } catch { exit 1 }" <nul >nul 2>nul
+exit /b !ERRORLEVEL!
+
+:ensure_alas_port_free
+call :get_alas_webui_port
+call :get_port_pid
+if not defined PORT_PID exit /b 0
+call :is_safe_port_pid "!PORT_PID!"
+if errorlevel 1 (
+    echo([Alas-Gyre] ALAS WebUI port !ALAS_WEBUI_PORT! is already in use by pid=!PORT_PID!.
+    echo([Alas-Gyre] Refusing to kill an unrelated process automatically.
+    echo([Alas-Gyre] Stop that process manually, or change ALAS_WEBUI_PORT in .gyre_runtime.conf.
+    exit /b 1
+)
+echo([Alas-Gyre] Stopping process using ALAS WebUI port !ALAS_WEBUI_PORT!: pid=!PORT_PID!
+taskkill /PID !PORT_PID! /T /F >nul 2>nul
+timeout /t 1 /nobreak >nul 2>nul
+call :get_port_pid
+if defined PORT_PID (
+    echo([Alas-Gyre] ALAS WebUI port !ALAS_WEBUI_PORT! is still in use.
+    exit /b 1
+)
+exit /b 0
+
+:run_alas_core
+call :resolve_alas_root
+if errorlevel 1 exit /b 1
+call :ensure_alas_port_free
+if errorlevel 1 exit /b 1
+call :start_updater
+set "ALAS_ROOT=!ALAS_ROOT!"
+set "ALAS_GYRE_OVERLAY=!ALAS_GYRE_OVERLAY!"
+set "ALAS_GYRE_API_TOKEN=!ALAS_GYRE_API_TOKEN!"
+if defined PYTHONPATH (
+    set "PYTHONPATH=!ALAS_GYRE_OVERLAY!;!PYTHONPATH!"
+) else (
+    set "PYTHONPATH=!ALAS_GYRE_OVERLAY!"
+)
+cd /d "!ALAS_ROOT!"
+echo([Alas-Gyre] ALAS root: !ALAS_ROOT!
+echo([Alas-Gyre] Overlay : !ALAS_GYRE_OVERLAY!
+echo([Alas-Gyre] Starting ALAS...
+if exist "!ALAS_ROOT!\toolkit\python.exe" (
+    "!ALAS_ROOT!\toolkit\python.exe" gui.py
+) else if exist "!ALAS_ROOT!\.pixi\envs\default\python.exe" (
+    "!ALAS_ROOT!\.pixi\envs\default\python.exe" gui.py
+) else if exist "!ALAS_ROOT!\.venv\Scripts\python.exe" (
+    "!ALAS_ROOT!\.venv\Scripts\python.exe" gui.py
+) else if exist "!ALAS_ROOT!\venv\Scripts\python.exe" (
+    "!ALAS_ROOT!\venv\Scripts\python.exe" gui.py
+) else if exist "!ALAS_ROOT!\run_alas.bat" (
+    call "!ALAS_ROOT!\run_alas.bat"
+) else (
+    python gui.py
+)
+set "ALAS_EXIT_CODE=!ERRORLEVEL!"
+cd /d "!GYRE_RUNTIME!" >nul 2>nul
+exit /b !ALAS_EXIT_CODE!
+
+:start_foreground
+call :run_alas_core
+set "EXIT_CODE=!ERRORLEVEL!"
+echo(
+echo([Alas-Gyre] ALAS exited. exit_code=!EXIT_CODE!
+echo(If this was unexpected, check emulator/device config and the log above.
+pause
+exit /b 0
+
+:start_background
+call :prepare_status
+if defined MANAGED_PID (
+    echo(Managed ALAS is already running: pid=!MANAGED_PID!
+    exit /b 0
+)
+call :resolve_alas_root
+if errorlevel 1 exit /b 1
+call :ensure_alas_port_free
+if errorlevel 1 exit /b 1
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$q=[char]34; $cmd='call '+$q+$env:SCRIPT_PATH+$q+' __gyre_service_run >> '+$q+$env:LOG_FILE+$q+' 2>&1'; $lines=@('@echo off',$cmd); Set-Content -LiteralPath $env:ALAS_RUNNER -Value $lines -Encoding ASCII" <nul >nul 2>nul
+if errorlevel 1 (
+    echo(Failed to write ALAS runner: !ALAS_RUNNER!
+    exit /b 1
+)
+call :start_cmd_hidden "!ALAS_RUNNER!" "!LOG_FILE!" "!PID_FILE!"
+if errorlevel 1 (
+    echo(Failed to start ALAS in background. PowerShell may be blocked by policy.
+    exit /b 1
+)
+timeout /t 2 /nobreak >nul 2>nul
+call :get_managed_pid
+if defined MANAGED_PID (
+    call :is_pid_running "!MANAGED_PID!"
+    if not errorlevel 1 (
+        echo(ALAS started in background: pid=!MANAGED_PID!
+        echo(Log: !LOG_FILE!
+        exit /b 0
+    )
+)
+echo(ALAS exited shortly after background start. Check log:
+echo(!LOG_FILE!
+exit /b 1
+
+:stop_managed
+call :get_managed_pid
+if not defined MANAGED_PID (
+    echo(Managed ALAS is not running.
+    exit /b 0
+)
+call :is_pid_running "!MANAGED_PID!"
+if errorlevel 1 (
+    del "!PID_FILE!" >nul 2>nul
+    echo(ALAS PID is stale and has been cleaned.
+    exit /b 0
+)
+echo(Stopping ALAS pid=!MANAGED_PID! ...
+taskkill /PID !MANAGED_PID! /T /F >nul 2>nul
+del "!PID_FILE!" >nul 2>nul
+echo(ALAS stopped.
+exit /b 0
+
+:restart_managed
+call :stop_managed
+call :start_background
+exit /b !ERRORLEVEL!

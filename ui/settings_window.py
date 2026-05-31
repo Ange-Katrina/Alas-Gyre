@@ -1,17 +1,20 @@
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QWidget, QLabel, QLineEdit, QCheckBox,
-    QPushButton, QFrame, QGraphicsDropShadowEffect, QSlider, QGridLayout
+    QPushButton, QFrame, QSlider, QGridLayout, QStackedWidget
 )
 from PySide6.QtCore import Qt, Signal, QTimer, QSize
 from PySide6.QtGui import QColor, QPixmap, QPainter, QPen, QIcon
 import secrets
 import threading
 
-from .api_client import api_base_url, api_headers, api_request
-from updater import check_for_updates, do_update
-from main import VERSION
-from .main_window import WindowButton, config_path, fastapi_output_path, fastapi_source_path
-from .i18n import tr
+from alas_gyre.api.client import api_headers, api_request, gyre_api_url
+from alas_gyre.api.runtime_update import DEFAULT_RUNTIME_UPDATE_PORT, update_remote_runtime
+from alas_gyre.services.updater import check_for_updates, do_update
+from alas_gyre.core.version import get_current_version
+from alas_gyre.core.paths import config_path
+from .widgets import WindowButton
+from .i18n import get_language, tr
+from .window_behavior import install_title_bar_drag, schedule_frameless_stabilize
 
 try:
     from shiboken6 import isValid
@@ -43,18 +46,17 @@ class SettingsWindow(QDialog):
     update_result_signal = Signal(dict, int)
     update_progress_signal = Signal(int)
     update_finish_signal = Signal(bool, str)
-    fastapi_update_result_signal = Signal(bool, str)
+    runtime_update_result_signal = Signal(bool, str)
 
     def __init__(self, parent=None, config=None, configs=None, current_config="alas"):
         super().__init__(parent)
         self.config = config if config is not None else {}
         self.setObjectName("settingsWindow")
-        self.setFixedSize(480, 580)
+        self.setFixedSize(720, 520)
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog)
-        self.setAttribute(Qt.WA_TranslucentBackground)
 
         main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(18, 14, 18, 18)
+        main_layout.setContentsMargins(0, 0, 0, 0)
 
         # 背景容器卡片
         self.card = QFrame(self)
@@ -69,6 +71,7 @@ class SettingsWindow(QDialog):
         self.topBg.setObjectName("settingsTopBg")
         self.topBg.setAttribute(Qt.WA_StyledBackground, True)
         self.topBg.setFixedHeight(30)
+        install_title_bar_drag(self, self.topBg)
         top_layout = QHBoxLayout(self.topBg)
         top_layout.setContentsMargins(20, 0, 8, 0)
 
@@ -103,13 +106,17 @@ class SettingsWindow(QDialog):
         self.miniClickThroughCheck.setCursor(Qt.PointingHandCursor)
         self.miniClickThroughCheck.setChecked(self.config.get("mini_click_through", False))
 
+        self.showTaskNameCheck = CheckBox(tr("show_task_name"))
+        self.showTaskNameCheck.setCursor(Qt.PointingHandCursor)
+        self.showTaskNameCheck.setChecked(self.config.get("show_task_name", False))
+
         self.lightThemeCheck = CheckBox(tr("light_mode"))
         self.lightThemeCheck.setCursor(Qt.PointingHandCursor)
         self.lightThemeCheck.setChecked(self.config.get("theme", "dark") == "light")
 
         self.englishLangCheck = CheckBox(tr("english_mode"))
         self.englishLangCheck.setCursor(Qt.PointingHandCursor)
-        self.englishLangCheck.setChecked(self.config.get("lang", "zh") == "en")
+        self.englishLangCheck.setChecked(self.config.get("lang", get_language()) == "en")
 
         preference_grid = QGridLayout()
         preference_grid.setContentsMargins(0, 0, 0, 0)
@@ -119,7 +126,8 @@ class SettingsWindow(QDialog):
         preference_grid.addWidget(self.alwaysOnTopCheck, 0, 1)
         preference_grid.addWidget(self.miniClickThroughCheck, 1, 0)
         preference_grid.addWidget(self.lightThemeCheck, 1, 1)
-        preference_grid.addWidget(self.englishLangCheck, 2, 0, 1, 2)
+        preference_grid.addWidget(self.showTaskNameCheck, 2, 0)
+        preference_grid.addWidget(self.englishLangCheck, 2, 1)
 
         opacity_layout = QHBoxLayout()
         opacity_layout.setSpacing(10)
@@ -178,6 +186,22 @@ class SettingsWindow(QDialog):
         self.testBtn.setFixedSize(116, 30)
         self.testBtn.clicked.connect(self._run_connection_test)
         port_layout.addWidget(self.testBtn)
+
+        runtime_port_layout = QHBoxLayout()
+        runtime_port_layout.setSpacing(10)
+
+        runtime_port_label = QLabel(tr("runtime_update_port"))
+        runtime_port_label.setObjectName("formLabel")
+        runtime_port_label.setFixedWidth(104)
+        self.runtimePortInput = QLineEdit()
+        self.runtimePortInput.setObjectName("settingsInput")
+        self.runtimePortInput.setFixedSize(96, 30)
+        self.runtimePortInput.setText(str(self.config.get("runtime_update_port", DEFAULT_RUNTIME_UPDATE_PORT)))
+        runtime_port_hint = QLabel(tr("runtime_update_port_hint"))
+        runtime_port_hint.setStyleSheet("color: #8f96a3; font-size: 12px; font-family: 'Microsoft YaHei', 'Segoe UI';")
+        runtime_port_layout.addWidget(runtime_port_label)
+        runtime_port_layout.addWidget(self.runtimePortInput)
+        runtime_port_layout.addWidget(runtime_port_hint, stretch=1)
 
         token_layout = QHBoxLayout()
         token_layout.setSpacing(10)
@@ -238,7 +262,7 @@ class SettingsWindow(QDialog):
         update_label.setObjectName("formLabel")
         update_label.setFixedWidth(104)
         
-        self.versionLabel = QLabel(f"{tr('current_version')} {VERSION}")
+        self.versionLabel = QLabel(f"{tr('current_version')} {get_current_version()}")
         self.versionLabel.setStyleSheet("color: #a6abb4; font-size: 13px; font-family: 'Microsoft YaHei', 'Segoe UI';")
         
         self.updateBtn = QPushButton(tr("check_update"))
@@ -265,50 +289,125 @@ class SettingsWindow(QDialog):
         update_layout.addStretch()
         update_layout.addWidget(self.updateBtn)
 
-        fastapi_update_layout = QHBoxLayout()
-        fastapi_update_layout.setSpacing(10)
+        runtime_update_layout = QHBoxLayout()
+        runtime_update_layout.setSpacing(10)
 
-        fastapi_update_label = QLabel(tr("fastapi_update"))
-        fastapi_update_label.setObjectName("formLabel")
-        fastapi_update_label.setFixedWidth(104)
+        runtime_update_label = QLabel(tr("runtime_update"))
+        runtime_update_label.setObjectName("formLabel")
+        runtime_update_label.setFixedWidth(104)
 
-        self.fastapiUpdateHint = QLabel(tr("fastapi_update_hint"))
-        self.fastapiUpdateHint.setStyleSheet("color: #8f96a3; font-size: 12px; font-family: 'Microsoft YaHei', 'Segoe UI';")
-        self.fastapiUpdateHint.setWordWrap(True)
+        self.runtimeUpdateHint = QLabel(tr("runtime_update_hint"))
+        self.runtimeUpdateHint.setStyleSheet("color: #8f96a3; font-size: 12px; font-family: 'Microsoft YaHei', 'Segoe UI';")
+        self.runtimeUpdateHint.setWordWrap(True)
 
-        self.fastapiUpdateBtn = QPushButton(tr("update_fastapi"))
-        self.fastapiUpdateBtn.setObjectName("updateBtn")
-        self.fastapiUpdateBtn.setCursor(Qt.PointingHandCursor)
-        self.fastapiUpdateBtn.setFocusPolicy(Qt.NoFocus)
-        self.fastapiUpdateBtn.setFixedSize(116, 30)
-        self.fastapiUpdateBtn.setStyleSheet(self.updateBtn.styleSheet())
-        self.fastapiUpdateBtn.clicked.connect(self._update_remote_fastapi)
+        self.runtimeUpdateBtn = QPushButton(tr("update_runtime"))
+        self.runtimeUpdateBtn.setObjectName("updateBtn")
+        self.runtimeUpdateBtn.setCursor(Qt.PointingHandCursor)
+        self.runtimeUpdateBtn.setFocusPolicy(Qt.NoFocus)
+        self.runtimeUpdateBtn.setFixedSize(116, 30)
+        self.runtimeUpdateBtn.setStyleSheet(self.updateBtn.styleSheet())
+        self.runtimeUpdateBtn.clicked.connect(self._update_runtime)
 
-        fastapi_update_layout.addWidget(fastapi_update_label)
-        fastapi_update_layout.addWidget(self.fastapiUpdateHint, stretch=1)
-        fastapi_update_layout.addWidget(self.fastapiUpdateBtn)
+        runtime_update_layout.addWidget(runtime_update_label)
+        runtime_update_layout.addWidget(self.runtimeUpdateHint, stretch=1)
+        runtime_update_layout.addWidget(self.runtimeUpdateBtn)
 
-        form_layout.addWidget(self._section_label(tr("settings_section_behavior")))
-        form_layout.addLayout(preference_grid)
-        form_layout.addLayout(opacity_layout)
-        form_layout.addSpacing(2)
-        form_layout.addWidget(self._section_label(tr("settings_section_connection")))
-        form_layout.addLayout(ip_layout)
-        form_layout.addLayout(port_layout)
-        form_layout.addLayout(token_layout)
-        form_layout.addSpacing(2)
-        form_layout.addWidget(self._section_label(tr("settings_section_maintenance")))
-        form_layout.addLayout(wizard_layout)
-        form_layout.addLayout(update_layout)
-        form_layout.addLayout(fastapi_update_layout)
-        form_layout.addStretch()
+        content_layout = QHBoxLayout()
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(16)
+
+        sidebar = QFrame(self.formBg)
+        sidebar.setObjectName("settingsSidebar")
+        sidebar.setFixedWidth(146)
+        sidebar_layout = QVBoxLayout(sidebar)
+        sidebar_layout.setContentsMargins(10, 10, 10, 10)
+        sidebar_layout.setSpacing(8)
+
+        self.settingsNavButtons = []
+        for index, (key, tip_key) in enumerate((
+            ("settings_nav_behavior", "settings_behavior_desc"),
+            ("settings_nav_connection", "settings_connection_desc"),
+            ("settings_nav_maintenance", "settings_maintenance_desc"),
+        )):
+            button = QPushButton(tr(key), sidebar)
+            button.setObjectName("settingsNavButton")
+            button.setCursor(Qt.PointingHandCursor)
+            button.setFocusPolicy(Qt.NoFocus)
+            button.setFixedHeight(34)
+            button.setToolTip(tr(tip_key))
+            button.clicked.connect(lambda checked=False, page=index: self._set_settings_page(page))
+            sidebar_layout.addWidget(button)
+            self.settingsNavButtons.append(button)
+        sidebar_layout.addStretch()
+        content_layout.addWidget(sidebar)
+
+        self.settingsStack = QStackedWidget(self.formBg)
+        self.settingsStack.setObjectName("settingsStack")
+
+        behavior_page = QWidget(self.settingsStack)
+        behavior_page.setObjectName("settingsPage")
+        behavior_layout = QVBoxLayout(behavior_page)
+        behavior_layout.setContentsMargins(0, 0, 0, 0)
+        behavior_layout.setSpacing(10)
+        behavior_layout.addWidget(self._page_title(tr("settings_section_behavior"), tr("settings_behavior_desc")))
+        behavior_panel = QFrame(behavior_page)
+        behavior_panel.setObjectName("settingsPanel")
+        behavior_panel_layout = QVBoxLayout(behavior_panel)
+        behavior_panel_layout.setContentsMargins(14, 14, 14, 14)
+        behavior_panel_layout.setSpacing(12)
+        behavior_panel_layout.addLayout(preference_grid)
+        behavior_panel_layout.addLayout(opacity_layout)
+        behavior_layout.addWidget(behavior_panel)
+        behavior_layout.addStretch()
+        self.settingsStack.addWidget(behavior_page)
+
+        connection_page = QWidget(self.settingsStack)
+        connection_page.setObjectName("settingsPage")
+        connection_layout = QVBoxLayout(connection_page)
+        connection_layout.setContentsMargins(0, 0, 0, 0)
+        connection_layout.setSpacing(10)
+        connection_layout.addWidget(self._page_title(tr("settings_section_connection"), tr("settings_connection_desc")))
+        connection_panel = QFrame(connection_page)
+        connection_panel.setObjectName("settingsPanel")
+        connection_panel_layout = QVBoxLayout(connection_panel)
+        connection_panel_layout.setContentsMargins(14, 14, 14, 14)
+        connection_panel_layout.setSpacing(12)
+        connection_panel_layout.addLayout(ip_layout)
+        connection_panel_layout.addLayout(port_layout)
+        connection_panel_layout.addLayout(runtime_port_layout)
+        connection_panel_layout.addLayout(token_layout)
+        connection_layout.addWidget(connection_panel)
+        connection_layout.addStretch()
+        self.settingsStack.addWidget(connection_page)
+
+        maintenance_page = QWidget(self.settingsStack)
+        maintenance_page.setObjectName("settingsPage")
+        maintenance_layout = QVBoxLayout(maintenance_page)
+        maintenance_layout.setContentsMargins(0, 0, 0, 0)
+        maintenance_layout.setSpacing(10)
+        maintenance_layout.addWidget(self._page_title(tr("settings_section_maintenance"), tr("settings_maintenance_desc")))
+        maintenance_panel = QFrame(maintenance_page)
+        maintenance_panel.setObjectName("settingsPanel")
+        maintenance_panel_layout = QVBoxLayout(maintenance_panel)
+        maintenance_panel_layout.setContentsMargins(14, 12, 14, 12)
+        maintenance_panel_layout.setSpacing(10)
+        maintenance_panel_layout.addLayout(wizard_layout)
+        maintenance_panel_layout.addLayout(update_layout)
+        maintenance_panel_layout.addLayout(runtime_update_layout)
+        maintenance_layout.addWidget(maintenance_panel)
+        maintenance_layout.addStretch()
+        self.settingsStack.addWidget(maintenance_page)
+
+        content_layout.addWidget(self.settingsStack, stretch=1)
+        form_layout.addLayout(content_layout, stretch=1)
+        self._set_settings_page(0)
 
         # 绑定测试结果信号
         self.test_result_signal.connect(self._on_test_result)
         self.update_result_signal.connect(self._handle_update_check_result)
         self.update_progress_signal.connect(self._on_download_progress)
         self.update_finish_signal.connect(self._on_update_finish)
-        self.fastapi_update_result_signal.connect(self._on_remote_fastapi_updated)
+        self.runtime_update_result_signal.connect(self._on_runtime_updated)
 
         # 底部按钮
         btn_layout = QHBoxLayout()
@@ -338,14 +437,53 @@ class SettingsWindow(QDialog):
         main_layout.addWidget(self.card)
 
         # 阴影效果
-        shadow = QGraphicsDropShadowEffect()
-        shadow.setBlurRadius(20)
-        shadow.setOffset(0, 6)
-        shadow.setColor(QColor(0, 0, 0, 80))
-        self.card.setGraphicsEffect(shadow)
 
         self._center_on_screen()
+        self._force_layout()
+        QTimer.singleShot(0, self._force_layout)
         QTimer.singleShot(100, self._check_for_updates)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._force_layout()
+        QTimer.singleShot(0, self._force_layout)
+        schedule_frameless_stabilize(self, self.card, self.topBg, self.formBg)
+
+    def _force_layout(self):
+        widgets = [self, self.card, self.topBg, self.formBg]
+        if hasattr(self, "settingsStack"):
+            widgets.append(self.settingsStack)
+        for widget in widgets:
+            layout = widget.layout()
+            if layout is not None:
+                layout.invalidate()
+                layout.activate()
+            widget.updateGeometry()
+            widget.update()
+
+    def _page_title(self, title, desc):
+        box = QWidget()
+        box.setObjectName("settingsPageHeader")
+        layout = QVBoxLayout(box)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(3)
+        title_label = QLabel(title)
+        title_label.setObjectName("settingsPageTitle")
+        desc_label = QLabel(desc)
+        desc_label.setObjectName("settingsPageDesc")
+        desc_label.setWordWrap(True)
+        layout.addWidget(title_label)
+        layout.addWidget(desc_label)
+        return box
+
+    def _set_settings_page(self, index):
+        if not hasattr(self, "settingsStack"):
+            return
+        self.settingsStack.setCurrentIndex(index)
+        for i, button in enumerate(getattr(self, "settingsNavButtons", [])):
+            button.setProperty("active", i == index)
+            button.style().unpolish(button)
+            button.style().polish(button)
 
     def _section_label(self, text):
         label = QLabel(text)
@@ -374,7 +512,7 @@ class SettingsWindow(QDialog):
 
     def _update_task(self, check_id):
         try:
-            result = check_for_updates(VERSION)
+            result = check_for_updates(get_current_version())
         except Exception as exc:
             result = {"has_update": False, "error": str(exc)}
         try:
@@ -413,8 +551,13 @@ class SettingsWindow(QDialog):
             except Exception:
                 pass
             
-            download_url = result["url"]
-            self.updateBtn.clicked.connect(lambda: self._start_download(download_url))
+            self.updateBtn.clicked.connect(
+                lambda: self._start_download(
+                    result.get("url", ""),
+                    result.get("sha256_url", ""),
+                    result.get("asset_name", ""),
+                )
+            )
         elif "error" in result:
             self.updateBtn.setText(tr("check_failed"))
             self.updateBtn.setToolTip(result.get("error", ""))
@@ -425,7 +568,7 @@ class SettingsWindow(QDialog):
             self.updateBtn.setToolTip(result.get("version", ""))
             QTimer.singleShot(3000, self._reset_update_btn)
 
-    def _start_download(self, download_url):
+    def _start_download(self, download_url, sha256_url="", asset_name=""):
         if not isValid(self):
             return
         self.updateBtn.setEnabled(False)
@@ -433,6 +576,7 @@ class SettingsWindow(QDialog):
         threading.Thread(
             target=do_update,
             args=(download_url, self._emit_update_progress, self._emit_update_finish),
+            kwargs={"sha256_url": sha256_url, "asset_name": asset_name},
             daemon=True,
         ).start()
 
@@ -500,87 +644,57 @@ class SettingsWindow(QDialog):
             pass
         self.updateBtn.clicked.connect(self._check_for_updates)
 
-    def _update_remote_fastapi(self):
+    def _update_runtime(self):
         if not isValid(self):
             return
         self._sync_config_from_ui()
-        self.fastapiUpdateBtn.setEnabled(False)
-        self.fastapiUpdateBtn.setText(tr("updating"))
-        threading.Thread(target=self._update_remote_fastapi_task, daemon=True).start()
+        self.runtimeUpdateBtn.setEnabled(False)
+        self.runtimeUpdateBtn.setText(tr("updating"))
+        threading.Thread(target=self._update_runtime_task, daemon=True).start()
 
-    def _update_remote_fastapi_task(self):
+    def _update_runtime_task(self):
         success = False
         message = ""
         try:
-            from .fastapi_export_window import render_fastapi_payload
-
-            update_config = {
-                "ip": self.config.get("ip", "127.0.0.1"),
-                "port": self.config.get("port", "22267"),
-                "api_token": self.config.get("api_token", ""),
-            }
-            content = render_fastapi_payload(fastapi_source_path(), self.config, config_path())
-            resp = api_request(
-                "POST",
-                f"{api_base_url(update_config)}/api/fastapi/update",
-                headers=api_headers(update_config),
-                json={"content": content, "restart": True},
-                timeout=12,
-            )
-            if resp.status_code == 200:
-                success = True
-                try:
-                    data = resp.json()
-                    message = tr("fastapi_update_success", path=data.get("path", "fastapi.py"))
-                except Exception:
-                    message = tr("fastapi_update_success", path="fastapi.py")
-            elif resp.status_code == 404:
-                message = tr("fastapi_update_unsupported")
-            elif resp.status_code == 401:
-                message = tr("test_unauthorized")
+            result = update_remote_runtime(self.config, get_current_version())
+            success = bool(result.get("success"))
+            code = result.get("message", "")
+            if success:
+                if code == "latest":
+                    message = tr("runtime_update_latest")
+                else:
+                    updated = result.get("updated") or []
+                    if result.get("restart_required"):
+                        message = tr("runtime_update_success_restart", count=len(updated))
+                    else:
+                        message = tr("runtime_update_success", count=len(updated))
+            elif code == "unauthorized" or code == "missing_token":
+                message = tr("runtime_update_unauthorized")
+            elif code == "connect_failed":
+                message = tr("runtime_update_connect_failed")
+            elif code == "unsupported":
+                message = tr("runtime_update_unsupported")
             else:
-                try:
-                    data = resp.json()
-                    message = data.get("message") or data.get("error") or f"HTTP {resp.status_code}"
-                except Exception:
-                    message = f"HTTP {resp.status_code}"
+                detail = result.get("detail") or code or tr("check_failed")
+                message = tr("runtime_update_failed", error=detail)
         except Exception as exc:
-            message = str(exc)
-        self._emit_fastapi_update_result(success, message)
+            message = tr("runtime_update_failed", error=str(exc))
+        self._emit_runtime_update_result(success, message)
 
-    def _emit_fastapi_update_result(self, success, message):
+    def _emit_runtime_update_result(self, success, message):
         try:
             if isValid(self):
-                self.fastapi_update_result_signal.emit(success, message)
+                self.runtime_update_result_signal.emit(success, message)
         except RuntimeError:
             pass
 
-    def _on_remote_fastapi_updated(self, success, message):
+    def _on_runtime_updated(self, success, message):
         if not isValid(self):
             return
-        self.fastapiUpdateBtn.setEnabled(True)
-        self.fastapiUpdateBtn.setText(tr("update_fastapi"))
-        self.fastapiUpdateBtn.setToolTip(message or "")
-        self.fastapiUpdateHint.setText(message if success else tr("fastapi_update_failed", error=message))
-
-    def mousePressEvent(self, event):
-        if event.button() == Qt.LeftButton:
-            import sys
-            if sys.platform == "win32":
-                import ctypes
-                ctypes.windll.user32.ReleaseCapture()
-                hwnd = self.winId()
-                ctypes.windll.user32.SendMessageW(int(hwnd), 0x0112, 0xF012, 0)
-            else:
-                self._drag_offset = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
-            event.accept()
-
-    def mouseMoveEvent(self, event):
-        import sys
-        if sys.platform != "win32":
-            if hasattr(self, "_drag_offset") and event.buttons() & Qt.LeftButton:
-                self.move(event.globalPosition().toPoint() - self._drag_offset)
-                event.accept()
+        self.runtimeUpdateBtn.setEnabled(True)
+        self.runtimeUpdateBtn.setText(tr("update_runtime"))
+        self.runtimeUpdateBtn.setToolTip(message or "")
+        self.runtimeUpdateHint.setText(message)
 
     def _sync_config_from_ui(self):
         self.config["auto_start"] = self.autoStartCheck.isChecked()
@@ -589,8 +703,11 @@ class SettingsWindow(QDialog):
         self.config["lang"] = "en" if self.englishLangCheck.isChecked() else "zh"
         self.config["ip"] = self.ipInput.text()
         self.config["port"] = self.portInput.text()
+        runtime_port = self.runtimePortInput.text().strip()
+        self.config["runtime_update_port"] = runtime_port if runtime_port.isdigit() else DEFAULT_RUNTIME_UPDATE_PORT
         self.config["api_token"] = self.tokenInput.text().strip()
         self.config["mini_click_through"] = self.miniClickThroughCheck.isChecked()
+        self.config["show_task_name"] = self.showTaskNameCheck.isChecked()
         self.config["mini_opacity"] = self._normalize_opacity(self.miniOpacitySlider.value())
         if "api_port" in self.config:
             del self.config["api_port"]
@@ -598,6 +715,7 @@ class SettingsWindow(QDialog):
     def _refresh_fields_from_config(self):
         self.ipInput.setText(self.config.get("ip", "127.0.0.1"))
         self.portInput.setText(str(self.config.get("port", "22267")))
+        self.runtimePortInput.setText(str(self.config.get("runtime_update_port", DEFAULT_RUNTIME_UPDATE_PORT)))
         self.tokenInput.setText(self.config.get("api_token", ""))
 
     def _open_init_setup(self):
@@ -608,8 +726,6 @@ class SettingsWindow(QDialog):
             self,
             self.config,
             config_path(),
-            fastapi_source_path(),
-            fastapi_output_path(),
         )
         if dialog.exec():
             self._refresh_fields_from_config()
@@ -665,13 +781,15 @@ class SettingsWindow(QDialog):
             }
             resp = api_request(
                 "GET",
-                f"{api_base_url(test_config)}/api/health",
+                gyre_api_url(test_config, "health"),
                 headers=api_headers(test_config),
                 timeout=2.0,
             )
             success = resp.status_code == 200
             if resp.status_code == 401:
                 message = tr("test_unauthorized")
+            elif resp.status_code == 404:
+                message = tr("test_overlay_missing")
             elif not success:
                 message = f"HTTP {resp.status_code}"
         except Exception as exc:

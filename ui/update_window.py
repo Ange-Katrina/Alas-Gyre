@@ -1,16 +1,16 @@
 import threading
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
-    QDialog, QFrame, QGraphicsDropShadowEffect, QHBoxLayout, QLabel,
+    QDialog, QFrame, QHBoxLayout, QLabel,
     QPushButton, QTextEdit, QVBoxLayout, QWidget
 )
 
-from updater import do_update
+from alas_gyre.services.updater import do_update
 
 from .i18n import tr
-from .main_window import WindowButton
+from .widgets import WindowButton
+from .window_behavior import install_title_bar_drag, schedule_frameless_stabilize
 
 try:
     from shiboken6 import isValid
@@ -109,14 +109,15 @@ class UpdatePromptWindow(QDialog):
         super().__init__(parent)
         self.update_info = update_info or {}
         self.download_url = self.update_info.get("url", "")
+        self.sha256_url = self.update_info.get("sha256_url", "")
+        self.asset_name = self.update_info.get("asset_name", "")
 
         self.setObjectName("updateWindow")
         self.setFixedSize(520, 440)
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog)
-        self.setAttribute(Qt.WA_TranslucentBackground)
 
         main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(18, 14, 18, 18)
+        main_layout.setContentsMargins(0, 0, 0, 0)
 
         self.card = QFrame(self)
         self.card.setObjectName("updateCard")
@@ -129,6 +130,7 @@ class UpdatePromptWindow(QDialog):
         self.topBg.setObjectName("updateTopBg")
         self.topBg.setAttribute(Qt.WA_StyledBackground, True)
         self.topBg.setFixedHeight(30)
+        install_title_bar_drag(self, self.topBg)
         top_layout = QHBoxLayout(self.topBg)
         top_layout.setContentsMargins(20, 0, 8, 0)
 
@@ -194,11 +196,6 @@ class UpdatePromptWindow(QDialog):
         card_layout.addWidget(self.bodyBg)
         main_layout.addWidget(self.card)
 
-        shadow = QGraphicsDropShadowEffect()
-        shadow.setBlurRadius(20)
-        shadow.setOffset(0, 6)
-        shadow.setColor(QColor(0, 0, 0, 90))
-        self.card.setGraphicsEffect(shadow)
 
         self.progress_signal.connect(self._on_progress)
         self.finish_signal.connect(self._on_finish)
@@ -212,6 +209,10 @@ class UpdatePromptWindow(QDialog):
         y = parent_geom.y() + (parent_geom.height() - self.height()) // 2
         self.move(x, y)
 
+    def showEvent(self, event):
+        super().showEvent(event)
+        schedule_frameless_stabilize(self, self.card, self.topBg, self.bodyBg)
+
     def _start_download(self):
         if not self.download_url:
             self._set_status(tr("update_download_missing"), "error")
@@ -224,6 +225,7 @@ class UpdatePromptWindow(QDialog):
         threading.Thread(
             target=do_update,
             args=(self.download_url, self._emit_progress, self._emit_finish),
+            kwargs={"sha256_url": self.sha256_url, "asset_name": self.asset_name},
             daemon=True,
         ).start()
 
@@ -264,19 +266,7 @@ class UpdatePromptWindow(QDialog):
         self.statusLabel.style().polish(self.statusLabel)
 
     def mousePressEvent(self, event):
-        if event.button() == Qt.LeftButton:
-            import sys
-            if sys.platform == "win32":
-                import ctypes
-                ctypes.windll.user32.ReleaseCapture()
-                ctypes.windll.user32.SendMessageW(int(self.winId()), 0x0112, 0xF012, 0)
-            else:
-                self._drag_offset = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
-            event.accept()
+        super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
-        import sys
-        if sys.platform != "win32":
-            if hasattr(self, "_drag_offset") and event.buttons() & Qt.LeftButton:
-                self.move(event.globalPosition().toPoint() - self._drag_offset)
-                event.accept()
+        super().mouseMoveEvent(event)

@@ -3,7 +3,7 @@ name: Build and Release
 on:
   push:
     tags:
-      - 'v*'  # 版本号标记
+      - 'v*'
   workflow_dispatch:
 
 permissions:
@@ -51,39 +51,52 @@ jobs:
           import re
           import sys
           import os
+          from collections import OrderedDict
 
           PREFIX_MAP = {
-              "feat": "功能/feat",
-              "fix": "修复/fix",
-              "docs": "文档/docs",
-              "style": "样式/style",
-              "refactor": "重构/refactor",
-              "perf": "性能/perf",
-              "test": "测试/test",
-              "build": "构建/build",
-              "ci": "持续集成/ci",
-              "chore": "维护/chore",
-              "revert": "回滚/revert",
+              "feat": "Features / 新功能",
+              "fix": "Fixes / 修复",
+              "perf": "Performance / 性能优化",
+              "refactor": "Refactors / 重构",
+              "docs": "Documentation / 文档",
+              "style": "Style / 样式",
+              "test": "Tests / 测试",
+              "build": "Build / 构建",
+              "ci": "CI / 持续集成",
+              "chore": "Maintenance / 维护",
+              "revert": "Reverts / 回滚",
           }
 
-          def format_commit(line):
+          CATEGORY_ORDER = [
+              "feat",
+              "fix",
+              "perf",
+              "refactor",
+              "docs",
+              "style",
+              "test",
+              "build",
+              "ci",
+              "chore",
+              "revert",
+              "other",
+          ]
+
+          def parse_commit(line):
               if not line:
-                  return ""
+                  return "", ""
               parts = line.split(" ", 1)
               if len(parts) != 2:
-                  return line
+                  return "other", f"- {line}"
               commit_hash, message = parts
 
-              # Match conventional commit format
-              match = re.match(r"^([a-zA-Z]+)(\(.+?\))?:\s*(.+)$", message)
+              match = re.match(r"^([a-zA-Z]+)(\(.+?\))?(!)?:\s*(.+)$", message)
               if match:
                   prefix = match.group(1).lower()
-                  scope = match.group(2) or ""
-                  rest = match.group(3)
                   if prefix in PREFIX_MAP:
-                      return f"{commit_hash} [{PREFIX_MAP[prefix]}]{scope} {rest}"
+                      return prefix, f"- {message} ({commit_hash})"
 
-              return line
+              return "other", f"- {message} ({commit_hash})"
 
           commits_file = sys.argv[1]
           previous_tag = sys.argv[2] if len(sys.argv) > 2 else ""
@@ -95,14 +108,29 @@ jobs:
           else:
               raw_lines = []
 
-          output = ["## What's Changed / 发生了哪些变化？", ""]
+          grouped = OrderedDict((category, []) for category in CATEGORY_ORDER)
           for line in raw_lines:
               if line.strip():
-                  output.append(format_commit(line.strip()))
+                  category, entry = parse_commit(line.strip())
+                  if entry:
+                      grouped.setdefault(category, []).append(entry)
+
+          output = ["## What's Changed / 发生了哪些变化？", ""]
+          has_entries = any(grouped.get(category) for category in grouped)
+          if has_entries:
+              for category in grouped:
+                  entries = grouped.get(category, [])
+                  if not entries:
+                      continue
+                  title = PREFIX_MAP.get(category, "Other Changes / 其他变化")
+                  output.extend([f"### {title}", ""])
+                  output.extend(entries)
+                  output.append("")
+          else:
+              output.extend(["- No commit details were found for this release.", ""])
 
           if previous_tag and current_tag:
               output.extend([
-                  "",
                   f"**Full Changelog / 完整更新记录**: https://github.com/{os.environ.get('GITHUB_REPOSITORY', 'Ange-Katrina/Alas-Gyre')}/compare/{previous_tag}...{current_tag}",
               ])
 
@@ -201,11 +229,33 @@ jobs:
         run: |
           pyinstaller Alas-Gyre.spec --noconfirm
 
+      - name: Compress PyInstaller exe with UPX
+        shell: pwsh
+        run: |
+          $upx = "tools/upx-5.1.1-win64/upx.exe"
+          $exe = "dist/Alas-Gyre.exe"
+          if ((Test-Path -LiteralPath $upx) -and (Test-Path -LiteralPath $exe)) {
+            & $upx --best --lzma $exe
+            if ($LASTEXITCODE -ne 0) {
+              Write-Warning "UPX compression failed; keeping original PyInstaller exe."
+              exit 0
+            }
+          }
+
+      - name: Generate PyInstaller sha256
+        shell: pwsh
+        run: |
+          $exe = "dist/Alas-Gyre.exe"
+          $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $exe).Hash.ToLowerInvariant()
+          [System.IO.File]::WriteAllText((Join-Path $PWD "dist/Alas-Gyre.exe.sha256"), "$hash  Alas-Gyre.exe`n", [System.Text.Encoding]::ASCII)
+
       - name: Upload PyInstaller artifact
         uses: actions/upload-artifact@v7
         with:
           name: Alas-Gyre-Windows-PyInstaller-${{ needs.meta.outputs.tag }}
-          path: dist/Alas-Gyre.exe
+          path: |
+            dist/Alas-Gyre.exe
+            dist/Alas-Gyre.exe.sha256
           retention-days: 7
 
   build-nuitka:
@@ -262,7 +312,11 @@ jobs:
             --include-data-files=ui/style.qss=ui/style.qss `
             --include-data-files=ui/light.qss=ui/light.qss `
             --include-data-dir=ui/assets=ui/assets `
-            --include-data-files=resources/fastapi_payload.txt=resources/fastapi_payload.txt `
+            --include-data-files=resources/start_gyre_alas.bat.template=resources/start_gyre_alas.bat.template `
+            --include-data-files=resources/start_gyre_alas.sh.template=resources/start_gyre_alas.sh.template `
+            --include-data-files=resources/gyre_runtime_updater.py=resources/gyre_runtime_updater.py `
+            --include-data-files=overlay/sitecustomize.py=overlay/sitecustomize.py `
+            --include-data-files=overlay/gyre_overlay_runtime.py=overlay/gyre_overlay_runtime.py `
             --output-filename=Alas-Gyre-Nuitka.exe `
             main.py
 
@@ -278,11 +332,20 @@ jobs:
             }
           }
 
+      - name: Generate Nuitka sha256
+        shell: pwsh
+        run: |
+          $exe = "Alas-Gyre-Nuitka.exe"
+          $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $exe).Hash.ToLowerInvariant()
+          [System.IO.File]::WriteAllText((Join-Path $PWD "Alas-Gyre-Nuitka.exe.sha256"), "$hash  Alas-Gyre-Nuitka.exe`n", [System.Text.Encoding]::ASCII)
+
       - name: Upload Nuitka artifact
         uses: actions/upload-artifact@v7
         with:
           name: Alas-Gyre-Windows-Nuitka-${{ needs.meta.outputs.tag }}
-          path: Alas-Gyre-Nuitka.exe
+          path: |
+            Alas-Gyre-Nuitka.exe
+            Alas-Gyre-Nuitka.exe.sha256
           retention-days: 7
 
   release:
@@ -302,6 +365,8 @@ jobs:
           # Copy Windows exe files
           find assets/ -name "Alas-Gyre.exe" -exec cp {} release/ \;
           find assets/ -name "Alas-Gyre-Nuitka.exe" -exec cp {} release/ \;
+          find assets/ -name "Alas-Gyre.exe.sha256" -exec cp {} release/ \;
+          find assets/ -name "Alas-Gyre-Nuitka.exe.sha256" -exec cp {} release/ \;
 
           # Copy CHANGELOG.md (only for body_path description)
           find assets/ -name "CHANGELOG.md" -exec cp {} release/ \;
@@ -316,5 +381,7 @@ jobs:
           body_path: release/CHANGELOG.md
           files: |
             release/Alas-Gyre.exe
+            release/Alas-Gyre.exe.sha256
             release/Alas-Gyre-Nuitka.exe
+            release/Alas-Gyre-Nuitka.exe.sha256
           prerelease: ${{ needs.meta.outputs.prerelease != 'false' }}
