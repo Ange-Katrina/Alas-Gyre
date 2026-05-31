@@ -19,7 +19,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 TOKEN_HEADER = "X-Alas-Gyre-Token"
 PROTOCOL = "alas-gyre-runtime-update"
 RUNTIME_VERSION = "__RUNTIME_VERSION__"
-DEFAULT_HOST = "127.0.0.1"
+DEFAULT_HOST = "0.0.0.0"
 DEFAULT_PORT = 22268
 MAX_FILE_BYTES = 1024 * 1024
 MAX_REQUEST_BYTES = 8 * 1024 * 1024

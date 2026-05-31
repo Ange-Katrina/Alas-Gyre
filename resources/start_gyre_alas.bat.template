@@ -17,7 +17,7 @@ set "UPDATER_RUNNER=!GYRE_RUNTIME!\.gyre_run_updater.cmd"
 set "CAND_FILE=!TEMP!\gyre_alas_candidates_%RANDOM%_%RANDOM%.txt"
 set "ALAS_GYRE_OVERLAY=!GYRE_RUNTIME!\overlay"
 set "ALAS_GYRE_API_TOKEN=__API_TOKEN__"
-set "GYRE_UPDATE_HOST=127.0.0.1"
+set "GYRE_UPDATE_HOST=0.0.0.0"
 set "GYRE_UPDATE_PORT=22268"
 set "ALAS_WEBUI_PORT="
 set "GYRE_LANG="
@@ -65,7 +65,7 @@ echo(  Managed ALAS : !ALAS_STATE!
 echo(  Runtime API  : !UPDATER_STATE!
 echo(  ALAS root    : !ALAS_ROOT_DISPLAY!
 echo(  Update port  : !GYRE_UPDATE_HOST!:!GYRE_UPDATE_PORT!
-echo(  Remote update: local only unless GYRE_UPDATE_HOST is changed
+echo(  Remote update: LAN access enabled by default; do not expose publicly
 echo(--------------------------------------------------
 echo(
 echo(Startup
@@ -114,7 +114,7 @@ echo(  Managed ALAS : !ALAS_STATE!
 echo(  Runtime API  : !UPDATER_STATE!
 echo(  ALAS root    : !ALAS_ROOT_DISPLAY!
 echo(  Update port  : !GYRE_UPDATE_HOST!:!GYRE_UPDATE_PORT!
-echo(  Remote update: local only unless GYRE_UPDATE_HOST is changed
+echo(  Remote update: LAN access enabled by default; do not expose publicly
 echo(--------------------------------------------------
 echo(
 echo(Startup
@@ -331,7 +331,7 @@ echo(ALAS root    : !ALAS_ROOT_DISPLAY!
 echo(Runtime dir  : !GYRE_RUNTIME!
 echo(Overlay dir  : !ALAS_GYRE_OVERLAY!
 echo(Update port  : !GYRE_UPDATE_HOST!:!GYRE_UPDATE_PORT!
-echo(Remote update: local only by default. Set GYRE_UPDATE_HOST=0.0.0.0 or LAN IP in .gyre_runtime.conf to update remotely.
+echo(Remote update: LAN access enabled by default. Do not expose this port to the public Internet.
 echo(
 exit /b 0
 
@@ -344,7 +344,7 @@ echo(ALAS root    : !ALAS_ROOT_DISPLAY!
 echo(Runtime dir  : !GYRE_RUNTIME!
 echo(Overlay dir  : !ALAS_GYRE_OVERLAY!
 echo(Update port  : !GYRE_UPDATE_HOST!:!GYRE_UPDATE_PORT!
-echo(Remote update: local only by default. Set GYRE_UPDATE_HOST=0.0.0.0 or LAN IP in .gyre_runtime.conf to update remotely.
+echo(Remote update: LAN access enabled by default. Do not expose this port to the public Internet.
 echo(
 exit /b 0
 
@@ -354,7 +354,7 @@ echo(
 echo([Runtime updater]
 echo(Status       : !UPDATER_STATE!
 echo(Update port  : !GYRE_UPDATE_HOST!:!GYRE_UPDATE_PORT!
-echo(Remote update: local only by default. Exposing 22268 to the public Internet is not recommended.
+echo(Remote update: LAN access enabled by default. Exposing 22268 to the public Internet is not recommended.
 echo(PID file     : !UPDATER_PID_FILE!
 echo(Log          : !UPDATER_LOG_FILE!
 echo(Script       : !UPDATER_SCRIPT!
@@ -378,7 +378,7 @@ echo(Updater PID file   : !UPDATER_PID_FILE!
 echo(Updater log        : !UPDATER_LOG_FILE!
 echo(Updater script     : !UPDATER_SCRIPT!
 echo(Update listen      : !GYRE_UPDATE_HOST!:!GYRE_UPDATE_PORT!
-echo(Remote update      : local only by default. Change GYRE_UPDATE_HOST and open the port only for trusted LANs.
+echo(Remote update      : LAN access enabled by default. Do not expose this port to the public Internet.
 echo(
 if exist "!LOG_FILE!" echo(Hint: notepad "!LOG_FILE!"
 if exist "!UPDATER_LOG_FILE!" echo(Hint: notepad "!UPDATER_LOG_FILE!"
@@ -396,7 +396,7 @@ echo(Updater pid       : !UPDATER_PID_FILE!
 echo(Updater log       : !UPDATER_LOG_FILE!
 echo(Updater script    : !UPDATER_SCRIPT!
 echo(Update listen     : !GYRE_UPDATE_HOST!:!GYRE_UPDATE_PORT!
-echo(Remote update     : local only by default. Change GYRE_UPDATE_HOST and open the port only for trusted LANs.
+echo(Remote update     : LAN access enabled by default. Do not expose this port to the public Internet.
 echo(
 if exist "!LOG_FILE!" echo(Tip: notepad "!LOG_FILE!"
 if exist "!UPDATER_LOG_FILE!" echo(Tip: notepad "!UPDATER_LOG_FILE!"
