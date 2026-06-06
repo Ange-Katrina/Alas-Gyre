@@ -10,8 +10,8 @@ from __future__ import annotations
 
 import sys
 
-from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QRegion
+from PySide6.QtCore import QPoint, Qt, QTimer
+from PySide6.QtGui import QGuiApplication, QRegion
 
 try:
     from shiboken6 import isValid
@@ -52,6 +52,43 @@ def schedule_frameless_stabilize(window, *widgets, stable_input_region=True):
         180,
         lambda: repaint_frameless_window(window, *widgets),
     )
+
+
+def clamp_window_to_available_screen(window, reference_widget=None, margin=8):
+    """Keep a dialog fully reachable inside the current screen work area."""
+    if not _is_live_widget(window):
+        return
+
+    screen = None
+    ref = reference_widget if _is_live_widget(reference_widget) else window
+    try:
+        point = ref.frameGeometry().center()
+        screen = QGuiApplication.screenAt(point)
+    except Exception:
+        screen = None
+    if screen is None:
+        screen = QGuiApplication.primaryScreen()
+    if screen is None:
+        return
+
+    available = screen.availableGeometry()
+    frame = window.frameGeometry()
+    width = max(frame.width(), window.width(), 1)
+    height = max(frame.height(), window.height(), 1)
+
+    min_x = available.x() + margin
+    min_y = available.y() + margin
+    max_x = available.x() + available.width() - width - margin
+    max_y = available.y() + available.height() - height - margin
+    if max_x < min_x:
+        max_x = min_x
+    if max_y < min_y:
+        max_y = min_y
+
+    x = min(max(frame.x(), min_x), max_x)
+    y = min(max(frame.y(), min_y), max_y)
+    if x != frame.x() or y != frame.y():
+        window.move(QPoint(x, y))
 
 
 def stabilize_frameless_window(window, *widgets, stable_input_region=True):

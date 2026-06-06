@@ -12,7 +12,11 @@ from alas_gyre.api.client import api_headers, api_request, gyre_api_url
 from .error_screenshot_window import ErrorScreenshotPanel
 from .widgets import WindowButton
 from .i18n import tr
-from .window_behavior import install_title_bar_drag, schedule_frameless_stabilize
+from .window_behavior import (
+    clamp_window_to_available_screen,
+    install_title_bar_drag,
+    schedule_frameless_stabilize,
+)
 
 LOG_LEVEL_STYLES = {
     "CRITICAL": {"fg": "#ff6b6b", "bg": "#2b171a", "bar": "#ff5c5c"},
@@ -165,6 +169,7 @@ class LogWindow(QDialog):
             x = parent_geom.x() + (parent_geom.width() - self.width()) // 2
             y = parent_geom.y() + (parent_geom.height() - self.height()) // 2
             self.move(x, y)
+        clamp_window_to_available_screen(self, self.parent())
 
     def mousePressEvent(self, event):
         super().mousePressEvent(event)
@@ -356,7 +361,9 @@ class LogWindow(QDialog):
 
     def showEvent(self, event):
         super().showEvent(event)
+        clamp_window_to_available_screen(self, self.parent())
         schedule_frameless_stabilize(self, self.card, self.topBg, self.stack)
+        QTimer.singleShot(0, lambda: clamp_window_to_available_screen(self, self.parent()))
         if not self.poll_timer.isActive():
             self.poll_timer.start(2000)
         self._fetch_log()
