@@ -861,13 +861,14 @@ run_alas_foreground() {
 }
 
 start_background() {
+    allow_prompt="${1:-yes}"
     cleanup_stale_pid
     if is_managed_running; then
         pid="$(get_pid)"
         echo "[Alas-Gyre] ALAS is already running under Gyre. pid=$pid"
         return 0
     fi
-    resolve_alas_root yes || return 1
+    resolve_alas_root "$allow_prompt" || return 1
     cleanup_temp
     ensure_alas_port_free || return 1
     mkdir -p "$GYRE_RUNTIME" 2>/dev/null || true
@@ -918,7 +919,7 @@ stop_managed_alas() {
 
 restart_background() {
     stop_managed_alas
-    start_background
+    start_background "${1:-yes}"
 }
 
 show_status() {
@@ -1009,16 +1010,33 @@ write_openrc_service() {
     cat > "$target" <<EOF
 #!/sbin/openrc-run
 description="Alas-Gyre Overlay ALAS launcher"
-command="/bin/sh"
-command_args="$SCRIPT_PATH __gyre_service_run"
-command_background="yes"
 pidfile="$PID_FILE"
-output_log="$LOG_FILE"
-error_log="$LOG_FILE"
+runtime_dir="$GYRE_RUNTIME"
+script_path="$SCRIPT_PATH"
+log_file="$LOG_FILE"
 
 depend() {
     need localmount
-    after net
+    use net
+    after firewall
+}
+
+start() {
+    ebegin "Starting Alas-Gyre Overlay ALAS"
+    mkdir -p "\$runtime_dir" >/dev/null 2>&1 || true
+    : >> "\$log_file" 2>/dev/null || true
+    /bin/sh "\$script_path" __gyre_service_start >> "\$log_file" 2>&1
+    eend \$?
+}
+
+stop() {
+    ebegin "Stopping Alas-Gyre Overlay ALAS"
+    /bin/sh "\$script_path" __gyre_service_stop >> "\$log_file" 2>&1
+    eend \$?
+}
+
+status() {
+    /bin/sh "\$script_path" __gyre_service_status
 }
 EOF
     chmod +x "$target" 2>/dev/null || true
@@ -1044,6 +1062,14 @@ is_root() {
     [ "$(id -u 2>/dev/null || echo 1)" = "0" ]
 }
 
+warn_if_openrc_not_runtime_init() {
+    if [ ! -e /run/openrc/softlevel ]; then
+        echo "[Alas-Gyre] Warning: /run/openrc/softlevel was not found."
+        echo "[Alas-Gyre] rc-update can install the service, but autostart only works when OpenRC runs at boot."
+        echo "[Alas-Gyre] In Docker/WSL/chroot environments, use rc-service manually or run OpenRC as the init system."
+    fi
+}
+
 install_autostart() {
     resolve_alas_root yes || return 1
     cleanup_temp
@@ -1058,12 +1084,17 @@ install_autostart() {
             echo "  sudo cp $(shell_quote "$SERVICE_DIR/$SYSTEMD_SERVICE_NAME") /etc/systemd/system/$SYSTEMD_SERVICE_NAME"
             echo "  sudo systemctl daemon-reload"
             echo "  sudo systemctl enable $SYSTEMD_SERVICE_NAME"
+            echo "  sudo systemctl restart $SYSTEMD_SERVICE_NAME"
+            echo "  sudo systemctl status $SYSTEMD_SERVICE_NAME --no-pager"
         fi
         if [ "$manager" = "openrc" ] || [ "$manager" = "none" ]; then
             echo "OpenRC manual install:"
             echo "  sudo cp $(shell_quote "$SERVICE_DIR/$OPENRC_SERVICE_NAME") /etc/init.d/$OPENRC_SERVICE_NAME"
             echo "  sudo chmod +x /etc/init.d/$OPENRC_SERVICE_NAME"
             echo "  sudo rc-update add $OPENRC_SERVICE_NAME default"
+            echo "  sudo rc-service $OPENRC_SERVICE_NAME restart"
+            echo "  sudo rc-service $OPENRC_SERVICE_NAME status"
+            warn_if_openrc_not_runtime_init
         fi
         return 0
     fi
@@ -1074,14 +1105,29 @@ install_autostart() {
             systemctl daemon-reload
             systemctl enable "$SYSTEMD_SERVICE_NAME"
             echo "[Alas-Gyre] systemd autostart installed: $SYSTEMD_SERVICE_NAME"
-            echo "[Alas-Gyre] Start now: systemctl start $SYSTEMD_SERVICE_NAME"
+            echo "[Alas-Gyre] Starting service now..."
+            if systemctl restart "$SYSTEMD_SERVICE_NAME"; then
+                echo "[Alas-Gyre] systemd service started."
+                systemctl status "$SYSTEMD_SERVICE_NAME" --no-pager || true
+            else
+                echo "[Alas-Gyre] systemd service failed to start. Log: $LOG_FILE" >&2
+                return 1
+            fi
             ;;
         openrc)
             cp "$SERVICE_DIR/$OPENRC_SERVICE_NAME" "/etc/init.d/$OPENRC_SERVICE_NAME"
             chmod +x "/etc/init.d/$OPENRC_SERVICE_NAME"
             rc-update add "$OPENRC_SERVICE_NAME" default
+            warn_if_openrc_not_runtime_init
             echo "[Alas-Gyre] OpenRC autostart installed: $OPENRC_SERVICE_NAME"
-            echo "[Alas-Gyre] Start now: rc-service $OPENRC_SERVICE_NAME start"
+            echo "[Alas-Gyre] Starting service now..."
+            if rc-service "$OPENRC_SERVICE_NAME" restart; then
+                echo "[Alas-Gyre] OpenRC service started."
+                rc-service "$OPENRC_SERVICE_NAME" status || true
+            else
+                echo "[Alas-Gyre] OpenRC service failed to start. Log: $LOG_FILE" >&2
+                return 1
+            fi
             ;;
         *)
             echo "[Alas-Gyre] No supported service manager detected. Service files remain in $SERVICE_DIR" >&2
@@ -1283,9 +1329,26 @@ show_menu() {
     done
 }
 case "${1:-}" in
+    __gyre_service_start)
+        shift || true
+        start_background no
+        ;;
     __gyre_service_run)
         shift || true
         run_alas_foreground no
+        ;;
+    __gyre_service_stop)
+        shift || true
+        stop_managed_alas
+        stop_updater
+        ;;
+    __gyre_service_status)
+        shift || true
+        show_status
+        if is_managed_running; then
+            exit 0
+        fi
+        exit 3
         ;;
     *)
         # Keep the runtime updater available by default.  This lets the desktop
