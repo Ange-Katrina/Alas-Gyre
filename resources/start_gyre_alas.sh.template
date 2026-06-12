@@ -987,6 +987,7 @@ write_systemd_service() {
     target="$1"
     mkdir -p "$(dirname -- "$target")"
     script_q="$(shell_quote "$SCRIPT_PATH")"
+    runtime_q="$(shell_quote "$GYRE_RUNTIME")"
     cat > "$target" <<EOF
 [Unit]
 Description=Alas-Gyre Overlay ALAS launcher
@@ -995,9 +996,13 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/bin/sh -c 'exec "\$1" __gyre_service_run' sh $script_q
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/bin/sh -c 'cd "\$1" && exec "\$2" __gyre_service_run' sh $runtime_q $script_q
+ExecStop=/bin/sh -c 'exec "\$1" __gyre_service_stop' sh $script_q
 Restart=on-failure
 RestartSec=5
+TimeoutStopSec=30
+KillMode=control-group
 
 [Install]
 WantedBy=multi-user.target
@@ -1048,10 +1053,36 @@ generate_service_files() {
     write_openrc_service "$SERVICE_DIR/$OPENRC_SERVICE_NAME"
 }
 
+detect_linux_distro() {
+    if [ -r /etc/os-release ]; then
+        # shellcheck disable=SC1091
+        . /etc/os-release 2>/dev/null || true
+        printf '%s' "${ID:-unknown}"
+        return 0
+    fi
+    printf 'unknown'
+}
+
+detect_pid1() {
+    ps -p 1 -o comm= 2>/dev/null | tr -d ' ' | sed -n '1p'
+}
+
+systemd_available() {
+    command -v systemctl >/dev/null 2>&1 || return 1
+    [ -d /run/systemd/system ] || return 1
+    systemctl list-unit-files >/dev/null 2>&1 || return 1
+}
+
+openrc_available() {
+    command -v rc-update >/dev/null 2>&1 || return 1
+    command -v rc-service >/dev/null 2>&1 || return 1
+    [ -x /sbin/openrc-run ] || [ -e /run/openrc/softlevel ] || [ -d /run/openrc ]
+}
+
 detect_service_manager() {
-    if command -v systemctl >/dev/null 2>&1 && [ -d /etc/systemd/system ]; then
+    if systemd_available; then
         echo systemd
-    elif command -v rc-update >/dev/null 2>&1 || [ -x /sbin/openrc-run ]; then
+    elif openrc_available; then
         echo openrc
     else
         echo none
@@ -1070,12 +1101,32 @@ warn_if_openrc_not_runtime_init() {
     fi
 }
 
+warn_if_no_runtime_init() {
+    distro="$(detect_linux_distro)"
+    pid1="$(detect_pid1)"
+    echo "[Alas-Gyre] Linux distro: ${distro:-unknown}, pid1: ${pid1:-unknown}, service manager: none"
+    case "$distro" in
+        debian|ubuntu)
+            echo "[Alas-Gyre] Debian/Ubuntu autostart requires systemd running as the init system."
+            echo "[Alas-Gyre] If this is Docker/WSL/chroot, install on the real host or start the launcher manually."
+            ;;
+        alpine)
+            echo "[Alas-Gyre] Alpine autostart requires OpenRC running at boot."
+            echo "[Alas-Gyre] If this is Docker/chroot, rc-update may not start services automatically."
+            ;;
+        *)
+            echo "[Alas-Gyre] Supported autostart targets: systemd Debian/Ubuntu, OpenRC Alpine."
+            ;;
+    esac
+}
+
 install_autostart() {
     resolve_alas_root yes || return 1
     cleanup_temp
     generate_service_files
     manager="$(detect_service_manager)"
     echo "[Alas-Gyre] Service files generated in: $SERVICE_DIR"
+    echo "[Alas-Gyre] Linux distro: $(detect_linux_distro), pid1: $(detect_pid1), service manager: $manager"
 
     if ! is_root; then
         echo "[Alas-Gyre] Root permission is required to install autostart."
@@ -1096,6 +1147,7 @@ install_autostart() {
             echo "  sudo rc-service $OPENRC_SERVICE_NAME status"
             warn_if_openrc_not_runtime_init
         fi
+        [ "$manager" = "none" ] && warn_if_no_runtime_init
         return 0
     fi
 
@@ -1130,6 +1182,7 @@ install_autostart() {
             fi
             ;;
         *)
+            warn_if_no_runtime_init
             echo "[Alas-Gyre] No supported service manager detected. Service files remain in $SERVICE_DIR" >&2
             return 1
             ;;
