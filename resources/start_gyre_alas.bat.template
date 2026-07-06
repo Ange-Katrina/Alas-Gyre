@@ -19,6 +19,8 @@ set "ALAS_GYRE_OVERLAY=!GYRE_RUNTIME!\overlay"
 set "ALAS_GYRE_API_TOKEN=__API_TOKEN__"
 set "GYRE_UPDATE_HOST=0.0.0.0"
 set "GYRE_UPDATE_PORT=22268"
+set "GYRE_LOG_MAX_BYTES=10485760"
+set "GYRE_LOG_BACKUP_COUNT=3"
 set "ALAS_WEBUI_PORT="
 set "GYRE_LANG="
 
@@ -214,11 +216,17 @@ if exist "!CONF_FILE!" (
         if /i "%%A"=="ALAS_ROOT" set "ALAS_ROOT=%%B"
         if /i "%%A"=="GYRE_UPDATE_HOST" set "GYRE_UPDATE_HOST=%%B"
         if /i "%%A"=="GYRE_UPDATE_PORT" set "GYRE_UPDATE_PORT=%%B"
+        if /i "%%A"=="GYRE_LOG_MAX_BYTES" set "GYRE_LOG_MAX_BYTES=%%B"
+        if /i "%%A"=="GYRE_LOG_BACKUP_COUNT" set "GYRE_LOG_BACKUP_COUNT=%%B"
         if /i "%%A"=="ALAS_WEBUI_PORT" set "ALAS_WEBUI_PORT=%%B"
         if /i "%%A"=="GYRE_LANG" set "GYRE_LANG=%%B"
     )
 )
 if not defined ALAS_ROOT if exist "!ALAS_ROOT_CACHE!" set /p ALAS_ROOT=<"!ALAS_ROOT_CACHE!"
+for /f "delims=0123456789" %%X in ("!GYRE_LOG_MAX_BYTES!") do set "GYRE_LOG_MAX_BYTES=10485760"
+for /f "delims=0123456789" %%X in ("!GYRE_LOG_BACKUP_COUNT!") do set "GYRE_LOG_BACKUP_COUNT=3"
+if not defined GYRE_LOG_MAX_BYTES set "GYRE_LOG_MAX_BYTES=10485760"
+if not defined GYRE_LOG_BACKUP_COUNT set "GYRE_LOG_BACKUP_COUNT=3"
 exit /b 0
 
 :detect_language
@@ -228,7 +236,7 @@ if not defined GYRE_LANG set "GYRE_LANG=en"
 exit /b 0
 
 :save_config
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$enc=New-Object System.Text.UTF8Encoding($false); $nl=[Environment]::NewLine; $content='ALAS_ROOT='+$env:ALAS_ROOT+$nl+'GYRE_UPDATE_HOST='+$env:GYRE_UPDATE_HOST+$nl+'GYRE_UPDATE_PORT='+$env:GYRE_UPDATE_PORT+$nl+'ALAS_WEBUI_PORT='+$env:ALAS_WEBUI_PORT+$nl+'GYRE_LANG='+$env:GYRE_LANG+$nl; [System.IO.File]::WriteAllText($env:CONF_FILE,$content,$enc); [System.IO.File]::WriteAllText($env:ALAS_ROOT_CACHE,$env:ALAS_ROOT,$enc)" <nul >nul 2>nul
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$enc=New-Object System.Text.UTF8Encoding($false); $nl=[Environment]::NewLine; $content='ALAS_ROOT='+$env:ALAS_ROOT+$nl+'GYRE_UPDATE_HOST='+$env:GYRE_UPDATE_HOST+$nl+'GYRE_UPDATE_PORT='+$env:GYRE_UPDATE_PORT+$nl+'ALAS_WEBUI_PORT='+$env:ALAS_WEBUI_PORT+$nl+'GYRE_LANG='+$env:GYRE_LANG+$nl+'GYRE_LOG_MAX_BYTES='+$env:GYRE_LOG_MAX_BYTES+$nl+'GYRE_LOG_BACKUP_COUNT='+$env:GYRE_LOG_BACKUP_COUNT+$nl; [System.IO.File]::WriteAllText($env:CONF_FILE,$content,$enc); [System.IO.File]::WriteAllText($env:ALAS_ROOT_CACHE,$env:ALAS_ROOT,$enc)" <nul >nul 2>nul
 exit /b !ERRORLEVEL!
 
 :is_alas_root
@@ -614,6 +622,13 @@ if not errorlevel 1 (
 )
 exit /b 1
 
+:rotate_log
+set "ROTATE_LOG_PATH=%~1"
+if not defined ROTATE_LOG_PATH exit /b 0
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$path=[string]$env:ROTATE_LOG_PATH; $max=[long]10485760; $keep=[int]3; [long]::TryParse([string]$env:GYRE_LOG_MAX_BYTES,[ref]$max) | Out-Null; [int]::TryParse([string]$env:GYRE_LOG_BACKUP_COUNT,[ref]$keep) | Out-Null; if ($max -le 0 -or -not (Test-Path -LiteralPath $path -PathType Leaf)) { exit 0 }; $item=Get-Item -LiteralPath $path -ErrorAction SilentlyContinue; if (-not $item -or $item.Length -lt $max) { exit 0 }; if ($keep -le 0) { Clear-Content -LiteralPath $path -ErrorAction SilentlyContinue; exit 0 }; for ($i=$keep; $i -ge 2; $i--) { $src=$path+'.'+($i-1); $dst=$path+'.'+$i; if (Test-Path -LiteralPath $src) { Move-Item -LiteralPath $src -Destination $dst -Force -ErrorAction SilentlyContinue } }; Move-Item -LiteralPath $path -Destination ($path+'.1') -Force -ErrorAction SilentlyContinue; [System.IO.File]::WriteAllBytes($path, [byte[]]@())" <nul >nul 2>nul
+set "ROTATE_LOG_PATH="
+exit /b 0
+
 :start_cmd_hidden
 set "GYRE_CMD_PATH=%~1"
 set "GYRE_LOG_PATH=%~2"
@@ -649,7 +664,8 @@ if errorlevel 1 (
     echo([WARN] Python was not found. Runtime updater was not started.
     exit /b 1
 )
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$q=[char]34; $lines=@(); $lines += '@echo off'; $lines += ('set '+$q+'ALAS_GYRE_API_TOKEN='+$env:ALAS_GYRE_API_TOKEN+$q); $lines += ('set '+$q+'GYRE_UPDATE_HOST='+$env:GYRE_UPDATE_HOST+$q); $lines += ('set '+$q+'GYRE_UPDATE_PORT='+$env:GYRE_UPDATE_PORT+$q); $lines += ('cd /d '+$q+$env:GYRE_RUNTIME+$q); $lines += ($q+$env:GYRE_PYTHON+$q+' '+$q+$env:UPDATER_SCRIPT+$q+' --runtime '+$q+$env:GYRE_RUNTIME+$q+' --host '+$q+$env:GYRE_UPDATE_HOST+$q+' --port '+$q+$env:GYRE_UPDATE_PORT+$q+' >> '+$q+$env:UPDATER_LOG_FILE+$q+' 2>&1'); [System.IO.File]::WriteAllLines($env:UPDATER_RUNNER,[string[]]$lines,[System.Text.Encoding]::ASCII)" <nul >nul 2>nul
+call :rotate_log "!UPDATER_LOG_FILE!"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$q=[char]34; $lines=@(); $lines += '@echo off'; $lines += ('set '+$q+'ALAS_GYRE_API_TOKEN='+$env:ALAS_GYRE_API_TOKEN+$q); $lines += ('set '+$q+'GYRE_UPDATE_HOST='+$env:GYRE_UPDATE_HOST+$q); $lines += ('set '+$q+'GYRE_UPDATE_PORT='+$env:GYRE_UPDATE_PORT+$q); $lines += ('set '+$q+'GYRE_LOG_MAX_BYTES='+$env:GYRE_LOG_MAX_BYTES+$q); $lines += ('set '+$q+'GYRE_LOG_BACKUP_COUNT='+$env:GYRE_LOG_BACKUP_COUNT+$q); $lines += ('cd /d '+$q+$env:GYRE_RUNTIME+$q); $lines += ($q+$env:GYRE_PYTHON+$q+' '+$q+$env:UPDATER_SCRIPT+$q+' --runtime '+$q+$env:GYRE_RUNTIME+$q+' --host '+$q+$env:GYRE_UPDATE_HOST+$q+' --port '+$q+$env:GYRE_UPDATE_PORT+$q+' >> '+$q+$env:UPDATER_LOG_FILE+$q+' 2>&1'); [System.IO.File]::WriteAllLines($env:UPDATER_RUNNER,[string[]]$lines,[System.Text.Encoding]::ASCII)" <nul >nul 2>nul
 if errorlevel 1 (
     echo([WARN] Failed to write updater runner: !UPDATER_RUNNER!
     exit /b 1
@@ -791,6 +807,7 @@ call :resolve_alas_root
 if errorlevel 1 exit /b 1
 call :ensure_alas_port_free
 if errorlevel 1 exit /b 1
+call :rotate_log "!LOG_FILE!"
 powershell -NoProfile -ExecutionPolicy Bypass -Command "$q=[char]34; $cmd='call '+$q+$env:SCRIPT_PATH+$q+' __gyre_service_run >> '+$q+$env:LOG_FILE+$q+' 2>&1'; $lines=@('@echo off',$cmd); Set-Content -LiteralPath $env:ALAS_RUNNER -Value $lines -Encoding ASCII" <nul >nul 2>nul
 if errorlevel 1 (
     echo(Failed to write ALAS runner: !ALAS_RUNNER!

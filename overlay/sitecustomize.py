@@ -40,6 +40,6 @@ def _install_uvicorn_hook():
     print("[Alas-Gyre Overlay] Hooked uvicorn.Config.load().")
 
 
-if "_alas_gyre_overlay_hooked" not in sys.modules:
-    sys.modules["_alas_gyre_overlay_hooked"] = True
+if not getattr(sys, "_alas_gyre_overlay_hooked", False):
+    sys._alas_gyre_overlay_hooked = True
     _install_uvicorn_hook()

@@ -2,9 +2,12 @@
 
 from collections import deque
 from datetime import datetime
+import gc
 import json
 import mimetypes
 import os
+import threading
+import time
 from urllib.parse import parse_qs
 import secrets
 
@@ -21,11 +24,16 @@ CONFIG_DIR = "config"
 LOG_DIR = "log"
 ERROR_LOG_DIR = "error"
 LOG_TAIL_CHUNK_SIZE = 64 * 1024
+FILE_RESPONSE_CHUNK_SIZE = 64 * 1024
 DEFAULT_LOG_LINES = 200
 MAX_LOG_LINES = 2000
+MAX_LIVE_RENDERABLES = MAX_LOG_LINES * 2
 DEFAULT_ERROR_SCREENSHOT_LIMIT = 20
 MAX_ERROR_SCREENSHOT_LIMIT = 100
 OVERLAY_VERSION = 1
+DEFAULT_MEMORY_WATCHDOG_INTERVAL = 60
+DEFAULT_MEMORY_LOW_MB = 256
+DEFAULT_MEMORY_LOW_PERCENT = 5.0
 
 STATE_MAP = {
     1: "running",
@@ -37,12 +45,32 @@ VALID_STATUSES = {"idle", "running", "error", "update", "disconnected"}
 INVALID_CONFIG_NAME_CHARS = set('/\\:*?"<>|')
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
 
+_RICH_CONSOLE = None
+_TOKEN_CACHE = {
+    "path": "",
+    "mtime_ns": None,
+    "size": None,
+    "value": "",
+}
+_I18N_CACHE = {}
+_MEMORY_WATCHDOG_STARTED = False
+_MEMORY_WATCHDOG_LOCK = threading.Lock()
+_MEMORY_CLEANUP_STATS = {
+    "count": 0,
+    "last_at": "",
+    "last_reason": "",
+    "last_collected": 0,
+    "last_malloc_trim": False,
+}
+
 
 def log_internal_error(context, exc):
     print("[Alas-Gyre Overlay] %s: %r" % (context, exc), flush=True)
 
 
 def create_overlay_app(original_app):
+    ensure_memory_watchdog()
+
     async def overlay_app(scope, receive, send):
         scope_type = scope.get("type")
         if scope_type != "http":
@@ -57,6 +85,267 @@ def create_overlay_app(original_app):
         await original_app(scope, receive, send)
 
     return overlay_app
+
+
+def env_bool(name, default=True):
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return str(value).strip().lower() not in {"0", "false", "no", "off", "disable", "disabled"}
+
+
+def env_int(name, default, minimum=None, maximum=None):
+    try:
+        value = int(os.environ.get(name, ""))
+    except (TypeError, ValueError):
+        value = default
+    if minimum is not None:
+        value = max(minimum, value)
+    if maximum is not None:
+        value = min(maximum, value)
+    return value
+
+
+def env_float(name, default, minimum=None, maximum=None):
+    try:
+        value = float(os.environ.get(name, ""))
+    except (TypeError, ValueError):
+        value = default
+    if minimum is not None:
+        value = max(minimum, value)
+    if maximum is not None:
+        value = min(maximum, value)
+    return value
+
+
+def get_system_memory():
+    cgroup_memory = get_cgroup_memory()
+    if cgroup_memory:
+        return cgroup_memory
+    if os.name == "nt":
+        return get_windows_memory()
+    if os.path.exists("/proc/meminfo"):
+        return get_linux_memory()
+    return None
+
+
+def read_text_file(path):
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return f.read().strip()
+    except Exception:
+        return ""
+
+
+def parse_memory_limit(value):
+    value = str(value or "").strip()
+    if not value or value == "max":
+        return None
+    try:
+        limit = int(value)
+    except ValueError:
+        return None
+    if limit <= 0 or limit >= (1 << 60):
+        return None
+    return limit
+
+
+def get_cgroup_memory():
+    if os.name != "posix" or not os.path.exists("/proc/self/cgroup"):
+        return None
+    return get_cgroup_v2_memory() or get_cgroup_v1_memory()
+
+
+def get_cgroup_v2_memory():
+    cgroup_path = ""
+    try:
+        with open("/proc/self/cgroup", "r", encoding="utf-8") as f:
+            for line in f:
+                parts = line.strip().split(":", 2)
+                if len(parts) == 3 and parts[0] == "0":
+                    cgroup_path = parts[2].lstrip("/")
+                    break
+    except Exception:
+        return None
+
+    if cgroup_path == "":
+        base = "/sys/fs/cgroup"
+    else:
+        base = os.path.join("/sys/fs/cgroup", cgroup_path)
+    limit = parse_memory_limit(read_text_file(os.path.join(base, "memory.max")))
+    if limit is None:
+        return None
+    try:
+        current = int(read_text_file(os.path.join(base, "memory.current")) or "0")
+    except ValueError:
+        return None
+    available = max(0, limit - current)
+    return limit, available
+
+
+def get_cgroup_v1_memory():
+    cgroup_path = ""
+    try:
+        with open("/proc/self/cgroup", "r", encoding="utf-8") as f:
+            for line in f:
+                parts = line.strip().split(":", 2)
+                if len(parts) != 3:
+                    continue
+                controllers = set(parts[1].split(","))
+                if "memory" in controllers:
+                    cgroup_path = parts[2].lstrip("/")
+                    break
+    except Exception:
+        return None
+
+    candidates = [
+        os.path.join("/sys/fs/cgroup/memory", cgroup_path),
+        os.path.join("/sys/fs/cgroup", cgroup_path),
+    ]
+    for base in candidates:
+        limit = parse_memory_limit(read_text_file(os.path.join(base, "memory.limit_in_bytes")))
+        if limit is None:
+            continue
+        try:
+            current = int(read_text_file(os.path.join(base, "memory.usage_in_bytes")) or "0")
+        except ValueError:
+            continue
+        available = max(0, limit - current)
+        return limit, available
+    return None
+
+
+def get_windows_memory():
+    try:
+        import ctypes
+
+        class MemoryStatusEx(ctypes.Structure):
+            _fields_ = [
+                ("dwLength", ctypes.c_ulong),
+                ("dwMemoryLoad", ctypes.c_ulong),
+                ("ullTotalPhys", ctypes.c_ulonglong),
+                ("ullAvailPhys", ctypes.c_ulonglong),
+                ("ullTotalPageFile", ctypes.c_ulonglong),
+                ("ullAvailPageFile", ctypes.c_ulonglong),
+                ("ullTotalVirtual", ctypes.c_ulonglong),
+                ("ullAvailVirtual", ctypes.c_ulonglong),
+                ("ullAvailExtendedVirtual", ctypes.c_ulonglong),
+            ]
+
+        status = MemoryStatusEx()
+        status.dwLength = ctypes.sizeof(status)
+        if not ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status)):
+            return None
+        return int(status.ullTotalPhys), int(status.ullAvailPhys)
+    except Exception:
+        return None
+
+
+def get_linux_memory():
+    values = {}
+    try:
+        with open("/proc/meminfo", "r", encoding="utf-8") as f:
+            for line in f:
+                key, _, rest = line.partition(":")
+                if not key:
+                    continue
+                parts = rest.strip().split()
+                if not parts:
+                    continue
+                try:
+                    values[key] = int(parts[0]) * 1024
+                except ValueError:
+                    continue
+    except Exception:
+        return None
+
+    total = values.get("MemTotal")
+    available = values.get("MemAvailable")
+    if available is None:
+        available = values.get("MemFree", 0) + values.get("Buffers", 0) + values.get("Cached", 0)
+    if not total or available is None:
+        return None
+    return int(total), int(available)
+
+
+def try_malloc_trim():
+    if os.name != "posix":
+        return False
+    try:
+        import ctypes
+
+        libc = None
+        for name in ("libc.so.6", None):
+            try:
+                libc = ctypes.CDLL(name) if name else ctypes.CDLL(None)
+                break
+            except Exception:
+                continue
+        if libc is None or not hasattr(libc, "malloc_trim"):
+            return False
+        libc.malloc_trim(0)
+        return True
+    except Exception:
+        return False
+
+
+def perform_memory_cleanup(reason):
+    global _RICH_CONSOLE
+
+    _I18N_CACHE.clear()
+    _RICH_CONSOLE = None
+    collected = gc.collect()
+    malloc_trimmed = try_malloc_trim()
+
+    _MEMORY_CLEANUP_STATS.update(
+        {
+            "count": int(_MEMORY_CLEANUP_STATS.get("count", 0)) + 1,
+            "last_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "last_reason": reason,
+            "last_collected": int(collected),
+            "last_malloc_trim": bool(malloc_trimmed),
+        }
+    )
+    print(
+        "[Alas-Gyre Overlay] memory cleanup: reason=%s collected=%s malloc_trim=%s"
+        % (reason, collected, malloc_trimmed),
+        flush=True,
+    )
+
+
+def memory_watchdog_loop():
+    interval = env_int("ALAS_GYRE_MEMORY_CHECK_INTERVAL", DEFAULT_MEMORY_WATCHDOG_INTERVAL, minimum=30)
+    low_mb = env_int("ALAS_GYRE_MEMORY_LOW_MB", DEFAULT_MEMORY_LOW_MB, minimum=32)
+    low_percent = env_float("ALAS_GYRE_MEMORY_LOW_PERCENT", DEFAULT_MEMORY_LOW_PERCENT, minimum=1.0, maximum=50.0)
+    low_bytes = low_mb * 1024 * 1024
+
+    while True:
+        time.sleep(interval)
+        memory = get_system_memory()
+        if not memory:
+            continue
+        total, available = memory
+        if total <= 0:
+            continue
+        available_percent = (available / float(total)) * 100.0
+        if available <= low_bytes or available_percent <= low_percent:
+            perform_memory_cleanup(
+                "available=%dMB %.1f%% threshold=%dMB %.1f%%"
+                % (available // (1024 * 1024), available_percent, low_mb, low_percent)
+            )
+
+
+def ensure_memory_watchdog():
+    global _MEMORY_WATCHDOG_STARTED
+    if not env_bool("ALAS_GYRE_MEMORY_WATCHDOG", True):
+        return
+    with _MEMORY_WATCHDOG_LOCK:
+        if _MEMORY_WATCHDOG_STARTED:
+            return
+        _MEMORY_WATCHDOG_STARTED = True
+        thread = threading.Thread(target=memory_watchdog_loop, name="gyre-memory-watchdog", daemon=True)
+        thread.start()
+        print("[Alas-Gyre Overlay] Memory watchdog enabled.", flush=True)
 
 
 async def handle_api(scope, receive, send):
@@ -130,11 +419,33 @@ def read_expected_token():
     if not config_path:
         overlay_dir = os.path.dirname(os.path.abspath(__file__))
         config_path = os.path.join(os.path.dirname(overlay_dir), "config.json")
+
     try:
+        real_path = os.path.realpath(os.path.abspath(config_path))
+        stat_result = os.stat(real_path)
+        mtime_ns = getattr(stat_result, "st_mtime_ns", int(stat_result.st_mtime * 1000000000))
+        size = stat_result.st_size
+        if (
+            _TOKEN_CACHE.get("path") == real_path
+            and _TOKEN_CACHE.get("mtime_ns") == mtime_ns
+            and _TOKEN_CACHE.get("size") == size
+        ):
+            return _TOKEN_CACHE.get("value", "")
+
         with open(config_path, "r", encoding="utf-8") as f:
             data = json.load(f)
-        return str(data.get("api_token", "")).strip()
+        token = str(data.get("api_token", "")).strip()
+        _TOKEN_CACHE.update(
+            {
+                "path": real_path,
+                "mtime_ns": mtime_ns,
+                "size": size,
+                "value": token,
+            }
+        )
+        return token
     except Exception:
+        _TOKEN_CACHE.update({"path": "", "mtime_ns": None, "size": None, "value": ""})
         return ""
 
 
@@ -171,17 +482,22 @@ async def send_json(send, payload, status=200):
 
 async def send_file(send, path):
     media_type = mimetypes.guess_type(path)[0] or "application/octet-stream"
-    with open(path, "rb") as f:
-        body = f.read()
+    file_size = os.path.getsize(path)
     headers = response_headers(
         media_type,
         [
-            (b"content-length", str(len(body)).encode("ascii")),
+            (b"content-length", str(file_size).encode("ascii")),
             (b"content-disposition", f'inline; filename="{os.path.basename(path)}"'.encode("utf-8")),
         ],
     )
     await send({"type": "http.response.start", "status": 200, "headers": headers})
-    await send({"type": "http.response.body", "body": body})
+    with open(path, "rb") as f:
+        while True:
+            chunk = f.read(FILE_RESPONSE_CHUNK_SIZE)
+            if not chunk:
+                break
+            await send({"type": "http.response.body", "body": chunk, "more_body": True})
+    await send({"type": "http.response.body", "body": b"", "more_body": False})
 
 
 def get_alas_root():
@@ -304,15 +620,19 @@ def get_latest_log_file(config_name):
         return None
 
     suffix = f"_{config_name}.txt"
-    candidates = []
+    best_path = None
+    best_key = None
     for entry in os.scandir(log_dir):
         if entry.is_file() and entry.name.endswith(suffix):
-            candidates.append(entry.path)
-
-    if not candidates:
-        return None
-    candidates.sort(key=lambda path: (os.path.getmtime(path), os.path.basename(path)), reverse=True)
-    return candidates[0]
+            try:
+                stat_result = entry.stat()
+            except OSError:
+                continue
+            key = (stat_result.st_mtime, entry.name)
+            if best_key is None or key > best_key:
+                best_key = key
+                best_path = entry.path
+    return best_path
 
 
 def get_error_dir():
@@ -474,14 +794,16 @@ def tail_log_file(log_file, line_limit):
 
 
 def render_log_item(renderable):
+    global _RICH_CONSOLE
     if isinstance(renderable, str):
         return renderable if renderable.endswith("\n") else renderable + "\n"
     if Console is None:
         return str(renderable) + "\n"
 
-    console = Console(no_color=True, highlight=False, width=119)
-    with console.capture() as capture:
-        console.print(renderable)
+    if _RICH_CONSOLE is None:
+        _RICH_CONSOLE = Console(no_color=True, highlight=False, width=119)
+    with _RICH_CONSOLE.capture() as capture:
+        _RICH_CONSOLE.print(renderable)
     return capture.get()
 
 
@@ -492,12 +814,46 @@ def get_live_log(config_name, line_limit):
         return ""
 
     lines = deque(maxlen=line_limit)
+    recent_renderables = deque(maxlen=min(MAX_LIVE_RENDERABLES, max(line_limit * 2, line_limit)))
     for renderable in renderables:
+        recent_renderables.append(renderable)
+    for renderable in recent_renderables:
         lines.extend(render_log_item(renderable).splitlines(True))
     return "".join(lines)
 
 
 def extract_running_task(config_name):
+    def load_i18n_json(paths):
+        for path in paths:
+            if not os.path.exists(path):
+                continue
+            try:
+                real_path = os.path.realpath(os.path.abspath(path))
+                stat_result = os.stat(real_path)
+                mtime_ns = getattr(stat_result, "st_mtime_ns", int(stat_result.st_mtime * 1000000000))
+                size = stat_result.st_size
+                cached = _I18N_CACHE.get(real_path)
+                if (
+                    cached
+                    and cached.get("mtime_ns") == mtime_ns
+                    and cached.get("size") == size
+                ):
+                    return cached.get("data", {})
+
+                with open(real_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                if len(_I18N_CACHE) > 8:
+                    _I18N_CACHE.clear()
+                _I18N_CACHE[real_path] = {
+                    "mtime_ns": mtime_ns,
+                    "size": size,
+                    "data": data if isinstance(data, dict) else {},
+                }
+                return _I18N_CACHE[real_path]["data"]
+            except Exception:
+                continue
+        return {}
+
     def extract_translation_value(value):
         if isinstance(value, str):
             return value
@@ -552,15 +908,7 @@ def extract_running_task(config_name):
             "gui/i18n/zh-CN.json",
             "config/i18n/zh-CN.json",
         ]
-        i18n_dict = {}
-        for path in paths:
-            if os.path.exists(path):
-                try:
-                    with open(path, "r", encoding="utf-8") as f:
-                        i18n_dict = json.load(f)
-                        break
-                except Exception:
-                    pass
+        i18n_dict = load_i18n_json(paths)
         translated = find_translation(i18n_dict, clean_name)
         return translated if translated else clean_name
 
@@ -618,6 +966,7 @@ async def api_health(send):
             "overlay": True,
             "gyre_overlay_version": OVERLAY_VERSION,
             "api_prefix": API_PREFIX,
+            "memory_watchdog": dict(_MEMORY_CLEANUP_STATS),
             "configs": configs,
             "default": get_default_config(),
         },

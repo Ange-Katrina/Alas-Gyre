@@ -13,6 +13,7 @@ import os
 import secrets
 import shutil
 import stat
+import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 
@@ -23,6 +24,11 @@ DEFAULT_HOST = "0.0.0.0"
 DEFAULT_PORT = 22268
 MAX_FILE_BYTES = 1024 * 1024
 MAX_REQUEST_BYTES = 8 * 1024 * 1024
+DEFAULT_LOG_MAX_BYTES = 10 * 1024 * 1024
+DEFAULT_LOG_BACKUP_COUNT = 3
+DEFAULT_LOG_CHECK_INTERVAL = 60
+LOG_COPY_CHUNK_SIZE = 1024 * 1024
+ROTATED_LOG_FILES = (".gyre_alas.log", ".gyre_updater.log")
 
 ALLOWED_FILES = {
     "overlay/sitecustomize.py": {"restart_required": True, "executable": False},
@@ -43,6 +49,18 @@ def sha256_file(path):
         for chunk in iter(lambda: f.read(1024 * 256), b""):
             h.update(chunk)
     return h.hexdigest()
+
+
+def parse_int(value, default, minimum=None, maximum=None):
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        parsed = default
+    if minimum is not None:
+        parsed = max(minimum, parsed)
+    if maximum is not None:
+        parsed = min(maximum, parsed)
+    return parsed
 
 
 def read_token():
@@ -114,6 +132,75 @@ def write_allowed_file(runtime_dir, rel_path, content):
     if info.get("executable"):
         mode = os.stat(target).st_mode
         os.chmod(target, mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+
+
+def copy_file_stream(src_path, dst_path):
+    tmp_path = dst_path + ".tmp"
+    try:
+        with open(src_path, "rb") as src, open(tmp_path, "wb") as dst:
+            shutil.copyfileobj(src, dst, length=LOG_COPY_CHUNK_SIZE)
+        os.replace(tmp_path, dst_path)
+    finally:
+        try:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+        except OSError:
+            pass
+
+
+def rotate_log_file(log_path, max_bytes, backup_count):
+    if max_bytes <= 0:
+        return
+    if not os.path.isfile(log_path):
+        return
+    try:
+        if os.path.getsize(log_path) < max_bytes:
+            return
+    except OSError:
+        return
+
+    if backup_count <= 0:
+        try:
+            with open(log_path, "wb"):
+                pass
+        except OSError as exc:
+            print("[Alas-Gyre Updater] log_truncate_failed %s: %r" % (log_path, exc), flush=True)
+        return
+
+    for index in range(backup_count, 1, -1):
+        src = "%s.%s" % (log_path, index - 1)
+        dst = "%s.%s" % (log_path, index)
+        if os.path.exists(src):
+            try:
+                os.replace(src, dst)
+            except OSError:
+                pass
+
+    try:
+        copy_file_stream(log_path, "%s.1" % log_path)
+        with open(log_path, "wb"):
+            pass
+        print("[Alas-Gyre Updater] rotated log: %s" % log_path, flush=True)
+    except OSError as exc:
+        print("[Alas-Gyre Updater] log_rotate_failed %s: %r" % (log_path, exc), flush=True)
+
+
+def rotate_runtime_logs(runtime_dir, max_bytes, backup_count):
+    for file_name in ROTATED_LOG_FILES:
+        rotate_log_file(os.path.join(runtime_dir, file_name), max_bytes, backup_count)
+
+
+def start_log_maintenance(runtime_dir, max_bytes, backup_count, interval):
+    stop_event = threading.Event()
+
+    def loop():
+        rotate_runtime_logs(runtime_dir, max_bytes, backup_count)
+        while not stop_event.wait(interval):
+            rotate_runtime_logs(runtime_dir, max_bytes, backup_count)
+
+    thread = threading.Thread(target=loop, name="gyre-log-maintenance", daemon=True)
+    thread.start()
+    return stop_event
 
 
 class RuntimeUpdaterHandler(BaseHTTPRequestHandler):
@@ -247,6 +334,21 @@ def parse_args():
     parser.add_argument("--runtime", default=os.path.dirname(os.path.abspath(__file__)))
     parser.add_argument("--host", default=os.environ.get("GYRE_UPDATE_HOST", DEFAULT_HOST))
     parser.add_argument("--port", type=int, default=int(os.environ.get("GYRE_UPDATE_PORT", DEFAULT_PORT)))
+    parser.add_argument(
+        "--log-max-bytes",
+        type=int,
+        default=parse_int(os.environ.get("GYRE_LOG_MAX_BYTES"), DEFAULT_LOG_MAX_BYTES, minimum=0),
+    )
+    parser.add_argument(
+        "--log-backup-count",
+        type=int,
+        default=parse_int(os.environ.get("GYRE_LOG_BACKUP_COUNT"), DEFAULT_LOG_BACKUP_COUNT, minimum=0, maximum=20),
+    )
+    parser.add_argument(
+        "--log-check-interval",
+        type=int,
+        default=parse_int(os.environ.get("GYRE_LOG_CHECK_INTERVAL"), DEFAULT_LOG_CHECK_INTERVAL, minimum=10),
+    )
     return parser.parse_args()
 
 
@@ -268,8 +370,20 @@ def main():
     httpd.runtime_dir = runtime_dir
     httpd.update_host = args.host
     httpd.update_port = args.port
+    log_stop_event = start_log_maintenance(
+        runtime_dir,
+        args.log_max_bytes,
+        args.log_backup_count,
+        args.log_check_interval,
+    )
     print("[Alas-Gyre Updater] listening on %s:%s runtime=%s" % (args.host, args.port, runtime_dir), flush=True)
-    httpd.serve_forever()
+    try:
+        httpd.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        log_stop_event.set()
+        httpd.server_close()
 
 
 if __name__ == "__main__":

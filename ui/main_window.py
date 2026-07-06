@@ -55,6 +55,25 @@ except Exception:
     def isValid(widget):
         return widget is not None
 
+
+MAIN_CARD_WIDTH = 294
+MAIN_TITLE_HEIGHT = 30
+MAIN_BOTTOM_HEIGHT = 40
+MAIN_ROW_HEIGHT = 46
+MAIN_ROW_SPACING = 2
+MAIN_LIST_TOP_MARGIN = 8
+MAIN_LIST_BOTTOM_MARGIN = 6
+MAIN_VISIBLE_ROWS = 3
+MAIN_LIST_HEIGHT = (
+    MAIN_LIST_TOP_MARGIN
+    + MAIN_LIST_BOTTOM_MARGIN
+    + MAIN_VISIBLE_ROWS * MAIN_ROW_HEIGHT
+    + max(MAIN_VISIBLE_ROWS - 1, 0) * MAIN_ROW_SPACING
+    + 8
+)
+MAIN_CARD_HEIGHT = MAIN_TITLE_HEIGHT + MAIN_LIST_HEIGHT + MAIN_BOTTOM_HEIGHT
+
+
 def get_status_text(status):
     return tr(normalize_status(status))
 
@@ -232,7 +251,7 @@ class CardWidget(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("card")
-        self.setFixedSize(294, 166)
+        self.setFixedSize(MAIN_CARD_WIDTH, MAIN_CARD_HEIGHT)
 
         self.config = {
             "ip": "127.0.0.1",
@@ -333,9 +352,8 @@ class CardWidget(QFrame):
         list_layout.setSpacing(2)
         self.rows_layout = list_layout
         self.configScroll.setWidget(self.configListBg)
-        main_layout.addWidget(self.configScroll, stretch=1)
-
-        self._rebuild_rows()
+        self.configScroll.setFixedHeight(MAIN_LIST_HEIGHT)
+        main_layout.addWidget(self.configScroll)
 
         self.bottomBg = QWidget(self)
         self.bottomBg.setObjectName("mainBottomBg")
@@ -369,6 +387,7 @@ class CardWidget(QFrame):
         self.logIcon.mousePressEvent = lambda e: self._on_icon_click("log", self.logIcon)
 
         main_layout.addWidget(self.bottomBg)
+        self._rebuild_rows()
 
     def retranslate_ui(self):
         self.setIcon.setToolTip(tr("settings_btn_tip"))
@@ -390,13 +409,29 @@ class CardWidget(QFrame):
         for row in self.rows.values():
             row.apply_task_display_setting()
 
-    def _sync_window_size(self):
-        row_count = min(max(len(self._configs), 2), 5)
-        list_height = 8 + 6 + row_count * 46 + max(row_count - 1, 0) * 2 + 8
-        card_height = 30 + list_height + 40
-        self.setFixedSize(294, card_height)
-        if self.window() and self.window() is not self:
-            self.window().setFixedSize(294, card_height)
+    def _sync_window_size(self, visible_count=None):
+        _ = visible_count
+        # The main window is deliberately not resized by the number of configs.
+        # Config changes now only affect the scroll area's content. This keeps
+        # the bottom menu visible after add/delete/status refresh operations.
+        self.configScroll.setFixedHeight(MAIN_LIST_HEIGHT)
+        self.setFixedSize(MAIN_CARD_WIDTH, MAIN_CARD_HEIGHT)
+        self.updateGeometry()
+
+        top_window = self.window()
+        if top_window and top_window is not self:
+            top_window.setMinimumSize(MAIN_CARD_WIDTH, MAIN_CARD_HEIGHT)
+            top_window.setMaximumSize(MAIN_CARD_WIDTH, MAIN_CARD_HEIGHT)
+            top_window.resize(MAIN_CARD_WIDTH, MAIN_CARD_HEIGHT)
+            top_window.updateGeometry()
+
+            # Re-apply after the current event pass. This protects the compact
+            # frameless window from stale fixed-size state on Windows.
+            QTimer.singleShot(
+                0,
+                lambda: isValid(top_window)
+                and top_window.setFixedSize(MAIN_CARD_WIDTH, MAIN_CARD_HEIGHT),
+            )
 
     def _rebuild_rows(self):
         while self.rows_layout.count():
@@ -419,7 +454,7 @@ class CardWidget(QFrame):
             if config_name in self._statuses:
                 row.update_status(self._statuses[config_name], self._tasks.get(config_name, ""))
         self.rows_layout.addStretch()
-        self._sync_window_size()
+        self._sync_window_size(len(visible_configs))
 
     def set_current_config(self, config_name):
         if not config_name or self.current_config == config_name:
@@ -739,15 +774,20 @@ class CardWidget(QFrame):
                     self.retranslate_ui()
 
                     app = QApplication.instance()
-                    if hasattr(app, "_alas_tray"):
-                        tray = app._alas_tray
-                        actions = tray.contextMenu().actions()
-                        if len(actions) >= 6:
-                            actions[0].setText(tr("show_main"))
-                            actions[1].setText(tr("show_float"))
-                            actions[2].setText(tr("open_webui"))
-                            actions[4].setText(tr("wizard"))
-                            actions[5].setText(tr("quit"))
+                    tray_actions = getattr(app, "_alas_tray_actions", {})
+                    if tray_actions:
+                        action_texts = {
+                            "show_main": tr("show_main"),
+                            "show_float": tr("show_float"),
+                            "open_webui": tr("open_webui"),
+                            "settings": tr("settings_title"),
+                            "wizard": tr("wizard"),
+                            "quit": tr("quit"),
+                        }
+                        for action_name, action_text in action_texts.items():
+                            action = tray_actions.get(action_name)
+                            if action is not None:
+                                action.setText(action_text)
 
                     from .theme import apply_theme
                     apply_theme(app, self.config.get("theme", "dark"))
@@ -790,7 +830,7 @@ class AlasConsole(QWidget):
         super().__init__()
         self.setObjectName("mainWindow")
         self.setWindowTitle("Alas-Gyre")
-        self.setFixedSize(294, 186)
+        self.setFixedSize(MAIN_CARD_WIDTH, MAIN_CARD_HEIGHT)
         self.setWindowFlags(Qt.FramelessWindowHint)
         self.setAttribute(Qt.WA_StyledBackground, True)
 
@@ -800,6 +840,7 @@ class AlasConsole(QWidget):
         self.card = CardWidget(self)
         self.apply_always_on_top(self.card.config.get("always_on_top", False), show_after=False)
         main_layout.addWidget(self.card, alignment=Qt.AlignTop)
+        self.card._sync_window_size()
 
         self._auto_update_check_id = 0
         self._update_prompt_shown = False

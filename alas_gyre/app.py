@@ -52,28 +52,39 @@ def create_tray(app, app_icon, window):
     tray = QSystemTrayIcon(app_icon, app)
     tray.setToolTip("Alas-Gyre")
     menu = QMenu()
+    tray_actions = {}
 
     show_action = QAction(tr("show_main"), menu)
     show_action.triggered.connect(window.card.restore_main_window)
     menu.addAction(show_action)
+    tray_actions["show_main"] = show_action
 
     mini_action = QAction(tr("show_float"), menu)
     mini_action.triggered.connect(window.card.show_mini_window)
     menu.addAction(mini_action)
+    tray_actions["show_float"] = mini_action
 
     home_action = QAction(tr("open_webui"), menu)
     home_action.triggered.connect(lambda: window.card._on_icon_click("home", window.card.homeIcon))
     menu.addAction(home_action)
+    tray_actions["open_webui"] = home_action
 
     menu.addSeparator()
+
+    settings_action = QAction(tr("settings_title"), menu)
+    settings_action.triggered.connect(lambda: window.card._on_icon_click("settings", window.card.setIcon))
+    menu.addAction(settings_action)
+    tray_actions["settings"] = settings_action
 
     setup_action = QAction(tr("wizard"), menu)
     setup_action.triggered.connect(lambda: open_init_setup(window, app_icon))
     menu.addAction(setup_action)
+    tray_actions["wizard"] = setup_action
 
     quit_action = QAction(tr("quit"), menu)
     quit_action.triggered.connect(app.quit)
     menu.addAction(quit_action)
+    tray_actions["quit"] = quit_action
 
     tray.setContextMenu(menu)
     tray.activated.connect(
@@ -82,6 +93,7 @@ def create_tray(app, app_icon, window):
         else None
     )
     app._alas_tray = tray
+    app._alas_tray_actions = tray_actions
     return tray
 
 

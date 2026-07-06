@@ -17,8 +17,12 @@ ALAS_GYRE_OVERLAY="$GYRE_RUNTIME/overlay"
 ALAS_GYRE_API_TOKEN=__API_TOKEN__
 DEFAULT_GYRE_UPDATE_HOST="0.0.0.0"
 DEFAULT_GYRE_UPDATE_PORT="22268"
+DEFAULT_GYRE_LOG_MAX_BYTES="10485760"
+DEFAULT_GYRE_LOG_BACKUP_COUNT="3"
 GYRE_UPDATE_HOST="${GYRE_UPDATE_HOST:-$DEFAULT_GYRE_UPDATE_HOST}"
 GYRE_UPDATE_PORT="${GYRE_UPDATE_PORT:-$DEFAULT_GYRE_UPDATE_PORT}"
+GYRE_LOG_MAX_BYTES="${GYRE_LOG_MAX_BYTES:-$DEFAULT_GYRE_LOG_MAX_BYTES}"
+GYRE_LOG_BACKUP_COUNT="${GYRE_LOG_BACKUP_COUNT:-$DEFAULT_GYRE_LOG_BACKUP_COUNT}"
 ALAS_WEBUI_PORT="${ALAS_WEBUI_PORT:-}"
 GYRE_LANG="${GYRE_LANG:-}"
 MENU_DISCOVERY_DONE=0
@@ -145,10 +149,14 @@ load_config() {
     env_update_host="${GYRE_UPDATE_HOST:-}"
     env_update_port="${GYRE_UPDATE_PORT:-}"
     env_alas_webui_port="${ALAS_WEBUI_PORT:-}"
+    env_log_max_bytes="${GYRE_LOG_MAX_BYTES:-}"
+    env_log_backup_count="${GYRE_LOG_BACKUP_COUNT:-}"
     ALAS_ROOT=""
     GYRE_LANG=""
     GYRE_UPDATE_HOST="$DEFAULT_GYRE_UPDATE_HOST"
     GYRE_UPDATE_PORT="$DEFAULT_GYRE_UPDATE_PORT"
+    GYRE_LOG_MAX_BYTES="$DEFAULT_GYRE_LOG_MAX_BYTES"
+    GYRE_LOG_BACKUP_COUNT="$DEFAULT_GYRE_LOG_BACKUP_COUNT"
     ALAS_WEBUI_PORT=""
     if [ -f "$CONF_FILE" ]; then
         while IFS= read -r line || [ -n "$line" ]; do
@@ -157,6 +165,8 @@ load_config() {
                 GYRE_LANG=*) GYRE_LANG=${line#GYRE_LANG=} ;;
                 GYRE_UPDATE_HOST=*) GYRE_UPDATE_HOST=${line#GYRE_UPDATE_HOST=} ;;
                 GYRE_UPDATE_PORT=*) GYRE_UPDATE_PORT=${line#GYRE_UPDATE_PORT=} ;;
+                GYRE_LOG_MAX_BYTES=*) GYRE_LOG_MAX_BYTES=${line#GYRE_LOG_MAX_BYTES=} ;;
+                GYRE_LOG_BACKUP_COUNT=*) GYRE_LOG_BACKUP_COUNT=${line#GYRE_LOG_BACKUP_COUNT=} ;;
                 ALAS_WEBUI_PORT=*) ALAS_WEBUI_PORT=${line#ALAS_WEBUI_PORT=} ;;
             esac
         done < "$CONF_FILE"
@@ -170,12 +180,20 @@ load_config() {
     [ -n "$env_update_host" ] && GYRE_UPDATE_HOST="$env_update_host"
     [ -n "$env_update_port" ] && GYRE_UPDATE_PORT="$env_update_port"
     [ -n "$env_alas_webui_port" ] && ALAS_WEBUI_PORT="$env_alas_webui_port"
+    [ -n "$env_log_max_bytes" ] && GYRE_LOG_MAX_BYTES="$env_log_max_bytes"
+    [ -n "$env_log_backup_count" ] && GYRE_LOG_BACKUP_COUNT="$env_log_backup_count"
     case "$GYRE_LANG" in
         zh|en) ;;
         *) GYRE_LANG="$(default_lang)" ;;
     esac
     case "$GYRE_UPDATE_PORT" in
         ''|*[!0-9]*) GYRE_UPDATE_PORT="$DEFAULT_GYRE_UPDATE_PORT" ;;
+    esac
+    case "$GYRE_LOG_MAX_BYTES" in
+        ''|*[!0-9]*) GYRE_LOG_MAX_BYTES="$DEFAULT_GYRE_LOG_MAX_BYTES" ;;
+    esac
+    case "$GYRE_LOG_BACKUP_COUNT" in
+        ''|*[!0-9]*) GYRE_LOG_BACKUP_COUNT="$DEFAULT_GYRE_LOG_BACKUP_COUNT" ;;
     esac
     [ -n "$GYRE_UPDATE_HOST" ] || GYRE_UPDATE_HOST="$DEFAULT_GYRE_UPDATE_HOST"
 }
@@ -188,18 +206,68 @@ save_config() {
     case "$GYRE_UPDATE_PORT" in
         ''|*[!0-9]*) GYRE_UPDATE_PORT="$DEFAULT_GYRE_UPDATE_PORT" ;;
     esac
+    case "$GYRE_LOG_MAX_BYTES" in
+        ''|*[!0-9]*) GYRE_LOG_MAX_BYTES="$DEFAULT_GYRE_LOG_MAX_BYTES" ;;
+    esac
+    case "$GYRE_LOG_BACKUP_COUNT" in
+        ''|*[!0-9]*) GYRE_LOG_BACKUP_COUNT="$DEFAULT_GYRE_LOG_BACKUP_COUNT" ;;
+    esac
     [ -n "$GYRE_UPDATE_HOST" ] || GYRE_UPDATE_HOST="$DEFAULT_GYRE_UPDATE_HOST"
     printf 'ALAS_ROOT=%s
 GYRE_LANG=%s
 GYRE_UPDATE_HOST=%s
 GYRE_UPDATE_PORT=%s
 ALAS_WEBUI_PORT=%s
-' "${ALAS_ROOT:-}" "$GYRE_LANG" "$GYRE_UPDATE_HOST" "$GYRE_UPDATE_PORT" "${ALAS_WEBUI_PORT:-}" > "$CONF_FILE"
+GYRE_LOG_MAX_BYTES=%s
+GYRE_LOG_BACKUP_COUNT=%s
+' "${ALAS_ROOT:-}" "$GYRE_LANG" "$GYRE_UPDATE_HOST" "$GYRE_UPDATE_PORT" "${ALAS_WEBUI_PORT:-}" "$GYRE_LOG_MAX_BYTES" "$GYRE_LOG_BACKUP_COUNT" > "$CONF_FILE"
 }
 
 save_alas_root() {
     save_config
     printf '%s\n' "$ALAS_ROOT" > "$LEGACY_ROOT_CACHE" 2>/dev/null || true
+}
+
+rotate_log_file() {
+    log_path="$1"
+    max_bytes="${2:-$GYRE_LOG_MAX_BYTES}"
+    keep_count="${3:-$GYRE_LOG_BACKUP_COUNT}"
+
+    case "$max_bytes" in
+        ''|*[!0-9]*) max_bytes="$DEFAULT_GYRE_LOG_MAX_BYTES" ;;
+    esac
+    case "$keep_count" in
+        ''|*[!0-9]*) keep_count="$DEFAULT_GYRE_LOG_BACKUP_COUNT" ;;
+    esac
+    [ "$max_bytes" -gt 0 ] 2>/dev/null || return 0
+    [ -f "$log_path" ] || return 0
+
+    size="$(wc -c < "$log_path" 2>/dev/null | tr -d ' ')"
+    case "$size" in
+        ''|*[!0-9]*) return 0 ;;
+    esac
+    [ "$size" -ge "$max_bytes" ] 2>/dev/null || return 0
+
+    if [ "$keep_count" -le 0 ] 2>/dev/null; then
+        : > "$log_path" 2>/dev/null || true
+        return 0
+    fi
+
+    i="$keep_count"
+    while [ "$i" -gt 1 ]; do
+        prev=$((i - 1))
+        if [ -f "$log_path.$prev" ]; then
+            mv -f "$log_path.$prev" "$log_path.$i" 2>/dev/null || true
+        fi
+        i="$prev"
+    done
+    mv -f "$log_path" "$log_path.1" 2>/dev/null || : > "$log_path"
+    : > "$log_path" 2>/dev/null || true
+}
+
+rotate_runtime_logs() {
+    rotate_log_file "$LOG_FILE"
+    rotate_log_file "$UPDATER_LOG_FILE"
 }
 
 
@@ -648,8 +716,9 @@ start_updater() {
         return 1
     fi
     mkdir -p "$GYRE_RUNTIME" 2>/dev/null || true
+    rotate_log_file "$UPDATER_LOG_FILE"
     : >> "$UPDATER_LOG_FILE" 2>/dev/null || true
-    export ALAS_GYRE_API_TOKEN GYRE_UPDATE_HOST GYRE_UPDATE_PORT
+    export ALAS_GYRE_API_TOKEN GYRE_UPDATE_HOST GYRE_UPDATE_PORT GYRE_LOG_MAX_BYTES GYRE_LOG_BACKUP_COUNT
     nohup "$py" "$UPDATER_SCRIPT" --runtime "$GYRE_RUNTIME" --host "$GYRE_UPDATE_HOST" --port "$GYRE_UPDATE_PORT" >> "$UPDATER_LOG_FILE" 2>&1 &
     updater_pid=$!
     printf '%s
@@ -872,6 +941,7 @@ start_background() {
     cleanup_temp
     ensure_alas_port_free || return 1
     mkdir -p "$GYRE_RUNTIME" 2>/dev/null || true
+    rotate_log_file "$LOG_FILE"
     : >> "$LOG_FILE" 2>/dev/null || true
     echo "[Alas-Gyre] Starting ALAS in background..."
     nohup sh "$SCRIPT_PATH" __gyre_service_run >> "$LOG_FILE" 2>&1 &
@@ -983,11 +1053,15 @@ shell_quote() {
     printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\''/g")"
 }
 
+unit_quote() {
+    printf '"%s"' "$(printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g')"
+}
+
 write_systemd_service() {
     target="$1"
     mkdir -p "$(dirname -- "$target")"
-    script_q="$(shell_quote "$SCRIPT_PATH")"
-    runtime_q="$(shell_quote "$GYRE_RUNTIME")"
+    script_q="$(unit_quote "$SCRIPT_PATH")"
+    runtime_q="$(unit_quote "$GYRE_RUNTIME")"
     cat > "$target" <<EOF
 [Unit]
 Description=Alas-Gyre Overlay ALAS launcher
@@ -997,8 +1071,9 @@ Wants=network-online.target
 [Service]
 Type=simple
 Environment=PYTHONUNBUFFERED=1
-ExecStart=/bin/sh -c 'cd "\$1" && exec "\$2" __gyre_service_run' sh $runtime_q $script_q
-ExecStop=/bin/sh -c 'exec "\$1" __gyre_service_stop' sh $script_q
+WorkingDirectory=$runtime_q
+ExecStart=/bin/sh $script_q __gyre_service_run
+ExecStop=/bin/sh $script_q __gyre_service_stop
 Restart=on-failure
 RestartSec=5
 TimeoutStopSec=30
@@ -1015,10 +1090,17 @@ write_openrc_service() {
     cat > "$target" <<EOF
 #!/sbin/openrc-run
 description="Alas-Gyre Overlay ALAS launcher"
+supervisor=supervise-daemon
+command="/bin/sh"
+command_args="$SCRIPT_PATH __gyre_service_run"
 pidfile="$PID_FILE"
 runtime_dir="$GYRE_RUNTIME"
 script_path="$SCRIPT_PATH"
 log_file="$LOG_FILE"
+output_log="$LOG_FILE"
+error_log="$LOG_FILE"
+respawn_delay=5
+retry="TERM/30/KILL/5"
 
 depend() {
     need localmount
@@ -1026,18 +1108,13 @@ depend() {
     after firewall
 }
 
-start() {
-    ebegin "Starting Alas-Gyre Overlay ALAS"
+start_pre() {
     mkdir -p "\$runtime_dir" >/dev/null 2>&1 || true
     : >> "\$log_file" 2>/dev/null || true
-    /bin/sh "\$script_path" __gyre_service_start >> "\$log_file" 2>&1
-    eend \$?
 }
 
-stop() {
-    ebegin "Stopping Alas-Gyre Overlay ALAS"
-    /bin/sh "\$script_path" __gyre_service_stop >> "\$log_file" 2>&1
-    eend \$?
+stop_post() {
+    /bin/sh "\$script_path" __gyre_service_stop >> "\$log_file" 2>&1 || true
 }
 
 status() {
@@ -1120,7 +1197,44 @@ warn_if_no_runtime_init() {
     esac
 }
 
+install_linux_dependencies() {
+    if command -v apk >/dev/null 2>&1; then
+        manager="apk"
+        packages="python3 procps iproute2 coreutils grep sed gawk ca-certificates openrc"
+        install_cmd="apk add --no-cache $packages"
+    elif command -v apt-get >/dev/null 2>&1; then
+        manager="apt"
+        packages="python3 procps iproute2 coreutils grep sed gawk ca-certificates"
+        install_cmd="apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y $packages"
+    else
+        echo "[Alas-Gyre] Unsupported package manager. Please install manually:"
+        echo "  python3 procps iproute2 coreutils grep sed gawk ca-certificates"
+        return 0
+    fi
+
+    if ! is_root; then
+        echo "[Alas-Gyre] Root permission is required to install Linux dependencies."
+        echo "[Alas-Gyre] Detected package manager: $manager"
+        echo "  sudo sh -c '$install_cmd'"
+        return 0
+    fi
+
+    echo "[Alas-Gyre] Installing/checking Linux dependencies with $manager..."
+    case "$manager" in
+        apk)
+            # shellcheck disable=SC2086
+            apk add --no-cache $packages
+            ;;
+        apt)
+            apt-get update
+            # shellcheck disable=SC2086
+            DEBIAN_FRONTEND=noninteractive apt-get install -y $packages
+            ;;
+    esac
+}
+
 install_autostart() {
+    install_linux_dependencies || return 1
     resolve_alas_root yes || return 1
     cleanup_temp
     generate_service_files
