@@ -212,7 +212,26 @@ python main.py
 3. 保持 API Token 一致，或同步修改客户端设置中的 Token。
 4. 运行启动器并重启 ALAS。
 
-### 3. 启动器变更后重新安装 Linux 自启动
+### 3. Web-Scrcpy 网关接口升级
+
+本版本新增给 Web-Scrcpy 后端使用的网关接口：
+
+```text
+GET  /api/gyre/config?config=<name>
+PUT  /api/gyre/config?config=<source>&target=<target>
+POST /api/gyre/restart?config=<name>
+```
+
+升级 `gyre_runtime` 并重启 ALAS 后，Web-Scrcpy 后端可以携带 Gyre Token 调用这些接口。不要把 Gyre Token 暴露给浏览器，也不要让浏览器直接调用 Gyre Runtime。Web-Scrcpy 仍然需要自己维护用户与 ALAS 配置的绑定关系，并且只把用户绑定的配置名传给 Gyre Runtime。
+
+Web-Scrcpy 验证清单：
+
+- 普通用户不能调用 `/api/gyre/configs`；
+- 普通用户只能使用自己绑定的配置名；
+- 保存配置时请求体使用 `{"data": {...}}`；
+- 错误恢复优先调用 `/api/gyre/restart`，不要再依赖手动 stop/start 组合。
+
+### 4. 启动器变更后重新安装 Linux 自启动
 
 如果新版修改了 `start_gyre_alas.sh`，需要重新安装服务：
 
@@ -246,7 +265,7 @@ tail -n 100 /path/to/gyre_runtime/.gyre_alas.log
 
 如果 Alpine 运行在 Docker、WSL 或 chroot 中，且 OpenRC 不是 PID 1，`rc-update` 可能能安装服务，但容器启动时不会自动运行服务。此时需要由宿主机、面板或容器 supervisor 拉起脚本。
 
-### 4. 升级后验证
+### 5. 升级后验证
 
 - 桌面客户端可以连接 `/api/gyre/health`。
 - health 响应中包含 `memory_watchdog`。

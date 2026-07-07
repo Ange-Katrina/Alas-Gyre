@@ -6,6 +6,7 @@ import gc
 import json
 import mimetypes
 import os
+import shutil
 import threading
 import time
 from urllib.parse import parse_qs
@@ -25,6 +26,7 @@ LOG_DIR = "log"
 ERROR_LOG_DIR = "error"
 LOG_TAIL_CHUNK_SIZE = 64 * 1024
 FILE_RESPONSE_CHUNK_SIZE = 64 * 1024
+MAX_CONFIG_BODY_BYTES = 2 * 1024 * 1024
 DEFAULT_LOG_LINES = 200
 MAX_LOG_LINES = 2000
 MAX_LIVE_RENDERABLES = MAX_LOG_LINES * 2
@@ -62,6 +64,8 @@ _MEMORY_CLEANUP_STATS = {
     "last_collected": 0,
     "last_malloc_trim": False,
 }
+_CONFIG_OPERATION_LOCKS = {}
+_CONFIG_OPERATION_LOCKS_LOCK = threading.Lock()
 
 
 def log_internal_error(context, exc):
@@ -371,6 +375,10 @@ async def handle_api(scope, receive, send):
             await api_get_configs(send)
         elif route == "/configs" and method == "DELETE":
             await api_delete_config(send, query)
+        elif route == "/config" and method == "GET":
+            await api_get_config(send, query)
+        elif route == "/config" and method == "PUT":
+            await api_put_config(send, receive, query)
         elif route == "/status_all" and method == "GET":
             await api_get_status_all(send)
         elif route == "/status" and method == "GET":
@@ -379,6 +387,8 @@ async def handle_api(scope, receive, send):
             await api_post_start(send, query)
         elif route == "/stop" and method == "POST":
             await api_post_stop(send, query)
+        elif route == "/restart" and method == "POST":
+            await api_post_restart(send, query)
         elif route == "/log" and method == "GET":
             await api_get_log(send, query)
         elif route == "/error_screenshots" and method == "GET":
@@ -478,6 +488,34 @@ async def send_json(send, payload, status=200):
         }
     )
     await send({"type": "http.response.body", "body": body})
+
+
+async def read_json_body(receive, max_bytes=MAX_CONFIG_BODY_BYTES):
+    chunks = []
+    total_size = 0
+    while True:
+        message = await receive()
+        message_type = message.get("type")
+        if message_type == "http.disconnect":
+            raise ValueError("client_disconnected")
+        if message_type != "http.request":
+            continue
+
+        chunk = message.get("body", b"") or b""
+        total_size += len(chunk)
+        if total_size > max_bytes:
+            raise ValueError("request_too_large")
+        if chunk:
+            chunks.append(chunk)
+        if not message.get("more_body", False):
+            break
+
+    if total_size <= 0:
+        raise ValueError("empty_body")
+    try:
+        return json.loads(b"".join(chunks).decode("utf-8"))
+    except Exception:
+        raise ValueError("invalid_json")
 
 
 async def send_file(send, path):
@@ -585,6 +623,66 @@ def get_config_path(config_name):
     if os.path.commonpath([config_dir, config_path]) != config_dir:
         raise ValueError("invalid config path")
     return config_path
+
+
+def get_config_operation_lock(config_name):
+    config_name = normalize_config_name(config_name)
+    with _CONFIG_OPERATION_LOCKS_LOCK:
+        lock = _CONFIG_OPERATION_LOCKS.get(config_name)
+        if lock is None:
+            lock = threading.Lock()
+            _CONFIG_OPERATION_LOCKS[config_name] = lock
+        return lock
+
+
+def validate_single_config(config_name):
+    try:
+        config_name = normalize_config_name(config_name)
+    except Exception:
+        return None, "invalid_config_name", 400
+    config_path = get_config_path(config_name)
+    if not os.path.isfile(config_path):
+        return config_name, "unknown_config", 404
+    return config_name, "", 200
+
+
+def validate_query_config(query, key="config"):
+    raw = query.get(key)
+    if raw is None or not str(raw).strip():
+        return None, "invalid_config_name", 400
+    return validate_single_config(raw)
+
+
+def load_config_json(config_name):
+    config_path = get_config_path(config_name)
+    with open(config_path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def write_config_json_atomic(config_name, data):
+    config_path = get_config_path(config_name)
+    config_dir = os.path.dirname(config_path)
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    backup_path = "%s.bak-%s" % (config_path, timestamp)
+    tmp_path = os.path.join(
+        config_dir,
+        ".%s.tmp-%s-%s" % (os.path.basename(config_path), os.getpid(), int(time.time() * 1000)),
+    )
+    try:
+        shutil.copy2(config_path, backup_path)
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=4)
+            f.write("\n")
+        with open(tmp_path, "r", encoding="utf-8") as f:
+            json.load(f)
+        os.replace(tmp_path, config_path)
+        return os.path.basename(backup_path)
+    finally:
+        try:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+        except OSError:
+            pass
 
 
 def get_manager(config_name):
@@ -977,6 +1075,78 @@ async def api_get_configs(send):
     await send_json(send, {"configs": get_config_names(), "default": get_default_config()})
 
 
+async def api_get_config(send, query):
+    config_name, error, status = validate_query_config(query)
+    if error:
+        await send_json(send, {"ok": False, "error": error}, status=status)
+        return
+
+    try:
+        data = load_config_json(config_name)
+        await send_json(send, {"ok": True, "config": config_name, "data": data})
+    except Exception as exc:
+        log_internal_error("config_read_failed:%s" % config_name, exc)
+        await send_json(send, {"ok": False, "error": "config_read_failed"}, status=500)
+
+
+async def api_put_config(send, receive, query):
+    source, error, status = validate_query_config(query, "config")
+    if error:
+        await send_json(send, {"ok": False, "error": error}, status=status)
+        return
+
+    target_raw = query.get("target") or source
+    target, error, status = validate_single_config(target_raw)
+    if error:
+        await send_json(send, {"ok": False, "error": error}, status=status)
+        return
+
+    try:
+        body = await read_json_body(receive)
+    except ValueError as exc:
+        await send_json(send, {"ok": False, "error": str(exc)}, status=400)
+        return
+
+    if not isinstance(body, dict) or "data" not in body or not isinstance(body.get("data"), dict):
+        await send_json(send, {"ok": False, "error": "invalid_body"}, status=400)
+        return
+
+    lock = get_config_operation_lock(target)
+    with lock:
+        try:
+            if get_status(target) == "running":
+                await send_json(
+                    send,
+                    {"ok": False, "error": "cannot_save_running_config", "target": target},
+                    status=409,
+                )
+                return
+        except Exception as exc:
+            log_internal_error("config_status_failed:%s" % target, exc)
+            await send_json(send, {"ok": False, "error": "status_failed", "target": target}, status=500)
+            return
+
+        try:
+            load_config_json(source)
+            backup = write_config_json_atomic(target, body["data"])
+            await send_json(
+                send,
+                {
+                    "ok": True,
+                    "source": source,
+                    "target": target,
+                    "backup": backup,
+                },
+            )
+        except Exception as exc:
+            log_internal_error("config_save_failed:%s->%s" % (source, target), exc)
+            await send_json(
+                send,
+                {"ok": False, "error": "config_save_failed", "source": source, "target": target},
+                status=500,
+            )
+
+
 async def api_delete_config(send, query):
     config_name = get_requested_config(query)
     configs = get_config_names()
@@ -1121,6 +1291,87 @@ async def api_post_stop(send, query):
             {"config": config_name, "message": "stop_failed", "status": "error", "error": "stop_failed"},
             status=500,
         )
+
+
+def wait_manager_stopped(manager, timeout=10.0):
+    deadline = time.time() + timeout
+    process = getattr(manager, "_process", None)
+    while time.time() < deadline:
+        if not getattr(manager, "alive", False):
+            return True
+        if process is not None and hasattr(process, "join"):
+            try:
+                process.join(timeout=0.2)
+            except Exception:
+                time.sleep(0.2)
+        else:
+            time.sleep(0.2)
+    return not getattr(manager, "alive", False)
+
+
+def wait_manager_started(manager, timeout=3.0):
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if getattr(manager, "alive", False):
+            return True
+        time.sleep(0.2)
+    return bool(getattr(manager, "alive", False))
+
+
+async def api_post_restart(send, query):
+    config_name, error, status = validate_query_config(query)
+    if error:
+        await send_json(send, {"ok": False, "config": config_name or "", "error": error, "status": "error"}, status=status)
+        return
+
+    lock = get_config_operation_lock(config_name)
+    with lock:
+        try:
+            manager = get_manager(config_name)
+            if getattr(manager, "alive", False):
+                manager.stop()
+                if not wait_manager_stopped(manager, timeout=10.0):
+                    process = getattr(manager, "_process", None)
+                    if process is not None and hasattr(process, "kill"):
+                        try:
+                            process.kill()
+                            process.join(timeout=1)
+                        except Exception:
+                            pass
+                if getattr(manager, "alive", False):
+                    await send_json(
+                        send,
+                        {"ok": False, "config": config_name, "error": "restart_failed", "status": "error"},
+                        status=500,
+                    )
+                    return
+
+            manager.start(None)
+            wait_manager_started(manager, timeout=3.0)
+            final_status = get_status(config_name)
+            if final_status != "running":
+                await send_json(
+                    send,
+                    {"ok": False, "config": config_name, "error": "restart_failed", "status": final_status},
+                    status=500,
+                )
+                return
+
+            await send_json(
+                send,
+                {"ok": True, "config": config_name, "message": "restarted", "status": final_status},
+            )
+        except Exception as exc:
+            log_internal_error("restart_failed:%s" % config_name, exc)
+            try:
+                final_status = get_status(config_name)
+            except Exception:
+                final_status = "error"
+            await send_json(
+                send,
+                {"ok": False, "config": config_name, "error": "restart_failed", "status": final_status},
+                status=500,
+            )
 
 
 async def api_get_log(send, query):

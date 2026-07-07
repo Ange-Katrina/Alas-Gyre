@@ -212,7 +212,26 @@ Manual path when the updater is unavailable:
 3. Keep the same API Token, or update the client settings to match the new token.
 4. Run the launcher and restart ALAS.
 
-### 3. Reinstall Linux autostart after launcher changes
+### 3. Web-Scrcpy gateway API upgrade
+
+This release adds backend-only gateway APIs for Web-Scrcpy integrations:
+
+```text
+GET  /api/gyre/config?config=<name>
+PUT  /api/gyre/config?config=<source>&target=<target>
+POST /api/gyre/restart?config=<name>
+```
+
+After upgrading `gyre_runtime` and restarting ALAS, Web-Scrcpy can call these APIs from its backend with the Gyre Token. Do not expose the Gyre Token or these direct runtime calls to the browser. Web-Scrcpy should still enforce its own user-to-config binding and pass only the bound config name to Gyre Runtime.
+
+Validation checklist for Web-Scrcpy:
+
+- ordinary users cannot call `/api/gyre/configs`;
+- ordinary users only use their bound config name;
+- config save requests send `{"data": {...}}`;
+- restart uses `/api/gyre/restart` instead of manual stop/start recovery.
+
+### 4. Reinstall Linux autostart after launcher changes
 
 When the release changes `start_gyre_alas.sh`, reinstall the service:
 
@@ -248,7 +267,7 @@ tail -n 100 /path/to/gyre_runtime/.gyre_alas.log
 
 If Alpine is running inside Docker, WSL, or a chroot where OpenRC is not PID 1, `rc-update` can install the service but it will not automatically start at container boot. Start it from the real init system, host panel, or container supervisor.
 
-### 4. Verify after upgrade
+### 5. Verify after upgrade
 
 - The desktop client can reach `/api/gyre/health`.
 - `memory_watchdog` appears in the health response.
