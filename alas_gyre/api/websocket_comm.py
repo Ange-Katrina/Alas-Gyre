@@ -253,3 +253,70 @@ def parse_pywebio_message(raw):
         task_id=str(raw.get("task_id", "") or ""),
         raw=dict(raw),
     )
+
+
+START_BUTTON_LABELS = ("启动", "啟動", "実行", "start")
+STOP_BUTTON_LABELS = ("停止", "中止", "stop")
+
+
+def _flatten_text(value):
+    """提取嵌套结构中的可见文本。"""
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, dict):
+        return " ".join(_flatten_text(item) for key, item in value.items() if key != "scope")
+    if isinstance(value, (list, tuple)):
+        return " ".join(_flatten_text(item) for item in value)
+    return str(value)
+
+
+def extract_instance_names(state):
+    """从侧边栏输出提取配置名。"""
+    names = []
+    seen = set()
+    for output in state.outputs:
+        if not isinstance(output, dict):
+            continue
+        scope = str(output.get("scope", "") or "")
+        if "alas-instance-" not in scope:
+            continue
+        text = _flatten_text(output).strip()
+        for token in text.replace("\n", " ").split():
+            name = token.strip()
+            if name and name not in seen:
+                seen.add(name)
+                names.append(name)
+                break
+    return names
+
+
+def extract_config_status(state):
+    """从目标配置页提取配置状态。"""
+    header_text = ""
+    scheduler_text = ""
+    for output in state.outputs:
+        if not isinstance(output, dict):
+            continue
+        scope = str(output.get("scope", "") or "")
+        text = _flatten_text(output).lower()
+        if "header_status" in scope:
+            header_text += " " + text
+        if "scheduler_btn" in scope:
+            scheduler_text += " " + text
+    if any(label in header_text for label in ("运行中", "running")):
+        return "running"
+    if any(label in header_text for label in ("空闲", "idle", "未运行")):
+        return "idle"
+    if any(label in header_text for label in ("错误", "error")):
+        return "error"
+    if any(label in header_text for label in ("更新中", "update")):
+        return "update"
+    if any(label in header_text for label in ("未连接", "disconnected")):
+        return "disconnected"
+    if any(label.lower() in scheduler_text for label in STOP_BUTTON_LABELS):
+        return "running"
+    if any(label.lower() in scheduler_text for label in START_BUTTON_LABELS):
+        return "idle"
+    return ""
