@@ -3,6 +3,7 @@ from PySide6.QtCore import QPoint, Qt, Signal
 from PySide6.QtGui import QColor, QPainter, QPainterPath
 import sys
 from alas_gyre.api.client import api_headers, api_request, gyre_api_url
+from alas_gyre.api.websocket_comm import get_persistent_manager
 from alas_gyre.core.status import normalize_status
 from .widgets import StatusIndicator, ConfigActionButton, MarqueeLabel
 from .window_snap import snap_to_available_screen
@@ -121,6 +122,13 @@ class MiniConfigRow(QWidget):
         import threading
         def send_req():
             try:
+                if self.main_card.config.get("connection_mode", "overlay") == "websocket":
+                    result = get_persistent_manager().post_action(self.config_name, action)
+                    if result.get("queued"):
+                        self.main_card.status_all_update_signal.emit({self.config_name: "queued"}, {self.config_name: ""})
+                        if self.main_card.current_config == self.config_name:
+                            self.main_card.status_update_signal.emit("queued", "")
+                    return
                 url = gyre_api_url(self.main_card.config, action)
                 resp = api_request("POST",
                     url,
