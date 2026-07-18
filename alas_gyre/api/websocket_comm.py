@@ -86,11 +86,19 @@ class WebSocketCommManager:
     def start(self):
         """启动后台通讯线程。"""
         with self._lock:
-            if self.connection_state == CONNECTION_STATE_STOPPED:
-                self.connection_state = CONNECTION_STATE_CONNECTING
+            if self.worker_thread is not None and self.worker_thread.is_alive():
+                return
+            self.stop_event.clear()
+            self.connection_state = CONNECTION_STATE_CONNECTING
+            self.worker_thread = threading.Thread(target=self._run_loop, daemon=True)
+            self.worker_thread.start()
 
     def stop(self):
         """停止后台通讯线程。"""
+        self.stop_event.set()
+        thread = self.worker_thread
+        if thread is not None:
+            thread.join(timeout=3)
         with self._lock:
             self.connection_state = CONNECTION_STATE_STOPPED
             self.ready = False
@@ -188,6 +196,14 @@ class WebSocketCommManager:
             return True
         self._mark_config_missing(name, ERROR_TARGET_SCOPE_NOT_FOUND)
         return False
+
+    def _run_loop(self):
+        """后台通讯循环。"""
+        with self._lock:
+            self.connection_state = CONNECTION_STATE_INITIAL_SCANNING
+            self.initial_scan_completed = True
+            self.connection_state = CONNECTION_STATE_READY
+            self.ready = True
 
 
 _manager = None
@@ -342,3 +358,15 @@ def extract_config_status(state):
     if any(label.lower() in scheduler_text for label in START_BUTTON_LABELS):
         return "idle"
     return ""
+
+
+def _is_button_disabled(button):
+    """判断按钮是否禁用。"""
+    if not isinstance(button, dict):
+        return False
+    if bool(button.get("disabled", False)):
+        return True
+    attrs = button.get("attributes")
+    if isinstance(attrs, dict) and attrs.get("disabled"):
+        return True
+    return False
