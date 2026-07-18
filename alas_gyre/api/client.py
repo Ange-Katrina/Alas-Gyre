@@ -29,3 +29,20 @@ def api_request(method, url, **kwargs):
         return session.request(method, url, **kwargs)
     finally:
         session.close()
+
+
+def alas_gui_url(config):
+    """返回 ALAS GUI 根地址。"""
+    return api_base_url(config)
+
+
+def pywebio_ws_url(config):
+    """返回 ALAS GUI PyWebIO WebSocket 地址。"""
+    base = api_base_url(config)
+    if base.startswith("https://"):
+        ws_base = "wss://" + base[len("https://"):]
+    elif base.startswith("http://"):
+        ws_base = "ws://" + base[len("http://"):]
+    else:
+        ws_base = "ws://" + base
+    return f"{ws_base}/?app=index&session=NEW"
