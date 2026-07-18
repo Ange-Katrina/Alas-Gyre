@@ -159,4 +159,7 @@ def main(current_version):
     window.show()
     QTimer.singleShot(1500, lambda: window.start_auto_update_check(current_version))
 
+    from alas_gyre.api.websocket_comm import get_persistent_manager
+    app.aboutToQuit.connect(lambda: get_persistent_manager().stop())
+
     sys.exit(app.exec())

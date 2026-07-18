@@ -355,6 +355,12 @@ class InitSetupWindow(QDialog):
         connection_layout.addWidget(self.testBtn, 1, 3)
         connection_layout.setColumnStretch(2, 1)
         test_layout.addLayout(connection_layout)
+
+        websocket_hint = QLabel(tr("init_websocket_hint"))
+        websocket_hint.setWordWrap(True)
+        websocket_hint.setStyleSheet("color: #8f96a3; font-size: 12px;")
+        test_layout.addWidget(websocket_hint)
+
         layout.addWidget(test_panel)
 
         layout.addStretch()
