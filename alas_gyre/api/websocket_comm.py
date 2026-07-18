@@ -65,6 +65,9 @@ class WebSocketCommManager:
         self.last_scan_config = ""
         self.initial_scan_completed = False
         self.pause_until = 0.0
+        self.stop_event = threading.Event()
+        self.worker_thread = None
+        self.round_robin_index = 0
 
     def _normalize_poll_interval(self, value):
         """规范化轮询间隔。"""
@@ -166,6 +169,25 @@ class WebSocketCommManager:
     def get_status_all(self):
         """返回 UI 状态快照。"""
         return self.get_snapshot()
+
+    def _mark_config_missing(self, config_name, error):
+        """标记配置页面状态不可确认。"""
+        name = str(config_name)
+        self.statuses[name] = "disconnected"
+        self.tasks[name] = ""
+        self.scan_errors[name] = str(error)
+
+    def _apply_config_status(self, config_name, status):
+        """写入经过页面证据确认的配置状态。"""
+        name = str(config_name)
+        if status:
+            self.statuses[name] = status
+            self.tasks[name] = ""
+            self.scan_errors.pop(name, None)
+            self.last_scan_config = name
+            return True
+        self._mark_config_missing(name, ERROR_TARGET_SCOPE_NOT_FOUND)
+        return False
 
 
 _manager = None
