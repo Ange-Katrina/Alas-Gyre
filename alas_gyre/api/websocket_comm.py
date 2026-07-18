@@ -179,3 +179,77 @@ def get_persistent_manager():
         if _manager is None:
             _manager = WebSocketCommManager({})
         return _manager
+
+
+@dataclass
+class PyWebIOMessage:
+    """PyWebIO 服务端消息。"""
+
+    command: str
+    spec: dict = field(default_factory=dict)
+    task_id: str = ""
+    raw: dict = field(default_factory=dict)
+
+
+@dataclass
+class PyWebIOPageState:
+    """PyWebIO 页面状态。"""
+
+    session_id: str = ""
+    task_ids: set = field(default_factory=set)
+    callback_ids: dict = field(default_factory=dict)
+    outputs: list = field(default_factory=list)
+    inputs: list = field(default_factory=list)
+    scripts: list = field(default_factory=list)
+
+    def apply_message(self, message):
+        """合并 PyWebIO 消息到页面状态。"""
+        if message.task_id:
+            self.task_ids.add(message.task_id)
+        if message.command == "set_session_id":
+            self.session_id = str(message.spec or "")
+        elif message.command == "pin_onchange":
+            name = str(message.spec.get("name", "") or "")
+            callback_id = str(message.spec.get("callback_id", "") or "")
+            if name and callback_id:
+                self.callback_ids[name] = callback_id
+        elif message.command == "output":
+            self.outputs.append(message.spec)
+        elif message.command == "input":
+            self.inputs.append(message.spec)
+        elif message.command == "run_script":
+            self.scripts.append(message.spec)
+        elif message.command == "output_ctl":
+            self._apply_output_ctl(message.spec)
+
+    def _apply_output_ctl(self, spec):
+        """应用 output_ctl 到 outputs。"""
+        if not isinstance(spec, dict):
+            return
+        scope = str(spec.get("scope", "") or "")
+        method = str(spec.get("method", "") or "").lower()
+        data = spec.get("data")
+        if not scope:
+            return
+        if method == "append":
+            if data is not None:
+                self.outputs.append(data)
+            return
+        self.outputs = [
+            item for item in self.outputs
+            if not isinstance(item, dict) or str(item.get("scope", "") or "") != scope
+        ]
+        if method == "replace" and data is not None:
+            self.outputs.append(data)
+
+
+def parse_pywebio_message(raw):
+    """解析 PyWebIO 原始消息。"""
+    if not isinstance(raw, dict):
+        return PyWebIOMessage("", {}, "", {})
+    return PyWebIOMessage(
+        command=str(raw.get("command", "") or ""),
+        spec=raw.get("spec") if isinstance(raw.get("spec"), dict) else {},
+        task_id=str(raw.get("task_id", "") or ""),
+        raw=dict(raw),
+    )
