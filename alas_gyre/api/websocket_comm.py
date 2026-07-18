@@ -24,6 +24,13 @@ ERROR_TRANSPORT_UNAVAILABLE = "transport_unavailable"
 ERROR_INTERNAL_ALAS_GUI_ERROR = "internal_alas_gui_error"
 ERROR_SESSION_CLOSED = "session_closed"
 
+TRANSPORT_FAILURE_THRESHOLD = 3
+PAGE_MISSING_FAILURE_THRESHOLD = 3
+PAUSE_SECONDS = 10.0
+RECONNECT_DELAY_SECONDS = 1.0
+COLLECT_TIMEOUT_SECONDS = 1.5
+CONTROL_RESYNC_DELAY_SECONDS = 0.5
+
 
 class WebSocketCommError(Exception):
     """WebSocket 通讯基础错误。"""
@@ -204,6 +211,19 @@ class WebSocketCommManager:
             self.initial_scan_completed = True
             self.connection_state = CONNECTION_STATE_READY
             self.ready = True
+
+    def _record_transport_failure(self, exc):
+        """记录传输异常并按阈值暂停。"""
+        with self._lock:
+            self.failure_count += 1
+            self.last_transport_error = str(exc)
+            self.transport_available = False
+            if self.failure_count >= TRANSPORT_FAILURE_THRESHOLD:
+                self.connection_state = CONNECTION_STATE_PAUSED
+                self.ready = False
+                self.pause_until = time.monotonic() + PAUSE_SECONDS
+            else:
+                self.connection_state = CONNECTION_STATE_DEGRADED
 
 
 _manager = None
