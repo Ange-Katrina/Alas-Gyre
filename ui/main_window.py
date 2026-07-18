@@ -9,6 +9,7 @@ import threading
 import time
 
 from alas_gyre.api.client import api_headers, api_request, gyre_api_url
+from alas_gyre.api.websocket_comm import get_persistent_manager
 from alas_gyre.core.paths import (
     app_base_dir as app_base_dir, asset_path, config_path,
 )
@@ -76,6 +77,15 @@ MAIN_CARD_HEIGHT = MAIN_TITLE_HEIGHT + MAIN_LIST_HEIGHT + MAIN_BOTTOM_HEIGHT
 
 def get_status_text(status):
     return tr(normalize_status(status))
+
+
+def safe_emit_signal(signal, *args):
+    """安全发射 Qt 信号，忽略已删除信号源异常。"""
+    try:
+        signal.emit(*args)
+        return True
+    except RuntimeError:
+        return False
 
 
 class MainConfigRow(QWidget):
@@ -209,6 +219,13 @@ class MainConfigRow(QWidget):
 
         def send_req():
             try:
+                if self.main_card._use_websocket_comm():
+                    result = get_persistent_manager().post_action(self.config_name, action)
+                    if result.get("queued"):
+                        safe_emit_signal(self.main_card.status_all_update_signal, {self.config_name: "queued"}, {self.config_name: ""})
+                        if self.main_card.current_config == self.config_name:
+                            safe_emit_signal(self.main_card.status_update_signal, "queued", "")
+                    return
                 url = gyre_api_url(self.main_card.config, action)
                 resp = api_request("POST",
                     url,
@@ -264,6 +281,9 @@ class CardWidget(QFrame):
             "mini_opacity": 100,
             "lang": get_language(),
             "setup_completed": False,
+            "connection_mode": "overlay",
+            "websocket_poll_interval": 3,
+            "websocket_poll_mode": "round_robin",
         }
 
         self.config_path = config_path()
@@ -531,6 +551,10 @@ class CardWidget(QFrame):
         )
         self._start_poll_thread()
 
+    def _use_websocket_comm(self):
+        """判断是否使用 WebSocket 通讯。"""
+        return self.config.get("connection_mode", "overlay") == "websocket"
+
     def format_control_http_error(self, resp):
         try:
             data = resp.json()
@@ -684,6 +708,29 @@ class CardWidget(QFrame):
             and time.monotonic() - self._configs_last_fetch_at >= self._configs_fetch_interval
         ):
             delattr(self, "_configs_fetched")
+
+        if self._use_websocket_comm():
+            manager = get_persistent_manager()
+            manager.update_config(self.config)
+            manager.start()
+            data = manager.get_status_all()
+            configs = data.get("configs", [])
+            if configs:
+                self.configs_update_signal.emit(configs)
+            statuses = {
+                str(config_name): normalize_status(status)
+                for config_name, status in data.get("statuses", {}).items()
+            }
+            tasks = {
+                str(config_name): str(task)
+                for config_name, task in data.get("tasks", {}).items()
+            }
+            self.status_all_update_signal.emit(statuses, tasks)
+            self.status_update_signal.emit(
+                statuses.get(self.current_config, "disconnected"),
+                tasks.get(self.current_config, ""),
+            )
+            return
 
         try:
             url = gyre_api_url(self.config, "status_all")
