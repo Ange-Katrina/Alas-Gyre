@@ -1,6 +1,6 @@
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QWidget, QLabel, QLineEdit, QCheckBox,
-    QPushButton, QFrame, QSlider, QGridLayout, QStackedWidget
+    QPushButton, QFrame, QSlider, QGridLayout, QStackedWidget, QComboBox
 )
 from PySide6.QtCore import Qt, Signal, QTimer, QSize
 from PySide6.QtGui import QColor, QPixmap, QPainter, QPen, QIcon
@@ -151,6 +151,30 @@ class SettingsWindow(QDialog):
         opacity_layout.addWidget(self.miniOpacitySlider, stretch=1)
         opacity_layout.addWidget(self.miniOpacityValue)
 
+        # 连接模式
+        conn_mode_layout = QHBoxLayout()
+        conn_mode_layout.setSpacing(10)
+
+        conn_mode_label = QLabel(tr("connection_mode"))
+        conn_mode_label.setObjectName("formLabel")
+        conn_mode_label.setFixedWidth(104)
+
+        self.connectionModeCombo = QComboBox()
+        self.connectionModeCombo.setObjectName("settingsInput")
+        self.connectionModeCombo.setCursor(Qt.PointingHandCursor)
+        self.connectionModeCombo.setFocusPolicy(Qt.NoFocus)
+        self.connectionModeCombo.setFixedHeight(30)
+        self.connectionModeCombo.setFixedWidth(164)
+        self.connectionModeCombo.addItem(tr("connection_mode_overlay"), "overlay")
+        self.connectionModeCombo.addItem(tr("connection_mode_websocket"), "websocket")
+        current_mode = self.config.get("connection_mode", "overlay")
+        idx = self.connectionModeCombo.findData(current_mode)
+        if idx >= 0:
+            self.connectionModeCombo.setCurrentIndex(idx)
+
+        conn_mode_layout.addWidget(conn_mode_label)
+        conn_mode_layout.addWidget(self.connectionModeCombo, stretch=1)
+
         # IP 布局
         ip_layout = QHBoxLayout()
         ip_layout.setSpacing(10)
@@ -163,6 +187,51 @@ class SettingsWindow(QDialog):
         self.ipInput.setText(self.config.get("ip", "127.0.0.1"))
         ip_layout.addWidget(ip_label)
         ip_layout.addWidget(self.ipInput, stretch=1)
+
+        # WebSocket 通讯轮询间隔
+        ws_interval_layout = QHBoxLayout()
+        ws_interval_layout.setSpacing(10)
+
+        ws_interval_label = QLabel(tr("websocket_poll_interval"))
+        ws_interval_label.setObjectName("formLabel")
+        ws_interval_label.setFixedWidth(104)
+
+        self.websocketPollIntervalInput = QLineEdit()
+        self.websocketPollIntervalInput.setObjectName("settingsInput")
+        self.websocketPollIntervalInput.setFixedSize(96, 30)
+        self.websocketPollIntervalInput.setText(str(self.config.get("websocket_poll_interval", 3)))
+
+        ws_interval_layout.addWidget(ws_interval_label)
+        ws_interval_layout.addWidget(self.websocketPollIntervalInput)
+        ws_interval_layout.addStretch()
+
+        # WebSocket 通讯轮询模式
+        ws_mode_layout = QHBoxLayout()
+        ws_mode_layout.setSpacing(10)
+
+        ws_mode_label = QLabel(tr("websocket_poll_mode"))
+        ws_mode_label.setObjectName("formLabel")
+        ws_mode_label.setFixedWidth(104)
+
+        self.websocketPollModeInput = QComboBox()
+        self.websocketPollModeInput.setObjectName("settingsInput")
+        self.websocketPollModeInput.setCursor(Qt.PointingHandCursor)
+        self.websocketPollModeInput.setFocusPolicy(Qt.NoFocus)
+        self.websocketPollModeInput.setFixedHeight(30)
+        self.websocketPollModeInput.addItem(tr("websocket_poll_round_robin"), "round_robin")
+        self.websocketPollModeInput.addItem(tr("websocket_poll_full_scan"), "full_scan")
+        current_poll_mode = self.config.get("websocket_poll_mode", "round_robin")
+        idx = self.websocketPollModeInput.findData(current_poll_mode)
+        if idx >= 0:
+            self.websocketPollModeInput.setCurrentIndex(idx)
+
+        ws_mode_layout.addWidget(ws_mode_label)
+        ws_mode_layout.addWidget(self.websocketPollModeInput, stretch=1)
+
+        # WebSocket 通讯说明
+        ws_hint = QLabel(tr("websocket_comm_hint"))
+        ws_hint.setStyleSheet("color: #8f96a3; font-size: 12px; font-family: 'Microsoft YaHei', 'Segoe UI';")
+        ws_hint.setWordWrap(True)
 
         # 端口与测试按钮布局
         port_layout = QHBoxLayout()
@@ -372,7 +441,11 @@ class SettingsWindow(QDialog):
         connection_panel_layout = QVBoxLayout(connection_panel)
         connection_panel_layout.setContentsMargins(14, 14, 14, 14)
         connection_panel_layout.setSpacing(12)
+        connection_panel_layout.addLayout(conn_mode_layout)
         connection_panel_layout.addLayout(ip_layout)
+        connection_panel_layout.addLayout(ws_interval_layout)
+        connection_panel_layout.addLayout(ws_mode_layout)
+        connection_panel_layout.addWidget(ws_hint)
         connection_panel_layout.addLayout(port_layout)
         connection_panel_layout.addLayout(runtime_port_layout)
         connection_panel_layout.addLayout(token_layout)
@@ -703,6 +776,12 @@ class SettingsWindow(QDialog):
         self.config["lang"] = "en" if self.englishLangCheck.isChecked() else "zh"
         self.config["ip"] = self.ipInput.text()
         self.config["port"] = self.portInput.text()
+        self.config["connection_mode"] = self.connectionModeCombo.currentData() or "overlay"
+        try:
+            self.config["websocket_poll_interval"] = max(1, min(60, int(self.websocketPollIntervalInput.text().strip() or "3")))
+        except ValueError:
+            self.config["websocket_poll_interval"] = 3
+        self.config["websocket_poll_mode"] = self.websocketPollModeInput.currentData() or "round_robin"
         runtime_port = self.runtimePortInput.text().strip()
         self.config["runtime_update_port"] = runtime_port if runtime_port.isdigit() else DEFAULT_RUNTIME_UPDATE_PORT
         self.config["api_token"] = self.tokenInput.text().strip()
