@@ -10,6 +10,7 @@ import time
 
 from alas_gyre.api.client import api_headers, api_request, gyre_api_url
 from alas_gyre.api.connection_policy import normalize_connection_mode
+from alas_gyre.api.connection_policy import should_fallback_to_websocket
 from alas_gyre.api.connection_policy import should_use_websocket_directly
 from alas_gyre.api.websocket_comm import get_persistent_manager
 from alas_gyre.core.paths import (
@@ -342,6 +343,7 @@ class CardWidget(QFrame):
         self.rows = {}
 
         self._config_idx = 0
+        self._runtime_connection = "websocket" if self._use_websocket_comm() else "overlay"
 
         self._build_ui()
 
@@ -585,6 +587,39 @@ class CardWidget(QFrame):
         """判断是否直接使用 WebSocket 通讯。"""
         return should_use_websocket_directly(self.config)
 
+    def _is_websocket_snapshot_usable(self, snapshot):
+        """判断 WebSocket 快照是否可用（连接状态有效）。"""
+        return snapshot.get("connection_state") in {"connecting", "initial_scanning", "ready", "degraded"}
+
+    def _poll_via_websocket_manager(self, fallback=False):
+        """通过 WebSocket 管理器轮询状态。
+
+        Args:
+            fallback: 是否为降级模式（设置 _runtime_connection 为 websocket_fallback）
+
+        Returns:
+            bool: 快照是否成功获取并可用
+        """
+        manager = get_persistent_manager()
+        manager.update_config(self.config)
+        snapshot = manager.get_status_all()
+        if snapshot.get("connection_state") == "stopped":
+            manager.start()
+            snapshot = manager.get_status_all()
+        if fallback and not self._is_websocket_snapshot_usable(snapshot):
+            return False
+        if fallback:
+            self._runtime_connection = "websocket_fallback"
+        configs, statuses, tasks, current_status, current_task = build_websocket_ui_snapshot(
+            snapshot,
+            self.current_config,
+        )
+        if configs:
+            self.configs_update_signal.emit(configs)
+        self.status_all_update_signal.emit(statuses, tasks)
+        self.status_update_signal.emit(current_status, current_task)
+        return True
+
     def format_control_http_error(self, resp):
         try:
             data = resp.json()
@@ -743,20 +778,8 @@ class CardWidget(QFrame):
             delattr(self, "_configs_fetched")
 
         if self._use_websocket_comm():
-            manager = get_persistent_manager()
-            manager.update_config(self.config)
-            # 仅在首次或 stopped 状态时启动 manager
-            snapshot = manager.get_status_all()
-            if snapshot.get("connection_state") == "stopped":
-                manager.start()
-            configs, statuses, tasks, current_status, current_task = build_websocket_ui_snapshot(
-                snapshot,
-                self.current_config,
-            )
-            if configs:
-                self.configs_update_signal.emit(configs)
-            self.status_all_update_signal.emit(statuses, tasks)
-            self.status_update_signal.emit(current_status, current_task)
+            self._runtime_connection = "websocket"
+            self._poll_via_websocket_manager(fallback=False)
             # 根据配置动态更新轮询间隔
             try:
                 interval_ms = max(1, min(60, int(self.config.get("websocket_poll_interval", 3)))) * 1000
@@ -764,6 +787,10 @@ class CardWidget(QFrame):
                 interval_ms = 3000
             if self.poll_timer.interval() != interval_ms:
                 self.poll_timer.setInterval(interval_ms)
+            return
+
+        if getattr(self, "_runtime_connection", "overlay") == "websocket_fallback":
+            self._poll_via_websocket_manager(fallback=True)
             return
 
         try:
@@ -808,8 +835,15 @@ class CardWidget(QFrame):
                 self.status_all_update_signal.emit(statuses, tasks)
                 self.status_update_signal.emit(statuses.get(self.current_config, "disconnected"), tasks.get(self.current_config, ""))
             else:
+                exc = Exception(f"HTTP {resp.status_code}")
+                if should_fallback_to_websocket(self.config, exc):
+                    if self._poll_via_websocket_manager(fallback=True):
+                        return
                 self.status_update_signal.emit("disconnected", "")
-        except Exception:
+        except Exception as exc:
+            if should_fallback_to_websocket(self.config, exc):
+                if self._poll_via_websocket_manager(fallback=True):
+                    return
             self.status_update_signal.emit("disconnected", "")
 
     def restore_main_window(self):
