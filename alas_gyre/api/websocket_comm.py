@@ -265,9 +265,16 @@ class WebSocketCommManager:
         # 阶段二：初始化全量扫描
         try:
             self._perform_initial_scan(ws)
-        except Exception as exc:
+        except (websocket.WebSocketException, ConnectionError, OSError) as exc:
+            # 传输层异常——标记为传输失败，进入轮询循环尝试恢复
             self._record_transport_failure(exc)
-            # 即使初始扫描部分失败，继续进入轮询循环
+        except Exception as exc:
+            # 非传输异常（如 JSON decode）——记录日志，允许降级运行
+            self._log_error("初始化扫描非传输异常: %s", exc)
+            with self._lock:
+                self.initial_scan_completed = True
+                self.connection_state = CONNECTION_STATE_READY
+                self.ready = True
 
         # 阶段三：后续轮询循环
         while not self.stop_event.is_set():
