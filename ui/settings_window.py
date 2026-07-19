@@ -304,6 +304,8 @@ class SettingsWindow(QDialog):
         self.tokenGenerateBtn.clicked.connect(self._generate_token)
         token_layout.addWidget(self.tokenGenerateBtn)
 
+        self._refresh_connection_mode_visibility()
+
         wizard_layout = QHBoxLayout()
         wizard_layout.setSpacing(10)
 
