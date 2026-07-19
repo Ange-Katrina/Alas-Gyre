@@ -1,6 +1,6 @@
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QWidget, QLabel, QLineEdit, QCheckBox,
-    QPushButton, QFrame, QSlider, QGridLayout, QStackedWidget, QComboBox, QSpinBox
+    QPushButton, QFrame, QSlider, QGridLayout, QStackedWidget, QComboBox
 )
 from PySide6.QtCore import Qt, Signal, QTimer, QSize
 from PySide6.QtGui import QColor, QPixmap, QPainter, QPen, QIcon
@@ -166,7 +166,6 @@ class SettingsWindow(QDialog):
         self.connectionModeCombo.setCursor(Qt.PointingHandCursor)
         self.connectionModeCombo.setFocusPolicy(Qt.NoFocus)
         self.connectionModeCombo.setFixedHeight(30)
-        self.connectionModeCombo.setFixedWidth(164)
         self.connectionModeCombo.addItem(tr("connection_mode_auto"), "auto")
         self.connectionModeCombo.addItem(tr("connection_mode_websocket"), "websocket")
         current_mode = normalize_connection_mode(self.config)
@@ -200,11 +199,10 @@ class SettingsWindow(QDialog):
         ws_interval_label.setObjectName("formLabel")
         ws_interval_label.setFixedWidth(104)
 
-        self.websocketPollIntervalInput = QSpinBox()
+        self.websocketPollIntervalInput = QLineEdit()
         self.websocketPollIntervalInput.setObjectName("settingsInput")
         self.websocketPollIntervalInput.setFixedSize(96, 30)
-        self.websocketPollIntervalInput.setRange(1, 60)
-        self.websocketPollIntervalInput.setValue(int(self.config.get("websocket_poll_interval", 3)))
+        self.websocketPollIntervalInput.setText(str(self.config.get("websocket_poll_interval", 3)))
 
         ws_interval_layout.addWidget(ws_interval_label)
         ws_interval_layout.addWidget(self.websocketPollIntervalInput)
@@ -790,7 +788,9 @@ class SettingsWindow(QDialog):
         self.config["ip"] = self.ipInput.text()
         self.config["port"] = self.portInput.text()
         self.config["connection_mode"] = self.connectionModeCombo.currentData() or "auto"
-        self.config["websocket_poll_interval"] = self.websocketPollIntervalInput.value()
+        self.config["websocket_poll_interval"] = self._normalize_poll_interval(
+            self.websocketPollIntervalInput.text()
+        )
         self.config["websocket_poll_mode"] = self.websocketPollModeInput.currentData() or "round_robin"
         runtime_port = self.runtimePortInput.text().strip()
         self.config["runtime_update_port"] = runtime_port if runtime_port.isdigit() else DEFAULT_RUNTIME_UPDATE_PORT
@@ -831,6 +831,13 @@ class SettingsWindow(QDialog):
         except (TypeError, ValueError):
             value = 100
         return max(35, min(value, 100))
+
+    def _normalize_poll_interval(self, value):
+        try:
+            value = int(str(value).strip())
+        except (TypeError, ValueError):
+            value = 3
+        return max(1, min(value, 60))
 
     def _generate_token(self):
         self.tokenInput.setText(secrets.token_urlsafe(32))
