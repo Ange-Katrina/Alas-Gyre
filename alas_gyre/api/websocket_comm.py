@@ -691,7 +691,7 @@ class WebSocketCommManager:
                 self.connection_state = CONNECTION_STATE_DEGRADED
                 self.failure_count = 0
                 self.transport_available = True
-                self.consecutive_degraded_count += 1
+                self.consecutive_degraded_count = 0
                 self._sidebar_nav_callback_id = ""
                 # 清除逐配置缺失跟踪（新连接后重新统计）
                 self._page_missing_counts.clear()
@@ -759,6 +759,7 @@ class WebSocketCommManager:
                 self.connection_state = CONNECTION_STATE_PAUSED
                 self.ready = False
                 self.pause_until = time.monotonic() + PAUSE_SECONDS
+                self.consecutive_degraded_count += 1
             else:
                 self.connection_state = CONNECTION_STATE_DEGRADED
 
