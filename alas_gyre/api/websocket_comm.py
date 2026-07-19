@@ -653,7 +653,16 @@ class WebSocketCommManager:
                 self._mark_config_missing(config_name, str(exc))
 
     def _attempt_connection_recovery(self):
-        """尝试恢复连接，成功返回新 ws 对象并重跑扫描，失败返回 None。"""
+        """尝试恢复连接，成功返回新 ws 对象并重跑扫描，失败返回 None。
+
+        多次降级恢复失败后应用退避延迟，避免频繁重连。
+        """
+        # 多次降级恢复尝试后应用退避延迟
+        degraded = getattr(self, 'consecutive_degraded_count', 0)
+        if degraded >= 3:
+            backoff = RECONNECT_DELAY_SECONDS * degraded
+            self._interruptible_sleep(backoff)
+
         try:
             self._http_probe_alas_gui()
             ws = self._connect_ws()
