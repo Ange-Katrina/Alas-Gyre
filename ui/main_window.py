@@ -921,6 +921,8 @@ class CardWidget(QFrame):
                         json.dump(self.config, f, indent=4, ensure_ascii=False)
                     print(f"[Log] Config successfully persisted to {self.config_path}")
 
+                    self._runtime_connection = "websocket" if self._use_websocket_comm() else "overlay"
+
                     self.retranslate_ui()
 
                     app = QApplication.instance()
