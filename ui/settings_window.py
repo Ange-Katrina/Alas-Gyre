@@ -175,7 +175,6 @@ class SettingsWindow(QDialog):
             self.connectionModeCombo.setCurrentIndex(idx)
 
         self.connectionModeCombo.currentIndexChanged.connect(self._refresh_connection_mode_visibility)
-        self._refresh_connection_mode_visibility()
 
         conn_mode_layout.addWidget(conn_mode_label)
         conn_mode_layout.addWidget(self.connectionModeCombo, stretch=1)
