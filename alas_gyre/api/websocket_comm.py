@@ -89,6 +89,7 @@ class WebSocketCommManager:
         self._sidebar_nav_callbacks = {}
         self._page_missing_counts = {}
         self._page_missing_skip_until = {}
+        self._page_state = PyWebIOPageState()
 
     def _normalize_poll_interval(self, value):
         """规范化轮询间隔。"""
@@ -197,7 +198,18 @@ class WebSocketCommManager:
 
     def get_status_all(self):
         """返回 UI 状态快照。"""
-        return self.get_snapshot()
+        snapshot = self.get_snapshot()
+        configs = snapshot.get("configs", [])
+        statuses = snapshot.get("statuses", {})
+        if (
+            snapshot.get("connection_state") == CONNECTION_STATE_INITIAL_SCANNING
+            and configs
+            and len(statuses) < len(configs)
+        ):
+            snapshot["configs"] = []
+            snapshot["statuses"] = {}
+            snapshot["tasks"] = {}
+        return snapshot
 
     def _mark_config_missing(self, config_name, error):
         """标记配置页面状态不可确认，递增逐配置缺失计数并在达到阈值后暂缓扫描。"""
@@ -382,6 +394,7 @@ class WebSocketCommManager:
             ws = self._connect_ws()
             with self._lock:
                 self.transport_available = True
+                self._page_state = PyWebIOPageState()
             return ws
         except Exception as exc:
             self._record_transport_failure(exc)
@@ -407,7 +420,10 @@ class WebSocketCommManager:
 
         通过设置 socket 短超时来逐条读取消息，累积到页面状态中。
         """
-        state = PyWebIOPageState()
+        state = getattr(self, "_page_state", None)
+        if state is None:
+            state = PyWebIOPageState()
+            self._page_state = state
         # 记录当前 session_id 用于检测 session 重置
         previous_session_id = None
 
@@ -613,7 +629,7 @@ class WebSocketCommManager:
         target_labels = START_BUTTON_LABELS if cmd.action == "start" else STOP_BUTTON_LABELS
 
         # 在 scheduler_btn scope 中查找目标按钮
-        callback_id = self._find_button_callback(page_state, target_labels)
+        callback_id, value = self._find_button_action(page_state, target_labels)
 
         if not callback_id:
             with self._lock:
@@ -621,7 +637,7 @@ class WebSocketCommManager:
             return
 
         # 发送按钮点击
-        self._send_button_callback(ws, callback_id, "")
+        self._send_button_callback(ws, callback_id, value)
         time.sleep(CONTROL_RESYNC_DELAY_SECONDS)
 
         # 重新扫描该配置状态
@@ -631,6 +647,35 @@ class WebSocketCommManager:
 
         with self._lock:
             self.control_errors.pop(cmd.config_name, None)
+
+    @staticmethod
+    def _find_button_action(page_state, target_labels):
+        """在页面状态中查找匹配标签的按钮并返回 callback_id 与 value。"""
+        for output in page_state.outputs:
+            if not isinstance(output, dict):
+                continue
+            if "scheduler_btn" not in _scope_identity(output):
+                continue
+            for button_group, buttons in _extract_buttons(output):
+                if "scheduler_btn" not in _scope_identity(button_group):
+                    continue
+                callback_id = str(button_group.get("callback_id", "") or "")
+                if not callback_id:
+                    continue
+                for button in buttons:
+                    if not isinstance(button, dict):
+                        continue
+                    label = _flatten_text(button.get("label", "")).strip().lower()
+                    if not any(t.lower() == label for t in target_labels):
+                        continue
+                    if _is_button_disabled(button):
+                        continue
+                    return callback_id, button.get("value")
+
+        callback_id = WebSocketCommManager._find_button_callback(page_state, target_labels)
+        if callback_id:
+            return callback_id, ""
+        return "", ""
 
     @staticmethod
     def _find_button_callback(page_state, target_labels):
