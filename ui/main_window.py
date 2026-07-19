@@ -873,6 +873,9 @@ class CardWidget(QFrame):
                 self.status_all_update_signal.emit(statuses, tasks)
                 current_status = statuses.get(self.current_config, "idle")
                 current_task = tasks.get(self.current_config, "")
+                if normalize_status(current_status) == "disconnected" and should_fallback_to_websocket(self.config, current_status):
+                    if self._poll_via_websocket_manager(fallback=True):
+                        return
                 self.status_update_signal.emit(current_status, current_task)
             elif resp.status_code == 404:
                 statuses = {}
