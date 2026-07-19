@@ -722,6 +722,14 @@ class WebSocketCommManager:
             with self._lock:
                 self._sidebar_nav_callback_id = sidebar_callback_id
 
+        # 检查是否有新配置出现（不删除已有配置，避免 UI 闪烁）
+        fresh_names = extract_instance_names(state)
+        with self._lock:
+            existing = set(self.configs)
+            for name in fresh_names:
+                if name not in existing:
+                    self.configs.append(name)
+
         # 获取当前配置列表快照
         with self._lock:
             config_names = list(self.configs)
