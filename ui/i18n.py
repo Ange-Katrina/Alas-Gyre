@@ -162,6 +162,12 @@ TRANSLATIONS = {
         "init_nav_runtime": "生成 Runtime",
         "init_nav_start": "启动 ALAS",
         "init_nav_test": "验证完成",
+        "init_nav_mode": "模式选择",
+        "init_nav_websocket": "连接设置",
+        "init_mode_select_title": "选择连接模式",
+        "init_mode_select_desc": "请选择 Alas-Gyre 与 ALAS 的连接方式。",
+        "init_websocket_connect_title": "WebSocket 连接设置",
+        "init_websocket_hint": "请先启动 ALAS WebUI，并建议完成连接测试后再保存。",
         "wizard_step_progress": "第 {current} / {total} 步",
         "welcome": "欢迎使用 Alas-Gyre",
         "welcome_desc": "初始化用于生成 gyre_runtime。请把它放在 ALAS 官方目录外，再通过启动器运行 ALAS。\nIP/端口仅用于可选连接测试，不是初始化必填项。",
@@ -354,6 +360,12 @@ TRANSLATIONS = {
         "init_nav_runtime": "Generate",
         "init_nav_start": "Start ALAS",
         "init_nav_test": "Verify",
+        "init_nav_mode": "Mode",
+        "init_nav_websocket": "Connection",
+        "init_mode_select_title": "Select Connection Mode",
+        "init_mode_select_desc": "Choose how Alas-Gyre connects to ALAS.",
+        "init_websocket_connect_title": "WebSocket Connection",
+        "init_websocket_hint": "Start ALAS WebUI first. Testing the connection before saving is recommended.",
         "wizard_step_progress": "Step {current} / {total}",
         "welcome": "Welcome to Alas-Gyre",
         "welcome_desc": "Setup is used to generate gyre_runtime. Keep it outside the official ALAS directory, then start ALAS through the launcher.\nIP and port are only for optional connection testing and are not required for setup.",
@@ -387,7 +399,6 @@ TRANSLATIONS = {
         "prev": "Back",
         "finish": "Save & Finish",
         "token_generated": "API Token regenerated. Regenerate Runtime or restart ALAS to apply it.",
-        "init_websocket_hint": "You can also choose WebSocket Comm in settings: it accesses ALAS GUI pages to read status and simulates button clicks for control.",
     }
 }
 
