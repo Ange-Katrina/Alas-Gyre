@@ -222,30 +222,7 @@ class MainConfigRow(QWidget):
 
         def send_req():
             try:
-                if self.main_card._use_websocket_comm():
-                    result = get_persistent_manager().post_action(self.config_name, action)
-                    if result.get("queued"):
-                        safe_emit_signal(self.main_card.status_all_update_signal, {self.config_name: "queued"}, {self.config_name: ""})
-                        if self.main_card.current_config == self.config_name:
-                            safe_emit_signal(self.main_card.status_update_signal, "queued", "")
-                    return
-                url = gyre_api_url(self.main_card.config, action)
-                resp = api_request("POST",
-                    url,
-                    params={"config": self.config_name},
-                    headers=api_headers(self.main_card.config),
-                    timeout=3,
-                )
-                if resp.status_code == 200:
-                    status = normalize_status(resp.json().get("status", "idle"))
-                    self.main_card.status_all_update_signal.emit({self.config_name: status}, {self.config_name: ""})
-                    if self.main_card.current_config == self.config_name:
-                        self.main_card.status_update_signal.emit(status, "")
-                else:
-                    message = self.main_card.format_control_http_error(resp)
-                    self.main_card.control_error_signal.emit(action, message)
-                time.sleep(0.5)
-                self.main_card._start_poll_thread()
+                self.main_card._post_control_action(self.config_name, action)
             except Exception as e:
                 print(f"[Error] Failed to send control command: {e}")
                 self.main_card.status_all_update_signal.emit(
@@ -619,6 +596,64 @@ class CardWidget(QFrame):
         self.status_all_update_signal.emit(statuses, tasks)
         self.status_update_signal.emit(current_status, current_task)
         return True
+
+    def _queue_websocket_control(self, config_name, action):
+        """通过 WebSocket 管理器发送控制命令。
+
+        Args:
+            config_name: 配置名称
+            action: 控制动作，如 start/stop
+
+        Returns:
+            dict: post_action 的结果
+        """
+        manager = get_persistent_manager()
+        manager.update_config(self.config)
+        snapshot = manager.get_status_all()
+        if snapshot.get("connection_state") == "stopped":
+            manager.start()
+            snapshot = manager.get_status_all()
+        result = manager.post_action(config_name, action)
+        if result.get("queued"):
+            self.status_all_update_signal.emit({config_name: "queued"}, {config_name: ""})
+            if self.current_config == config_name:
+                self.status_update_signal.emit("queued", "")
+        return result
+
+    def _post_control_action(self, config_name, action):
+        """发送控制命令，支持 Overlay/WebSocket 自动降级。
+
+        Args:
+            config_name: 配置名称
+            action: 控制动作，如 start/stop
+
+        Returns:
+            dict: 包含 status/error 的结果字典
+        """
+        if self._use_websocket_comm() or getattr(self, "_runtime_connection", "overlay") == "websocket_fallback":
+            return self._queue_websocket_control(config_name, action)
+        try:
+            resp = api_request(
+                "POST",
+                gyre_api_url(self.config, action),
+                params={"config": config_name},
+                headers=api_headers(self.config),
+                timeout=3,
+            )
+            if resp.status_code == 200:
+                status = normalize_status(resp.json().get("status", "idle"))
+                self.status_all_update_signal.emit({config_name: status}, {config_name: ""})
+                if self.current_config == config_name:
+                    self.status_update_signal.emit(status, "")
+                return {"status": status}
+            failure = self.format_control_http_error(resp)
+        except Exception as exc:
+            failure = exc
+        if should_fallback_to_websocket(self.config, failure):
+            self._runtime_connection = "websocket_fallback"
+            return self._queue_websocket_control(config_name, action)
+        self.control_error_signal.emit(action, str(failure) or tr("control_connect_failed"))
+        return {"error": str(failure)}
 
     def format_control_http_error(self, resp):
         try:
