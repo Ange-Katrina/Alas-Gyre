@@ -260,21 +260,23 @@ class WebSocketCommManager:
         # 阶段一：连接建立
         ws = self._establish_connection()
         if ws is None:
-            return
-
-        # 阶段二：初始化全量扫描
-        try:
-            self._perform_initial_scan(ws)
-        except (websocket.WebSocketException, ConnectionError, OSError) as exc:
-            # 传输层异常——标记为传输失败，进入轮询循环尝试恢复
-            self._record_transport_failure(exc)
-        except Exception as exc:
-            # 非传输异常（如 JSON decode）——记录日志，允许降级运行
-            self._log_error("初始化扫描非传输异常: %s", exc)
             with self._lock:
-                self.initial_scan_completed = True
-                self.connection_state = CONNECTION_STATE_READY
-                self.ready = True
+                self.connection_state = CONNECTION_STATE_PAUSED
+                self.pause_until = time.monotonic() + PAUSE_SECONDS
+        else:
+            # 阶段二：初始化全量扫描
+            try:
+                self._perform_initial_scan(ws)
+            except (websocket.WebSocketException, ConnectionError, OSError) as exc:
+                # 传输层异常——标记为传输失败，进入轮询循环尝试恢复
+                self._record_transport_failure(exc)
+            except Exception as exc:
+                # 非传输异常（如 JSON decode）——记录日志，允许降级运行
+                self._log_error("初始化扫描非传输异常: %s", exc)
+                with self._lock:
+                    self.initial_scan_completed = True
+                    self.connection_state = CONNECTION_STATE_READY
+                    self.ready = True
 
         # 阶段三：后续轮询循环
         while not self.stop_event.is_set():
@@ -292,6 +294,11 @@ class WebSocketCommManager:
                     continue
 
             if self.connection_state == CONNECTION_STATE_PAUSED:
+                self._interruptible_sleep(1.0)
+                continue
+
+            # ws 仍未建立（首次连接失败后等待恢复），跳过本轮通讯操作
+            if ws is None:
                 self._interruptible_sleep(1.0)
                 continue
 
