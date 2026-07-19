@@ -487,7 +487,10 @@ class WebSocketCommManager:
     def _navigate_to_config(self, ws, config_name):
         """通过 WebSocket 进入指定配置页。
 
-        使用侧边栏 pin_onchange 的 callback_id 发送导航事件。
+        简化假设：侧边栏导航 callback 取第一个 pin_onchange 的 callback_id。
+        实际 ALAS GUI 侧边栏使用单一 selector 切换配置，因此取任意一个
+        pin_onchange callback 即可完成导航。如果未来侧边栏引入了多个独立的
+        pin_onchange 组件，则需要在此处按名称精确匹配。
         """
         with self._lock:
             callback_id = self._sidebar_nav_callback_id
