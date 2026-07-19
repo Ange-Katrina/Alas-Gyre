@@ -517,9 +517,12 @@ class InitSetupWindow(QDialog):
 
     def _rebuild_step_nav(self):
         """根据当前模式重建步骤导航栏。"""
-        while self.stepNavLayout.count():
-            item = self.stepNavLayout.takeAt(0)
+        for idx in range(self.stepNavLayout.count() - 1, -1, -1):
+            item = self.stepNavLayout.takeAt(idx)
             widget = item.widget()
+            if widget is self.stepProgressLabel:
+                self.stepNavLayout.insertWidget(0, widget)
+                continue
             if widget:
                 widget.deleteLater()
         self.stepNavItems = []
