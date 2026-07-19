@@ -196,10 +196,11 @@ class SettingsWindow(QDialog):
         ws_interval_label.setObjectName("formLabel")
         ws_interval_label.setFixedWidth(104)
 
-        self.websocketPollIntervalInput = QLineEdit()
+        self.websocketPollIntervalInput = QSpinBox()
         self.websocketPollIntervalInput.setObjectName("settingsInput")
         self.websocketPollIntervalInput.setFixedSize(96, 30)
-        self.websocketPollIntervalInput.setText(str(self.config.get("websocket_poll_interval", 3)))
+        self.websocketPollIntervalInput.setRange(1, 60)
+        self.websocketPollIntervalInput.setValue(int(self.config.get("websocket_poll_interval", 3)))
 
         ws_interval_layout.addWidget(ws_interval_label)
         ws_interval_layout.addWidget(self.websocketPollIntervalInput)
