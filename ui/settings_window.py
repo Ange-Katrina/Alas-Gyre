@@ -850,59 +850,43 @@ class SettingsWindow(QDialog):
             return
         ip = self.ipInput.text().strip()
         port_str = self.portInput.text().strip()
-        connection_mode = self.connectionModeCombo.currentData() or "overlay"
-        
+        connection_mode = self.connectionModeCombo.currentData() or "auto"
+
         if not ip or not port_str.isdigit():
             self._on_test_result(False, tr("test_invalid"))
             return
-            
+
         self.testBtn.setText("...")
         self.testBtn.setIcon(QIcon())
         self.testBtn.setEnabled(False)
         self.testBtn.setProperty("state", "testing")
         self.testBtn.style().unpolish(self.testBtn)
         self.testBtn.style().polish(self.testBtn)
-        
-        threading.Thread(
-            target=self._test_api,
-            args=(ip, port_str, self.tokenInput.text().strip(), connection_mode),
-            daemon=True,
-        ).start()
 
-    def _test_api(self, ip, port, token, connection_mode="overlay"):
-        """测试连接。websocket 模式测试 ALAS GUI 根页面，overlay 模式测试 Overlay API /health。"""
-        success = False
-        message = ""
+        test_config = dict(self.config)
+        test_config.update({
+            "ip": ip,
+            "port": port_str,
+            "api_token": self.tokenInput.text().strip(),
+            "connection_mode": connection_mode,
+        })
+
+        threading.Thread(target=self._test_api, args=(test_config,), daemon=True).start()
+
+    def _test_api(self, test_config):
+        """使用统一连接测试接口，支持自动降级。"""
         try:
-            if connection_mode == "websocket":
-                url = alas_gui_url({"ip": ip, "port": port})
-                resp = api_request("GET", url, timeout=2.0)
-                if resp.status_code == 200 and "pywebio" in (resp.text or "").lower():
-                    success = True
-                elif resp.status_code == 200:
-                    message = tr("websocket_comm_hint")[:40]
+            result = test_connection_with_fallback(test_config)
+            if result.success:
+                message = tr(result.message_key)
+                if result.source == "websocket_fallback" and result.overlay_error:
+                    message = f"{message}\nOverlay: {result.overlay_error}"
+                self._emit_test_result(True, message)
             else:
-                test_config = {
-                    "ip": ip,
-                    "port": port,
-                    "api_token": token,
-                }
-                resp = api_request(
-                    "GET",
-                    gyre_api_url(test_config, "health"),
-                    headers=api_headers(test_config),
-                    timeout=2.0,
-                )
-                success = resp.status_code == 200
-                if resp.status_code == 401:
-                    message = tr("test_unauthorized")
-                elif resp.status_code == 404:
-                    message = tr("test_overlay_missing")
-                elif not success:
-                    message = f"HTTP {resp.status_code}"
+                detail = result.websocket_error or result.overlay_error
+                self._emit_test_result(False, detail or tr("test_failed_short"))
         except Exception as exc:
-            message = str(exc)
-        self._emit_test_result(success, message)
+            self._emit_test_result(False, str(exc))
 
     def _emit_test_result(self, success, message):
         try:

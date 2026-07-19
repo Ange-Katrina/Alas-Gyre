@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
 )
 
 from alas_gyre.api.client import alas_gui_url, api_headers, api_request, gyre_api_url
+from alas_gyre.api.connection_policy import test_connection_with_fallback
 from alas_gyre.api.overlay_launcher import RUNTIME_DIR_NAME, generate_portable_overlay_launchers
 from alas_gyre.core.config import ensure_api_token, save_config
 from alas_gyre.core.paths import app_base_dir
@@ -547,31 +548,19 @@ class InitSetupWindow(QDialog):
         threading.Thread(target=self._test_api, daemon=True).start()
 
     def _test_api(self):
-        success = False
-        message = ""
+        """使用统一连接测试接口，支持自动降级。"""
         try:
-            connection_mode = self.config.get("connection_mode", "overlay")
-            if connection_mode == "websocket":
-                resp = api_request("GET", alas_gui_url(self.config), timeout=5)
-                success = resp.status_code == 200 and "pywebio" in (resp.text or "").lower()
-                if not success:
-                    message = "WebSocket 通讯测试失败"
+            result = test_connection_with_fallback(self.config)
+            if result.success:
+                message = tr(result.message_key)
+                if result.source == "websocket_fallback" and result.overlay_error:
+                    message = f"{message}\nOverlay: {result.overlay_error}"
+                self.test_result_signal.emit(True, message)
             else:
-                resp = api_request("GET",
-                    gyre_api_url(self.config, "health"),
-                    headers=api_headers(self.config),
-                    timeout=2.0,
-                )
-                success = resp.status_code == 200
-                if resp.status_code == 401:
-                    message = tr("test_unauthorized")
-                elif resp.status_code == 404:
-                    message = tr("test_overlay_missing")
-                elif not success:
-                    message = f"HTTP {resp.status_code}"
+                detail = result.websocket_error or result.overlay_error
+                self.test_result_signal.emit(False, detail or tr("test_failed_short"))
         except Exception as exc:
-            message = str(exc)
-        self.test_result_signal.emit(success, message)
+            self.test_result_signal.emit(False, str(exc))
 
     def _create_icon(self, state):
         pixmap = QPixmap(24, 24)
