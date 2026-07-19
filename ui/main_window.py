@@ -638,6 +638,9 @@ class CardWidget(QFrame):
                 self._polling_status = False
 
     def _fetch_configs_task(self):
+        # websocket 模式下配置列表由 manager 快照提供，不走 Overlay API
+        if self._use_websocket_comm():
+            return
         try:
             url = gyre_api_url(self.config, "configs")
             resp = api_request("GET", url, headers=api_headers(self.config), timeout=2.0)
@@ -712,24 +715,33 @@ class CardWidget(QFrame):
         if self._use_websocket_comm():
             manager = get_persistent_manager()
             manager.update_config(self.config)
-            manager.start()
-            data = manager.get_status_all()
-            configs = data.get("configs", [])
+            # 仅在首次或 stopped 状态时启动 manager
+            snapshot = manager.get_status_all()
+            if snapshot.get("connection_state") == "stopped":
+                manager.start()
+            configs = snapshot.get("configs", [])
             if configs:
                 self.configs_update_signal.emit(configs)
             statuses = {
                 str(config_name): normalize_status(status)
-                for config_name, status in data.get("statuses", {}).items()
+                for config_name, status in snapshot.get("statuses", {}).items()
             }
             tasks = {
                 str(config_name): str(task)
-                for config_name, task in data.get("tasks", {}).items()
+                for config_name, task in snapshot.get("tasks", {}).items()
             }
             self.status_all_update_signal.emit(statuses, tasks)
             self.status_update_signal.emit(
                 statuses.get(self.current_config, "disconnected"),
                 tasks.get(self.current_config, ""),
             )
+            # 根据配置动态更新轮询间隔
+            try:
+                interval_ms = max(1, min(60, int(self.config.get("websocket_poll_interval", 3)))) * 1000
+            except (ValueError, TypeError):
+                interval_ms = 3000
+            if self.poll_timer.interval() != interval_ms:
+                self.poll_timer.setInterval(interval_ms)
             return
 
         try:

@@ -1,13 +1,13 @@
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QWidget, QLabel, QLineEdit, QCheckBox,
-    QPushButton, QFrame, QSlider, QGridLayout, QStackedWidget, QComboBox
+    QPushButton, QFrame, QSlider, QGridLayout, QStackedWidget, QComboBox, QSpinBox
 )
 from PySide6.QtCore import Qt, Signal, QTimer, QSize
 from PySide6.QtGui import QColor, QPixmap, QPainter, QPen, QIcon
 import secrets
 import threading
 
-from alas_gyre.api.client import api_headers, api_request, gyre_api_url
+from alas_gyre.api.client import alas_gui_url, api_headers, api_request, gyre_api_url
 from alas_gyre.api.runtime_update import DEFAULT_RUNTIME_UPDATE_PORT, update_remote_runtime
 from alas_gyre.services.updater import check_for_updates, do_update
 from alas_gyre.core.version import get_current_version
@@ -229,9 +229,12 @@ class SettingsWindow(QDialog):
         ws_mode_layout.addWidget(self.websocketPollModeInput, stretch=1)
 
         # WebSocket 通讯说明
-        ws_hint = QLabel(tr("websocket_comm_hint"))
-        ws_hint.setStyleSheet("color: #8f96a3; font-size: 12px; font-family: 'Microsoft YaHei', 'Segoe UI';")
-        ws_hint.setWordWrap(True)
+        self.wsHint = QLabel(tr("websocket_comm_hint"))
+        self.wsHint.setStyleSheet("color: #8f96a3; font-size: 12px; font-family: 'Microsoft YaHei', 'Segoe UI';")
+        self.wsHint.setWordWrap(True)
+
+        # 轮询模式切换时动态更新提示文本
+        self.websocketPollModeInput.currentIndexChanged.connect(self._on_poll_mode_changed)
 
         # 端口与测试按钮布局
         port_layout = QHBoxLayout()
@@ -445,7 +448,7 @@ class SettingsWindow(QDialog):
         connection_panel_layout.addLayout(ip_layout)
         connection_panel_layout.addLayout(ws_interval_layout)
         connection_panel_layout.addLayout(ws_mode_layout)
-        connection_panel_layout.addWidget(ws_hint)
+        connection_panel_layout.addWidget(self.wsHint)
         connection_panel_layout.addLayout(port_layout)
         connection_panel_layout.addLayout(runtime_port_layout)
         connection_panel_layout.addLayout(token_layout)
@@ -777,10 +780,7 @@ class SettingsWindow(QDialog):
         self.config["ip"] = self.ipInput.text()
         self.config["port"] = self.portInput.text()
         self.config["connection_mode"] = self.connectionModeCombo.currentData() or "overlay"
-        try:
-            self.config["websocket_poll_interval"] = max(1, min(60, int(self.websocketPollIntervalInput.text().strip() or "3")))
-        except ValueError:
-            self.config["websocket_poll_interval"] = 3
+        self.config["websocket_poll_interval"] = self.websocketPollIntervalInput.value()
         self.config["websocket_poll_mode"] = self.websocketPollModeInput.currentData() or "round_robin"
         runtime_port = self.runtimePortInput.text().strip()
         self.config["runtime_update_port"] = runtime_port if runtime_port.isdigit() else DEFAULT_RUNTIME_UPDATE_PORT
@@ -831,6 +831,7 @@ class SettingsWindow(QDialog):
             return
         ip = self.ipInput.text().strip()
         port_str = self.portInput.text().strip()
+        connection_mode = self.connectionModeCombo.currentData() or "overlay"
         
         if not ip or not port_str.isdigit():
             self._on_test_result(False, tr("test_invalid"))
@@ -845,32 +846,41 @@ class SettingsWindow(QDialog):
         
         threading.Thread(
             target=self._test_api,
-            args=(ip, port_str, self.tokenInput.text().strip()),
+            args=(ip, port_str, self.tokenInput.text().strip(), connection_mode),
             daemon=True,
         ).start()
 
-    def _test_api(self, ip, port, token):
+    def _test_api(self, ip, port, token, connection_mode="overlay"):
+        """测试连接。websocket 模式测试 ALAS GUI 根页面，overlay 模式测试 Overlay API /health。"""
         success = False
         message = ""
         try:
-            test_config = {
-                "ip": ip,
-                "port": port,
-                "api_token": token,
-            }
-            resp = api_request(
-                "GET",
-                gyre_api_url(test_config, "health"),
-                headers=api_headers(test_config),
-                timeout=2.0,
-            )
-            success = resp.status_code == 200
-            if resp.status_code == 401:
-                message = tr("test_unauthorized")
-            elif resp.status_code == 404:
-                message = tr("test_overlay_missing")
-            elif not success:
-                message = f"HTTP {resp.status_code}"
+            if connection_mode == "websocket":
+                url = alas_gui_url({"ip": ip, "port": port})
+                resp = api_request("GET", url, timeout=2.0)
+                if resp.status_code == 200 and "pywebio" in (resp.text or "").lower():
+                    success = True
+                elif resp.status_code == 200:
+                    message = tr("websocket_comm_hint")[:40]
+            else:
+                test_config = {
+                    "ip": ip,
+                    "port": port,
+                    "api_token": token,
+                }
+                resp = api_request(
+                    "GET",
+                    gyre_api_url(test_config, "health"),
+                    headers=api_headers(test_config),
+                    timeout=2.0,
+                )
+                success = resp.status_code == 200
+                if resp.status_code == 401:
+                    message = tr("test_unauthorized")
+                elif resp.status_code == 404:
+                    message = tr("test_overlay_missing")
+                elif not success:
+                    message = f"HTTP {resp.status_code}"
         except Exception as exc:
             message = str(exc)
         self._emit_test_result(success, message)
@@ -932,3 +942,11 @@ class SettingsWindow(QDialog):
         self.testBtn.setProperty("state", "normal")
         self.testBtn.style().unpolish(self.testBtn)
         self.testBtn.style().polish(self.testBtn)
+
+    def _on_poll_mode_changed(self, index):
+        """轮询模式切换时动态更新提示文本。"""
+        mode = self.websocketPollModeInput.currentData()
+        if mode == "full_scan":
+            self.wsHint.setText(tr("websocket_full_scan_hint"))
+        else:
+            self.wsHint.setText(tr("websocket_comm_hint"))

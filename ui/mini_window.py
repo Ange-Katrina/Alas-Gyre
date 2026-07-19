@@ -122,7 +122,7 @@ class MiniConfigRow(QWidget):
         import threading
         def send_req():
             try:
-                if self.main_card.config.get("connection_mode", "overlay") == "websocket":
+                if self.main_card._use_websocket_comm():
                     result = get_persistent_manager().post_action(self.config_name, action)
                     if result.get("queued"):
                         self.main_card.status_all_update_signal.emit({self.config_name: "queued"}, {self.config_name: ""})
