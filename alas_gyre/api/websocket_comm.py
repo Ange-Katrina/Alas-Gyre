@@ -160,6 +160,8 @@ class WebSocketCommManager:
                 if item.config_name != command.config_name
             ]
             self._control_queue.append(command)
+            self.statuses[command.config_name] = "queued"
+            self.tasks[command.config_name] = ""
             return {
                 "submitted": True,
                 "queued": True,
