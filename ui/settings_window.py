@@ -299,6 +299,9 @@ class SettingsWindow(QDialog):
         self.tokenInput.setText(self.config.get("api_token", ""))
         token_layout.addWidget(token_label)
         token_layout.addWidget(self.tokenInput, stretch=1)
+        self.tokenHint = QLabel(tr("api_token_hint"))
+        self.tokenHint.setStyleSheet("color: #8f96a3; font-size: 12px; font-family: 'Microsoft YaHei', 'Segoe UI';")
+        self.tokenHint.setWordWrap(True)
 
         self.tokenGenerateBtn = QPushButton(tr("generate"))
         self.tokenGenerateBtn.setObjectName("tokenBtn")
