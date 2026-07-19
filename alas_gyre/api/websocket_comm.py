@@ -86,6 +86,7 @@ class WebSocketCommManager:
         self.worker_thread = None
         self.round_robin_index = 0
         self._sidebar_nav_callback_id = ""
+        self._sidebar_nav_callbacks = {}
         self._page_missing_counts = {}
         self._page_missing_skip_until = {}
 
@@ -432,6 +433,7 @@ class WebSocketCommManager:
 
             message = parse_pywebio_message(raw)
             state.apply_message(message)
+            self._handle_pywebio_runtime_message(ws, message)
 
             # 检测 session 重置（set_session_id 变化）
             if message.command == "set_session_id":
@@ -450,12 +452,41 @@ class WebSocketCommManager:
 
         return state
 
+    @staticmethod
+    def _handle_pywebio_runtime_message(ws, message):
+        """处理 PyWebIO 运行时消息并发送必要响应。
+
+        PyWebIO 浏览器端收到 run_script(eval=True) 后会执行 JavaScript，
+        并通过 js_yield 事件把结果回传。非浏览器客户端也必须回传该事件，
+        否则服务端会停在等待 JS 返回值，后续 output/output_ctl 不会下发。
+        """
+        if message.command != "run_script" or not isinstance(message.spec, dict):
+            return False
+        if not message.spec.get("eval"):
+            return False
+        payload = {
+            "event": "js_yield",
+            "task_id": message.task_id,
+            "data": None,
+        }
+        ws.send(json.dumps(payload))
+        return True
+
     def _send_callback(self, ws, callback_id, value):
-        """发送 PyWebIO callback 事件到 WebSocket。"""
+        """发送 PyWebIO pin callback 事件到 WebSocket。"""
         payload = {
             "event": "callback",
             "task_id": "main",
             "data": {"callback_id": str(callback_id), "value": str(value)},
+        }
+        ws.send(json.dumps(payload))
+
+    def _send_button_callback(self, ws, callback_id, value):
+        """发送 PyWebIO buttons callback 事件到 WebSocket。"""
+        payload = {
+            "event": "callback",
+            "task_id": str(callback_id),
+            "data": value,
         }
         ws.send(json.dumps(payload))
 
@@ -467,6 +498,7 @@ class WebSocketCommManager:
         # 收集侧边栏页面消息
         state = self._collect_page_messages(ws, COLLECT_TIMEOUT_SECONDS)
         config_names = extract_instance_names(state)
+        nav_callbacks = extract_instance_nav_callbacks(state)
 
         # 存储侧边栏导航 callback_id（从 pin_onchange 获取）
         sidebar_callback_id = ""
@@ -476,6 +508,7 @@ class WebSocketCommManager:
 
         with self._lock:
             self._sidebar_nav_callback_id = sidebar_callback_id
+            self._sidebar_nav_callbacks = dict(nav_callbacks)
 
         # 无配置时回退为默认
         if not config_names:
@@ -518,7 +551,14 @@ class WebSocketCommManager:
         pin_onchange 组件，则需要在此处按名称精确匹配。
         """
         with self._lock:
+            nav_callback = getattr(self, "_sidebar_nav_callbacks", {}).get(config_name)
             callback_id = self._sidebar_nav_callback_id
+
+        if nav_callback:
+            callback_id, value = nav_callback
+            self._send_button_callback(ws, callback_id, value)
+            time.sleep(0.5)
+            return
 
         if not callback_id:
             # 侧边栏 callback_id 缺失，尝试重新从当前页面收集
@@ -581,7 +621,7 @@ class WebSocketCommManager:
             return
 
         # 发送按钮点击
-        self._send_callback(ws, callback_id, "")
+        self._send_button_callback(ws, callback_id, "")
         time.sleep(CONTROL_RESYNC_DELAY_SECONDS)
 
         # 重新扫描该配置状态
@@ -699,6 +739,7 @@ class WebSocketCommManager:
                 self.transport_available = True
                 self.consecutive_degraded_count = 0
                 self._sidebar_nav_callback_id = ""
+                self._sidebar_nav_callbacks = {}
                 # 清除逐配置缺失跟踪（新连接后重新统计）
                 self._page_missing_counts.clear()
                 self._page_missing_skip_until.clear()
@@ -720,6 +761,7 @@ class WebSocketCommManager:
 
         # 收集侧边栏页面消息，更新侧边栏 callback_id
         state = self._collect_page_messages(ws, COLLECT_TIMEOUT_SECONDS)
+        nav_callbacks = extract_instance_nav_callbacks(state)
         sidebar_callback_id = ""
         for pin_name, cid in state.callback_ids.items():
             sidebar_callback_id = cid
@@ -727,6 +769,9 @@ class WebSocketCommManager:
         if sidebar_callback_id:
             with self._lock:
                 self._sidebar_nav_callback_id = sidebar_callback_id
+        if nav_callbacks:
+            with self._lock:
+                self._sidebar_nav_callbacks.update(nav_callbacks)
 
         # 检查是否有新配置出现（不删除已有配置，避免 UI 闪烁）
         fresh_names = extract_instance_names(state)
@@ -809,6 +854,7 @@ class PyWebIOPageState:
     outputs: list = field(default_factory=list)
     inputs: list = field(default_factory=list)
     scripts: list = field(default_factory=list)
+    current_scope: str = ""
 
     def apply_message(self, message):
         """合并 PyWebIO 消息到页面状态。"""
@@ -823,7 +869,11 @@ class PyWebIOPageState:
                 if name and callback_id:
                     self.callback_ids[name] = callback_id
         elif message.command == "output":
-            self.outputs.append(message.spec)
+            output = message.spec
+            if isinstance(output, dict) and self.current_scope and "scope" not in output:
+                output = dict(output)
+                output["scope"] = self.current_scope
+            self.outputs.append(output)
         elif message.command == "input":
             self.inputs.append(message.spec)
         elif message.command == "run_script":
@@ -835,6 +885,16 @@ class PyWebIOPageState:
         """应用 output_ctl 到 outputs。"""
         if not isinstance(spec, dict):
             return
+        set_scope = str(spec.get("set_scope", "") or "")
+        if set_scope:
+            self.current_scope = set_scope if set_scope.startswith("#") else f"#{set_scope}"
+            if spec.get("if_exist") == "clear":
+                self._clear_scope(self.current_scope)
+            return
+        clear_scope = str(spec.get("clear", "") or "")
+        if clear_scope:
+            self._clear_scope(clear_scope)
+            return
         scope = str(spec.get("scope", "") or "")
         method = str(spec.get("method", "") or "").lower()
         data = spec.get("data")
@@ -844,12 +904,20 @@ class PyWebIOPageState:
             if data is not None:
                 self.outputs.append(data)
             return
-        self.outputs = [
-            item for item in self.outputs
-            if not isinstance(item, dict) or str(item.get("scope", "") or "") != scope
-        ]
+        self._clear_scope(scope)
         if method == "replace" and data is not None:
             self.outputs.append(data)
+
+    def _clear_scope(self, scope):
+        """清理指定 PyWebIO scope 的输出。"""
+        normalized = scope if str(scope).startswith("#") else f"#{scope}"
+        raw = normalized[1:]
+        self.outputs = [
+            item for item in self.outputs
+            if not isinstance(item, dict)
+            or normalized not in _scope_identity(item)
+            and raw not in _scope_identity(item)
+        ]
 
 
 def parse_pywebio_message(raw):
@@ -875,10 +943,45 @@ def _flatten_text(value):
     if isinstance(value, str):
         return value
     if isinstance(value, dict):
-        return " ".join(_flatten_text(item) for key, item in value.items() if key != "scope")
+        return " ".join(
+            _flatten_text(item)
+            for key, item in value.items()
+            if key not in {"scope", "dom_id", "callback_id", "type"}
+        )
     if isinstance(value, (list, tuple)):
         return " ".join(_flatten_text(item) for item in value)
     return str(value)
+
+
+def _walk_dicts(value):
+    """遍历嵌套结构中的所有 dict 节点。"""
+    if isinstance(value, dict):
+        yield value
+        for item in value.values():
+            yield from _walk_dicts(item)
+    elif isinstance(value, (list, tuple)):
+        for item in value:
+            yield from _walk_dicts(item)
+
+
+def _scope_identity(value):
+    """返回 PyWebIO 输出节点关联的 scope 标识文本。"""
+    if not isinstance(value, dict):
+        return ""
+    parts = []
+    for key in ("scope", "dom_id", "set_scope", "container", "clear"):
+        raw = value.get(key)
+        if raw:
+            parts.append(str(raw))
+    return " ".join(parts)
+
+
+def _extract_buttons(value):
+    """遍历嵌套结构中的 PyWebIO buttons 节点。"""
+    for item in _walk_dicts(value):
+        buttons = item.get("buttons")
+        if isinstance(buttons, list):
+            yield item, buttons
 
 
 def extract_instance_names(state):
@@ -888,17 +991,50 @@ def extract_instance_names(state):
     for output in state.outputs:
         if not isinstance(output, dict):
             continue
-        scope = str(output.get("scope", "") or "")
-        if "alas-instance-" not in scope:
+        if "alas-instance-" not in _scope_identity(output):
             continue
-        text = _flatten_text(output).strip()
-        for token in text.replace("\n", " ").split():
-            name = token.strip()
+        found_button = False
+        for button_group, buttons in _extract_buttons(output):
+            if "alas-instance-" not in _scope_identity(button_group):
+                continue
+            found_button = True
+            for button in buttons:
+                if not isinstance(button, dict):
+                    continue
+                name = str(button.get("label", "") or "").strip()
+                if name and name not in seen:
+                    seen.add(name)
+                    names.append(name)
+        if not found_button:
+            name = str(output.get("content", "") or "").strip()
             if name and name not in seen:
                 seen.add(name)
                 names.append(name)
-                break
     return names
+
+
+def extract_instance_nav_callbacks(state):
+    """从侧边栏按钮输出提取配置导航 callback。"""
+    callbacks = {}
+    for output in state.outputs:
+        if not isinstance(output, dict):
+            continue
+        if "alas-instance-" not in _scope_identity(output):
+            continue
+        for button_group, buttons in _extract_buttons(output):
+            if "alas-instance-" not in _scope_identity(button_group):
+                continue
+            callback_id = str(button_group.get("callback_id", "") or "")
+            if not callback_id:
+                continue
+            for button in buttons:
+                if not isinstance(button, dict):
+                    continue
+                name = str(button.get("label", "") or "").strip()
+                if not name:
+                    continue
+                callbacks[name] = (callback_id, button.get("value"))
+    return callbacks
 
 
 def extract_config_status(state):
@@ -908,7 +1044,7 @@ def extract_config_status(state):
     for output in state.outputs:
         if not isinstance(output, dict):
             continue
-        scope = str(output.get("scope", "") or "")
+        scope = _scope_identity(output)
         text = _flatten_text(output).lower()
         if "header_status" in scope:
             header_text += " " + text
