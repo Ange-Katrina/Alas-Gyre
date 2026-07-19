@@ -271,6 +271,7 @@ class CardWidget(QFrame):
     status_all_update_signal = Signal(dict, dict)
     config_delete_result_signal = Signal(bool, str, str, list, str)
     control_error_signal = Signal(str, str)
+    websocket_fallback_notice_signal = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -564,6 +565,20 @@ class CardWidget(QFrame):
         """判断是否直接使用 WebSocket 通讯。"""
         return should_use_websocket_directly(self.config)
 
+    def _reset_runtime_connection(self):
+        """按当前配置重置运行时连接来源和降级提示状态。"""
+        self._runtime_connection = "websocket" if self._use_websocket_comm() else "overlay"
+        self._websocket_fallback_notice_shown = False
+
+    def _mark_websocket_fallback(self):
+        """标记已降级到 WebSocket，并在当前降级周期只提示一次。"""
+        if getattr(self, "_runtime_connection", "overlay") != "websocket_fallback":
+            print("[Log] Overlay 不可用，已自动切换到 WebSocket 通讯")
+        self._runtime_connection = "websocket_fallback"
+        if not getattr(self, "_websocket_fallback_notice_shown", False):
+            self._websocket_fallback_notice_shown = True
+            safe_emit_signal(self.websocket_fallback_notice_signal)
+
     def _is_websocket_snapshot_usable(self, snapshot):
         """判断 WebSocket 快照是否可用（连接状态有效）。"""
         return snapshot.get("connection_state") in {"connecting", "initial_scanning", "ready", "degraded"}
@@ -586,9 +601,7 @@ class CardWidget(QFrame):
         if fallback and not self._is_websocket_snapshot_usable(snapshot):
             return False
         if fallback:
-            if getattr(self, "_runtime_connection", "overlay") != "websocket_fallback":
-                print("[Log] Overlay 不可用，已自动切换到 WebSocket 通讯")
-            self._runtime_connection = "websocket_fallback"
+            self._mark_websocket_fallback()
         configs, statuses, tasks, current_status, current_task = build_websocket_ui_snapshot(
             snapshot,
             self.current_config,
@@ -652,7 +665,7 @@ class CardWidget(QFrame):
         except Exception as exc:
             failure = exc
         if should_fallback_to_websocket(self.config, failure):
-            self._runtime_connection = "websocket_fallback"
+            self._mark_websocket_fallback()
             return self._queue_websocket_control(config_name, action)
         self.control_error_signal.emit(action, str(failure) or tr("control_connect_failed"))
         return {"error": str(failure)}
@@ -679,6 +692,17 @@ class CardWidget(QFrame):
             parent or self,
             tr("control_failed_title"),
             message or tr("action_failed", error=action),
+        )
+
+    def _on_websocket_fallback_notice(self):
+        """提示用户当前已自动切换到 WebSocket 通讯。"""
+        parent = self.window()
+        if hasattr(self, "mini_dialog") and self.mini_dialog.isVisible():
+            parent = self.mini_dialog
+        show_info(
+            parent or self,
+            tr("websocket_fallback_notice_title"),
+            tr("websocket_fallback_notice_message"),
         )
 
     def _forward_drag_press(self, event):
@@ -926,7 +950,7 @@ class CardWidget(QFrame):
                         json.dump(self.config, f, indent=4, ensure_ascii=False)
                     print(f"[Log] Config successfully persisted to {self.config_path}")
 
-                    self._runtime_connection = "websocket" if self._use_websocket_comm() else "overlay"
+                    self._reset_runtime_connection()
 
                     self.retranslate_ui()
 

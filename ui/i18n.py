@@ -125,6 +125,8 @@ TRANSLATIONS = {
         "test_overlay_and_websocket_failed": "Overlay 和 WebSocket 通讯均不可用。",
         "action_failed": "操作失败：{error}",
         "control_failed_title": "操作失败",
+        "websocket_fallback_notice_title": "已切换连接方式",
+        "websocket_fallback_notice_message": "Overlay API 暂不可用，已自动切换到 WebSocket 通讯。确认后将继续使用 WebSocket，直到恢复自动模式或重新保存设置。",
         "control_connect_failed": "未连接到 ALAS Overlay API。\n请使用 start_gyre_alas.bat / start_gyre_alas.sh 启动 ALAS 后重试。",
         "control_http_failed": "ALAS Overlay API 返回 HTTP {status}。",
         "control_http_failed_with_detail": "ALAS Overlay API 返回 HTTP {status}：\n{error}",
