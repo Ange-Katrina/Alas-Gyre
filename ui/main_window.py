@@ -9,6 +9,8 @@ import threading
 import time
 
 from alas_gyre.api.client import api_headers, api_request, gyre_api_url
+from alas_gyre.api.connection_policy import normalize_connection_mode
+from alas_gyre.api.connection_policy import should_use_websocket_directly
 from alas_gyre.api.websocket_comm import get_persistent_manager
 from alas_gyre.core.paths import (
     app_base_dir as app_base_dir, asset_path, config_path,
@@ -308,7 +310,7 @@ class CardWidget(QFrame):
             "mini_opacity": 100,
             "lang": get_language(),
             "setup_completed": False,
-            "connection_mode": "overlay",
+            "connection_mode": "auto",
             "websocket_poll_interval": 3,
             "websocket_poll_mode": "round_robin",
         }
@@ -319,6 +321,7 @@ class CardWidget(QFrame):
                 with open(self.config_path, "r", encoding="utf-8") as f:
                     loaded_config = json.load(f)
                 self.config.update(loaded_config)
+                self.config["connection_mode"] = normalize_connection_mode(self.config)
                 if "setup_completed" not in loaded_config:
                     self.config["setup_completed"] = True
             except Exception as e:
@@ -579,8 +582,8 @@ class CardWidget(QFrame):
         self._start_poll_thread()
 
     def _use_websocket_comm(self):
-        """判断是否使用 WebSocket 通讯。"""
-        return self.config.get("connection_mode", "overlay") == "websocket"
+        """判断是否直接使用 WebSocket 通讯。"""
+        return should_use_websocket_directly(self.config)
 
     def format_control_http_error(self, resp):
         try:
