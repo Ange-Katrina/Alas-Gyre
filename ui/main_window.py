@@ -730,9 +730,13 @@ class CardWidget(QFrame):
                 str(config_name): str(task)
                 for config_name, task in snapshot.get("tasks", {}).items()
             }
+            current_fallback = "scanning" if snapshot.get("connection_state") in {"stopped", "connecting", "initial_scanning"} else "disconnected"
+            if not statuses and current_fallback == "scanning" and self.current_config:
+                statuses = {self.current_config: "scanning"}
+                tasks = {self.current_config: ""}
             self.status_all_update_signal.emit(statuses, tasks)
             self.status_update_signal.emit(
-                statuses.get(self.current_config, "disconnected"),
+                statuses.get(self.current_config, current_fallback),
                 tasks.get(self.current_config, ""),
             )
             # 根据配置动态更新轮询间隔

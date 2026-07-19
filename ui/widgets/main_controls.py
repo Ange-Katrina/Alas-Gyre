@@ -12,7 +12,7 @@ from alas_gyre.core.status import normalize_status
 from ..i18n import tr
 
 
-ANIMATED_STATUSES = {"running", "error", "update", "disconnected"}
+ANIMATED_STATUSES = {"running", "error", "update", "disconnected", "scanning"}
 _BOTTOM_ICON_CACHE = {}
 
 
@@ -92,7 +92,7 @@ class StatusIndicator(QWidget):
             angle = self._synced_angle(-320)
             p.drawArc(2, 2, 12, 12, int(angle * 16), 270 * 16)
 
-        elif self._state == "update":
+        elif self._state in {"update", "scanning"}:
             pen = QPen(QColor(96, 165, 250), 2.5, Qt.SolidLine, Qt.RoundCap)
             p.setPen(pen)
             p.setBrush(Qt.NoBrush)

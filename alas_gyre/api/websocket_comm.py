@@ -39,7 +39,9 @@ PAGE_MISSING_FAILURE_THRESHOLD = 3
 PAUSE_SECONDS = 10.0
 RECONNECT_DELAY_SECONDS = 1.0
 COLLECT_TIMEOUT_SECONDS = 1.5
-CONTROL_RESYNC_DELAY_SECONDS = 0.5
+CONTROL_COLLECT_TIMEOUT_SECONDS = 0.35
+CONTROL_RESYNC_DELAY_SECONDS = 0.1
+NAVIGATION_DELAY_SECONDS = 0.15
 
 
 class WebSocketCommError(Exception):
@@ -206,9 +208,14 @@ class WebSocketCommManager:
             and configs
             and len(statuses) < len(configs)
         ):
-            snapshot["configs"] = []
-            snapshot["statuses"] = {}
-            snapshot["tasks"] = {}
+            snapshot["statuses"] = {
+                str(config_name): statuses.get(config_name, "scanning")
+                for config_name in configs
+            }
+            snapshot["tasks"] = {
+                str(config_name): snapshot.get("tasks", {}).get(config_name, "")
+                for config_name in configs
+            }
         return snapshot
 
     def _mark_config_missing(self, config_name, error):
@@ -573,7 +580,7 @@ class WebSocketCommManager:
         if nav_callback:
             callback_id, value = nav_callback
             self._send_button_callback(ws, callback_id, value)
-            time.sleep(0.5)
+            time.sleep(NAVIGATION_DELAY_SECONDS)
             return
 
         if not callback_id:
@@ -590,7 +597,7 @@ class WebSocketCommManager:
 
         self._send_callback(ws, callback_id, config_name)
         # 等待页面跳转
-        time.sleep(0.5)
+        time.sleep(NAVIGATION_DELAY_SECONDS)
 
     def _scan_config(self, ws, config_name):
         """扫描单个配置页——进入页面、收集消息、提取状态。"""
@@ -623,13 +630,16 @@ class WebSocketCommManager:
         # 进入目标配置页
         self._navigate_to_config(ws, cmd.config_name)
 
-        # 收集页面状态以查找按钮
-        page_state = self._collect_page_messages(ws, COLLECT_TIMEOUT_SECONDS)
+        # 收集页面状态以查找按钮，优先复用会话缓存以减少控制延迟。
+        page_state = getattr(self, "_page_state", PyWebIOPageState())
 
         target_labels = START_BUTTON_LABELS if cmd.action == "start" else STOP_BUTTON_LABELS
 
         # 在 scheduler_btn scope 中查找目标按钮
         callback_id, value = self._find_button_action(page_state, target_labels)
+        if not callback_id:
+            page_state = self._collect_page_messages(ws, CONTROL_COLLECT_TIMEOUT_SECONDS)
+            callback_id, value = self._find_button_action(page_state, target_labels)
 
         if not callback_id:
             with self._lock:
@@ -641,7 +651,7 @@ class WebSocketCommManager:
         time.sleep(CONTROL_RESYNC_DELAY_SECONDS)
 
         # 重新扫描该配置状态
-        page_state = self._collect_page_messages(ws, COLLECT_TIMEOUT_SECONDS)
+        page_state = self._collect_page_messages(ws, CONTROL_COLLECT_TIMEOUT_SECONDS)
         status = extract_config_status(page_state)
         self._apply_config_status(cmd.config_name, status)
 
