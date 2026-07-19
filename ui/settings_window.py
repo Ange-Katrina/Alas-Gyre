@@ -8,6 +8,8 @@ import secrets
 import threading
 
 from alas_gyre.api.client import alas_gui_url, api_headers, api_request, gyre_api_url
+from alas_gyre.api.connection_policy import normalize_connection_mode
+from alas_gyre.api.connection_policy import test_connection_with_fallback
 from alas_gyre.api.runtime_update import DEFAULT_RUNTIME_UPDATE_PORT, update_remote_runtime
 from alas_gyre.services.updater import check_for_updates, do_update
 from alas_gyre.core.version import get_current_version
@@ -165,12 +167,15 @@ class SettingsWindow(QDialog):
         self.connectionModeCombo.setFocusPolicy(Qt.NoFocus)
         self.connectionModeCombo.setFixedHeight(30)
         self.connectionModeCombo.setFixedWidth(164)
-        self.connectionModeCombo.addItem(tr("connection_mode_overlay"), "overlay")
+        self.connectionModeCombo.addItem(tr("connection_mode_auto"), "auto")
         self.connectionModeCombo.addItem(tr("connection_mode_websocket"), "websocket")
-        current_mode = self.config.get("connection_mode", "overlay")
+        current_mode = normalize_connection_mode(self.config)
         idx = self.connectionModeCombo.findData(current_mode)
         if idx >= 0:
             self.connectionModeCombo.setCurrentIndex(idx)
+
+        self.connectionModeCombo.currentIndexChanged.connect(self._refresh_connection_mode_visibility)
+        self._refresh_connection_mode_visibility()
 
         conn_mode_layout.addWidget(conn_mode_label)
         conn_mode_layout.addWidget(self.connectionModeCombo, stretch=1)
@@ -266,6 +271,7 @@ class SettingsWindow(QDialog):
         runtime_port_label = QLabel(tr("runtime_update_port"))
         runtime_port_label.setObjectName("formLabel")
         runtime_port_label.setFixedWidth(104)
+        self.runtimePortLabel = runtime_port_label
         self.runtimePortInput = QLineEdit()
         self.runtimePortInput.setObjectName("settingsInput")
         self.runtimePortInput.setFixedSize(96, 30)
@@ -281,6 +287,7 @@ class SettingsWindow(QDialog):
         token_label = QLabel("API Token")
         token_label.setObjectName("formLabel")
         token_label.setFixedWidth(104)
+        self.tokenLabel = token_label
         self.tokenInput = QLineEdit()
         self.tokenInput.setObjectName("settingsInput")
         self.tokenInput.setFixedHeight(30)
@@ -780,7 +787,7 @@ class SettingsWindow(QDialog):
         self.config["lang"] = "en" if self.englishLangCheck.isChecked() else "zh"
         self.config["ip"] = self.ipInput.text()
         self.config["port"] = self.portInput.text()
-        self.config["connection_mode"] = self.connectionModeCombo.currentData() or "overlay"
+        self.config["connection_mode"] = self.connectionModeCombo.currentData() or "auto"
         self.config["websocket_poll_interval"] = self.websocketPollIntervalInput.value()
         self.config["websocket_poll_mode"] = self.websocketPollModeInput.currentData() or "round_robin"
         runtime_port = self.runtimePortInput.text().strip()
@@ -826,6 +833,17 @@ class SettingsWindow(QDialog):
     def _generate_token(self):
         self.tokenInput.setText(secrets.token_urlsafe(32))
         self.tokenInput.setFocus()
+
+    def _refresh_connection_mode_visibility(self):
+        websocket = (self.connectionModeCombo.currentData() == "websocket")
+        for widget in (
+            self.runtimePortLabel,
+            self.runtimePortInput,
+            self.tokenLabel,
+            self.tokenInput,
+            self.tokenGenerateBtn,
+        ):
+            widget.setVisible(not websocket)
 
     def _run_connection_test(self):
         if not isValid(self):
