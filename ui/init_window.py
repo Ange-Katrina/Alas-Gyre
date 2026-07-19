@@ -104,7 +104,6 @@ class InitSetupWindow(QDialog):
 
         self.stepNavItems = []
         rail_layout.addStretch()
-        self._rebuild_step_nav()
         content_layout.addWidget(self.stepRail)
 
         right_panel = QWidget(self.bodyBg)
