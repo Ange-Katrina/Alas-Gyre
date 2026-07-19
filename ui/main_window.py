@@ -900,7 +900,12 @@ class CardWidget(QFrame):
                         statuses[config_name] = "disconnected"
                         tasks[config_name] = ""
                 self.status_all_update_signal.emit(statuses, tasks)
-                self.status_update_signal.emit(statuses.get(self.current_config, "disconnected"), tasks.get(self.current_config, ""))
+                current_status = statuses.get(self.current_config, "disconnected")
+                current_task = tasks.get(self.current_config, "")
+                if normalize_status(current_status) == "disconnected" and should_fallback_to_websocket(self.config, current_status):
+                    if self._poll_via_websocket_manager(fallback=True):
+                        return
+                self.status_update_signal.emit(current_status, current_task)
             else:
                 exc = Exception(f"HTTP {resp.status_code}")
                 if should_fallback_to_websocket(self.config, exc):
