@@ -85,6 +85,8 @@ class WebSocketCommManager:
         self.worker_thread = None
         self.round_robin_index = 0
         self._sidebar_nav_callback_id = ""
+        self._page_missing_counts = {}
+        self._page_missing_skip_until = {}
 
     def _normalize_poll_interval(self, value):
         """规范化轮询间隔。"""
@@ -196,23 +198,62 @@ class WebSocketCommManager:
         return self.get_snapshot()
 
     def _mark_config_missing(self, config_name, error):
-        """标记配置页面状态不可确认。"""
+        """标记配置页面状态不可确认，递增逐配置缺失计数并在达到阈值后暂缓扫描。"""
         name = str(config_name)
         self.statuses[name] = "disconnected"
         self.tasks[name] = ""
         self.scan_errors[name] = str(error)
 
+        # 递增逐配置缺失计数（防御 __new__ 构造的未初始化对象）
+        counts = getattr(self, '_page_missing_counts', None)
+        if counts is None:
+            counts = {}
+            self._page_missing_counts = counts
+        current_count = counts.get(name, 0) + 1
+        counts[name] = current_count
+        if current_count >= PAGE_MISSING_FAILURE_THRESHOLD:
+            skip_until = getattr(self, '_page_missing_skip_until', None)
+            if skip_until is None:
+                skip_until = {}
+                self._page_missing_skip_until = skip_until
+            skip_until[name] = time.monotonic() + PAUSE_SECONDS
+
     def _apply_config_status(self, config_name, status):
-        """写入经过页面证据确认的配置状态。"""
+        """写入经过页面证据确认的配置状态，成功时清除该配置的缺失计数和跳过时间。"""
         name = str(config_name)
         if status:
             self.statuses[name] = status
             self.tasks[name] = ""
             self.scan_errors.pop(name, None)
             self.last_scan_config = name
+            # 清除该配置的逐配置缺失跟踪（防御 __new__ 构造的未初始化对象）
+            counts = getattr(self, '_page_missing_counts', None)
+            if counts is not None:
+                counts.pop(name, None)
+            skip = getattr(self, '_page_missing_skip_until', None)
+            if skip is not None:
+                skip.pop(name, None)
             return True
         self._mark_config_missing(name, ERROR_TARGET_SCOPE_NOT_FOUND)
         return False
+
+    def _is_config_page_missing_skip(self, config_name):
+        """检查配置是否因页面缺失而被暂缓扫描（自动清理过期条目）。"""
+        name = str(config_name)
+        skip_dict = getattr(self, '_page_missing_skip_until', None)
+        if skip_dict is None:
+            return False
+        skip_until = skip_dict.get(name, 0.0)
+        if skip_until <= 0.0:
+            return False
+        if time.monotonic() >= skip_until:
+            # 跳过时间已过期，清理该条目
+            counts = getattr(self, '_page_missing_counts', None)
+            if counts is not None:
+                counts.pop(name, None)
+            skip_dict.pop(name, None)
+            return False
+        return True
 
     def _run_loop(self):
         """后台通讯循环——通过 PyWebIO WebSocket 与 ALAS GUI 通讯。"""
@@ -565,7 +606,7 @@ class WebSocketCommManager:
         return ""
 
     def _poll_round_robin(self, ws):
-        """round_robin 模式轮询一个配置的状态。"""
+        """round_robin 模式轮询一个配置的状态，跳过被暂缓的缺失配置。"""
         configs = []
         with self._lock:
             configs = list(self.configs)
@@ -573,24 +614,36 @@ class WebSocketCommManager:
         if not configs:
             return
 
+        # 找到第一个不在跳过列表中的配置
         with self._lock:
-            self.round_robin_index = self.round_robin_index % len(configs)
-            idx = self.round_robin_index
-            self.round_robin_index += 1
+            start_idx = self.round_robin_index % len(configs)
+            for offset in range(len(configs)):
+                idx = (start_idx + offset) % len(configs)
+                name = configs[idx]
+                if not self._is_config_page_missing_skip(name):
+                    self.round_robin_index = (idx + 1) % len(configs)
+                    config_name = name
+                    break
+            else:
+                # 所有配置都在跳过列表中，本轮不扫描
+                return
 
-        config_name = configs[idx]
         try:
             self._scan_config(ws, config_name)
         except Exception as exc:
             self._mark_config_missing(config_name, str(exc))
 
     def _poll_full_scan(self, ws):
-        """full_scan 模式遍历所有配置的状态。"""
+        """full_scan 模式遍历所有配置的状态，跳过被暂缓的缺失配置。"""
         configs = []
         with self._lock:
             configs = list(self.configs)
 
         for config_name in configs:
+            # 跳过被暂缓的缺失配置
+            with self._lock:
+                if self._is_config_page_missing_skip(config_name):
+                    continue
             try:
                 self._scan_config(ws, config_name)
             except Exception as exc:
@@ -607,6 +660,12 @@ class WebSocketCommManager:
                 self.transport_available = True
                 self.consecutive_degraded_count += 1
                 self._sidebar_nav_callback_id = ""
+                # 清除逐配置缺失跟踪（新连接后重新统计）
+                self._page_missing_counts.clear()
+                self._page_missing_skip_until.clear()
+                # 标记所有配置为 disconnected，等待后续扫描更新
+                for name in self.configs:
+                    self._mark_config_missing(name, ERROR_TRANSPORT_UNAVAILABLE)
             # 恢复后重跑初始化扫描
             self._recover_and_rescan(ws)
             return ws
