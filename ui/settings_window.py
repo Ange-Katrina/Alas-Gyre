@@ -177,6 +177,9 @@ class SettingsWindow(QDialog):
 
         conn_mode_layout.addWidget(conn_mode_label)
         conn_mode_layout.addWidget(self.connectionModeCombo, stretch=1)
+        self.connectionModeHint = QLabel(tr("connection_mode_hint"))
+        self.connectionModeHint.setStyleSheet("color: #8f96a3; font-size: 12px; font-family: 'Microsoft YaHei', 'Segoe UI';")
+        self.connectionModeHint.setWordWrap(True)
 
         # IP 布局
         ip_layout = QHBoxLayout()
@@ -253,6 +256,9 @@ class SettingsWindow(QDialog):
         port_layout.addWidget(port_label)
         port_layout.addWidget(self.portInput)
         port_layout.addStretch()
+        self.alasPortHint = QLabel(tr("alas_port_hint"))
+        self.alasPortHint.setStyleSheet("color: #8f96a3; font-size: 12px; font-family: 'Microsoft YaHei', 'Segoe UI';")
+        self.alasPortHint.setWordWrap(True)
 
         self.testBtn = QPushButton(tr("test_connection"))
         self.testBtn.setObjectName("testBtn")
@@ -453,13 +459,19 @@ class SettingsWindow(QDialog):
         connection_panel_layout.setContentsMargins(14, 14, 14, 14)
         connection_panel_layout.setSpacing(12)
         connection_panel_layout.addLayout(conn_mode_layout)
+        connection_panel_layout.addWidget(self.connectionModeHint)
         connection_panel_layout.addLayout(ip_layout)
-        connection_panel_layout.addLayout(ws_interval_layout)
-        connection_panel_layout.addLayout(ws_mode_layout)
-        connection_panel_layout.addWidget(self.wsHint)
+        connection_panel_layout.addWidget(self.ipHint)
         connection_panel_layout.addLayout(port_layout)
+        connection_panel_layout.addWidget(self.alasPortHint)
+        connection_panel_layout.addLayout(ws_interval_layout)
+        connection_panel_layout.addWidget(self.websocketPollIntervalHint)
+        connection_panel_layout.addLayout(ws_mode_layout)
+        connection_panel_layout.addWidget(self.websocketPollModeHint)
+        connection_panel_layout.addWidget(self.wsHint)
         connection_panel_layout.addLayout(runtime_port_layout)
         connection_panel_layout.addLayout(token_layout)
+        connection_panel_layout.addWidget(self.tokenHint)
         connection_layout.addWidget(connection_panel)
         connection_layout.addStretch()
         self.settingsStack.addWidget(connection_page)
@@ -851,6 +863,7 @@ class SettingsWindow(QDialog):
             self.runtimePortHint,
             self.tokenLabel,
             self.tokenInput,
+            self.tokenHint,
             self.tokenGenerateBtn,
         ):
             widget.setVisible(not websocket)
