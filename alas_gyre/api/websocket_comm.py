@@ -597,7 +597,7 @@ class WebSocketCommManager:
                 self._mark_config_missing(config_name, str(exc))
 
     def _attempt_connection_recovery(self):
-        """尝试恢复连接，成功返回新 ws 对象，失败返回 None。"""
+        """尝试恢复连接，成功返回新 ws 对象并重跑扫描，失败返回 None。"""
         try:
             self._http_probe_alas_gui()
             ws = self._connect_ws()
@@ -607,13 +607,46 @@ class WebSocketCommManager:
                 self.transport_available = True
                 self.consecutive_degraded_count += 1
                 self._sidebar_nav_callback_id = ""
-                # 标记所有配置为 disconnected，等待后续扫描更新
-                for name in self.configs:
-                    self._mark_config_missing(name, ERROR_TRANSPORT_UNAVAILABLE)
+            # 恢复后重跑初始化扫描
+            self._recover_and_rescan(ws)
             return ws
         except Exception as exc:
             self._record_transport_failure(exc)
             return None
+
+    def _recover_and_rescan(self, ws):
+        """恢复连接后重跑初始化扫描——使用已有配置列表，不重置 configs。"""
+        with self._lock:
+            self.connection_state = CONNECTION_STATE_INITIAL_SCANNING
+
+        # 收集侧边栏页面消息，更新侧边栏 callback_id
+        state = self._collect_page_messages(ws, COLLECT_TIMEOUT_SECONDS)
+        sidebar_callback_id = ""
+        for pin_name, cid in state.callback_ids.items():
+            sidebar_callback_id = cid
+            break
+        if sidebar_callback_id:
+            with self._lock:
+                self._sidebar_nav_callback_id = sidebar_callback_id
+
+        # 获取当前配置列表快照
+        with self._lock:
+            config_names = list(self.configs)
+
+        # 逐配置进入页面并提取状态（保留已有配置列表作为后备）
+        for config_name in config_names:
+            try:
+                self._navigate_to_config(ws, config_name)
+                page_state = self._collect_page_messages(ws, COLLECT_TIMEOUT_SECONDS)
+                status = extract_config_status(page_state)
+                self._apply_config_status(config_name, status)
+            except Exception as exc:
+                self._mark_config_missing(config_name, str(exc))
+
+        with self._lock:
+            self.initial_scan_completed = True
+            self.connection_state = CONNECTION_STATE_READY
+            self.ready = True
 
     def _record_transport_failure(self, exc):
         """记录传输异常并按阈值暂停。"""
