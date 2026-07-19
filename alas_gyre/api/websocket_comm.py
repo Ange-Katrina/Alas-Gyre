@@ -279,8 +279,7 @@ class WebSocketCommManager:
                 self._log_error("初始化扫描非传输异常: %s", exc)
                 with self._lock:
                     self.initial_scan_completed = True
-                    self.connection_state = CONNECTION_STATE_READY
-                    self.ready = True
+                    self.connection_state = CONNECTION_STATE_DEGRADED
 
         # 阶段三：后续轮询循环
         while not self.stop_event.is_set():
