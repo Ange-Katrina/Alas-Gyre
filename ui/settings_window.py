@@ -278,6 +278,7 @@ class SettingsWindow(QDialog):
         self.runtimePortInput.setText(str(self.config.get("runtime_update_port", DEFAULT_RUNTIME_UPDATE_PORT)))
         runtime_port_hint = QLabel(tr("runtime_update_port_hint"))
         runtime_port_hint.setStyleSheet("color: #8f96a3; font-size: 12px; font-family: 'Microsoft YaHei', 'Segoe UI';")
+        self.runtimePortHint = runtime_port_hint
         runtime_port_layout.addWidget(runtime_port_label)
         runtime_port_layout.addWidget(self.runtimePortInput)
         runtime_port_layout.addWidget(runtime_port_hint, stretch=1)
@@ -841,6 +842,7 @@ class SettingsWindow(QDialog):
         for widget in (
             self.runtimePortLabel,
             self.runtimePortInput,
+            self.runtimePortHint,
             self.tokenLabel,
             self.tokenInput,
             self.tokenGenerateBtn,
