@@ -8,6 +8,7 @@ import logging
 import re
 import threading
 import time
+from typing import Any
 
 import requests
 import websocket
@@ -442,7 +443,9 @@ class WebSocketCommManager:
 
             # 检测服务端内部错误
             if message.command == "eval_js":
-                js_code = str(message.spec.get("code", "") or "")
+                js_code = ""
+                if isinstance(message.spec, dict):
+                    js_code = str(message.spec.get("code", "") or "")
                 if "internal_error" in js_code.lower() or "traceback" in js_code.lower():
                     raise WebSocketCommError(ERROR_INTERNAL_ALAS_GUI_ERROR)
 
@@ -771,7 +774,7 @@ class PyWebIOMessage:
     """PyWebIO 服务端消息。"""
 
     command: str
-    spec: dict = field(default_factory=dict)
+    spec: Any = field(default_factory=dict)
     task_id: str = ""
     raw: dict = field(default_factory=dict)
 
@@ -792,12 +795,13 @@ class PyWebIOPageState:
         if message.task_id:
             self.task_ids.add(message.task_id)
         if message.command == "set_session_id":
-            self.session_id = str(message.spec or "")
+            self.session_id = str(message.spec or "") if isinstance(message.spec, str) else ""
         elif message.command == "pin_onchange":
-            name = str(message.spec.get("name", "") or "")
-            callback_id = str(message.spec.get("callback_id", "") or "")
-            if name and callback_id:
-                self.callback_ids[name] = callback_id
+            if isinstance(message.spec, dict):
+                name = str(message.spec.get("name", "") or "")
+                callback_id = str(message.spec.get("callback_id", "") or "")
+                if name and callback_id:
+                    self.callback_ids[name] = callback_id
         elif message.command == "output":
             self.outputs.append(message.spec)
         elif message.command == "input":
@@ -834,7 +838,7 @@ def parse_pywebio_message(raw):
         return PyWebIOMessage("", {}, "", {})
     return PyWebIOMessage(
         command=str(raw.get("command", "") or ""),
-        spec=raw.get("spec") if isinstance(raw.get("spec"), dict) else {},
+        spec=raw.get("spec"),  # 保留原始类型（可能是 dict 或字符串）
         task_id=str(raw.get("task_id", "") or ""),
         raw=dict(raw),
     )
