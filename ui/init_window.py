@@ -2,6 +2,7 @@ import os
 import secrets
 import threading
 
+import requests
 from PySide6.QtCore import Qt, Signal, QTimer, QSize, QUrl
 from PySide6.QtGui import QColor, QDesktopServices, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
@@ -17,7 +18,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from alas_gyre.api.client import api_headers, api_request, gyre_api_url
+from alas_gyre.api.client import alas_gui_url, api_headers, api_request, gyre_api_url
 from alas_gyre.api.overlay_launcher import RUNTIME_DIR_NAME, generate_portable_overlay_launchers
 from alas_gyre.core.config import ensure_api_token, save_config
 from alas_gyre.core.paths import app_base_dir
@@ -550,18 +551,25 @@ class InitSetupWindow(QDialog):
         success = False
         message = ""
         try:
-            resp = api_request("GET",
-                gyre_api_url(self.config, "health"),
-                headers=api_headers(self.config),
-                timeout=2.0,
-            )
-            success = resp.status_code == 200
-            if resp.status_code == 401:
-                message = tr("test_unauthorized")
-            elif resp.status_code == 404:
-                message = tr("test_overlay_missing")
-            elif not success:
-                message = f"HTTP {resp.status_code}"
+            connection_mode = self.config.get("connection_mode", "overlay")
+            if connection_mode == "websocket":
+                resp = requests.get(alas_gui_url(self.config), timeout=5)
+                success = resp.status_code == 200 and "pywebio" in resp.text.lower()
+                if not success:
+                    message = "WebSocket 通讯测试失败"
+            else:
+                resp = api_request("GET",
+                    gyre_api_url(self.config, "health"),
+                    headers=api_headers(self.config),
+                    timeout=2.0,
+                )
+                success = resp.status_code == 200
+                if resp.status_code == 401:
+                    message = tr("test_unauthorized")
+                elif resp.status_code == 404:
+                    message = tr("test_overlay_missing")
+                elif not success:
+                    message = f"HTTP {resp.status_code}"
         except Exception as exc:
             message = str(exc)
         self.test_result_signal.emit(success, message)
