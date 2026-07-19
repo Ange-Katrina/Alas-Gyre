@@ -740,6 +740,8 @@ class CardWidget(QFrame):
     def _fetch_configs_task(self):
         # websocket 模式或 fallback 状态下，配置列表由 manager 快照提供，不走 Overlay API
         if self._use_websocket_comm() or getattr(self, "_runtime_connection", "overlay") == "websocket_fallback":
+            with self._poll_lock:
+                self._configs_fetching = False
             return
         try:
             url = gyre_api_url(self.config, "configs")
