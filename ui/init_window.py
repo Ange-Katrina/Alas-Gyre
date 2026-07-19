@@ -2,7 +2,6 @@ import os
 import secrets
 import threading
 
-import requests
 from PySide6.QtCore import Qt, Signal, QTimer, QSize, QUrl
 from PySide6.QtGui import QColor, QDesktopServices, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
@@ -553,8 +552,8 @@ class InitSetupWindow(QDialog):
         try:
             connection_mode = self.config.get("connection_mode", "overlay")
             if connection_mode == "websocket":
-                resp = requests.get(alas_gui_url(self.config), timeout=5)
-                success = resp.status_code == 200 and "pywebio" in resp.text.lower()
+                resp = api_request("GET", alas_gui_url(self.config), timeout=5)
+                success = resp.status_code == 200 and "pywebio" in (resp.text or "").lower()
                 if not success:
                     message = "WebSocket 通讯测试失败"
             else:
