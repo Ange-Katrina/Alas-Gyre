@@ -143,7 +143,7 @@ class WebSocketCommManager:
 
     def refresh_config(self, config_name):
         """刷新单个配置的状态（当前不实现，忽略）。"""
-        self._log_error("refresh_config 未实现: %s", config_name)
+        logging.getLogger("alas_gyre.websocket").debug("refresh_config 未实现: %s", config_name)
 
     def post_action(self, config_name, action):
         """提交开始或停止控制命令。"""
