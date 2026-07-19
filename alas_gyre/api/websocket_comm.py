@@ -735,19 +735,25 @@ class WebSocketCommManager:
             config_names = list(self.configs)
 
         # 逐配置进入页面并提取状态（保留已有配置列表作为后备）
+        any_recovered = False
         for config_name in config_names:
             try:
                 self._navigate_to_config(ws, config_name)
                 page_state = self._collect_page_messages(ws, COLLECT_TIMEOUT_SECONDS)
                 status = extract_config_status(page_state)
-                self._apply_config_status(config_name, status)
+                if self._apply_config_status(config_name, status):
+                    any_recovered = True
             except Exception as exc:
                 self._mark_config_missing(config_name, str(exc))
 
         with self._lock:
             self.initial_scan_completed = True
-            self.connection_state = CONNECTION_STATE_READY
-            self.ready = True
+            if any_recovered:
+                self.connection_state = CONNECTION_STATE_READY
+                self.ready = True
+            else:
+                self.connection_state = CONNECTION_STATE_DEGRADED
+                self.ready = False
 
     def _record_transport_failure(self, exc):
         """记录传输异常并按阈值暂停。"""
@@ -979,12 +985,29 @@ _CALLBACK_ID_RE = re.compile(
 )
 
 
+def _extract_last_callback_id_from_onclick(onclick):
+    """从 onclick 中提取双参形式的最后一个 callback_id。
+
+    对 trigger_callback("task", "abc123") 这样的双参调用，
+    正则默认从左捕获会取到第一个参数。此函数返回最后一个匹配的引号参数，
+    即目标 callback_id。
+    """
+    matches = re.findall(
+        r"""(?:trigger_callback_id|trigger_callback)\s*\([^)]*["']([^"']+)["']\s*\)""",
+        onclick,
+        re.IGNORECASE,
+    )
+    if matches:
+        return matches[-1]
+    return ""
+
+
 def _parse_callback_id_from_onclick(onclick):
     """从 onclick JavaScript 字符串中解析 callback_id。
 
     支持格式：
-        WebIO.trigger_callback_id("abc123")
-        scope.trigger_callback("task", "abc123")
+        WebIO.trigger_callback_id("abc123")           —— 单参，取第一个匹配
+        scope.trigger_callback("task", "abc123")      —— 双参，取最后一个匹配
 
     Args:
         onclick: onclick 属性字符串。
@@ -992,6 +1015,10 @@ def _parse_callback_id_from_onclick(onclick):
     Returns:
         str: callback_id，未匹配时返回空字符串。
     """
+    # trigger_callback 双参形式：取最后一个引号参数（目标 callback_id）
+    if "trigger_callback(" in onclick.lower() or "trigger_callback (" in onclick.lower():
+        return _extract_last_callback_id_from_onclick(onclick)
+    # trigger_callback_id 单参形式：取第一个匹配
     match = _CALLBACK_ID_RE.search(onclick)
     if match:
         return match.group(1)
