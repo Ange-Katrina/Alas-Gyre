@@ -620,10 +620,13 @@ class InitSetupWindow(QDialog):
 
     def _sync_config_from_ui(self):
         self.config["connection_mode"] = self.modeCombo.currentData() or "auto"
-        self.config["ip"] = self.ipInput.text().strip() or "127.0.0.1"
-        self.config["port"] = self.portInput.text().strip() or "22267"
         if self._is_auto_mode():
+            self.config["ip"] = self.ipInput.text().strip() or "127.0.0.1"
+            self.config["port"] = self.portInput.text().strip() or "22267"
             self.config["api_token"] = self.tokenInput.text().strip()
+        else:
+            self.config["ip"] = self.wsIpInput.text().strip() or "127.0.0.1"
+            self.config["port"] = self.wsPortInput.text().strip() or "22267"
 
     def _set_status(self, text, state="normal", tooltip=None):
         self.statusLabel.setText(text)
