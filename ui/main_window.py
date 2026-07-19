@@ -257,6 +257,33 @@ class MainConfigRow(QWidget):
 
         threading.Thread(target=send_req, daemon=True).start()
 
+def build_websocket_ui_snapshot(snapshot, current_config=""):
+    """构造 WebSocket 模式下供 UI 使用的状态快照。"""
+    configs = [str(config_name) for config_name in snapshot.get("configs", [])]
+    statuses = {
+        str(config_name): normalize_status(status)
+        for config_name, status in snapshot.get("statuses", {}).items()
+    }
+    tasks = {
+        str(config_name): str(task)
+        for config_name, task in snapshot.get("tasks", {}).items()
+    }
+    state = snapshot.get("connection_state", "")
+    scanning_states = {"stopped", "connecting", "initial_scanning"}
+    current_fallback = "scanning" if state in scanning_states else "disconnected"
+    if not configs and current_fallback == "scanning":
+        configs = [tr("app_scanning")]
+        statuses = {configs[0]: "scanning"}
+        tasks = {configs[0]: ""}
+        return configs, statuses, tasks, "scanning", ""
+    if not statuses and current_fallback == "scanning" and current_config:
+        statuses = {current_config: "scanning"}
+        tasks = {current_config: ""}
+    current_status = statuses.get(current_config, current_fallback)
+    current_task = tasks.get(current_config, "")
+    return configs, statuses, tasks, current_status, current_task
+
+
 class CardWidget(QFrame):
     """Main card"""
     status_update_signal = Signal(str, str)
@@ -719,26 +746,14 @@ class CardWidget(QFrame):
             snapshot = manager.get_status_all()
             if snapshot.get("connection_state") == "stopped":
                 manager.start()
-            configs = snapshot.get("configs", [])
+            configs, statuses, tasks, current_status, current_task = build_websocket_ui_snapshot(
+                snapshot,
+                self.current_config,
+            )
             if configs:
                 self.configs_update_signal.emit(configs)
-            statuses = {
-                str(config_name): normalize_status(status)
-                for config_name, status in snapshot.get("statuses", {}).items()
-            }
-            tasks = {
-                str(config_name): str(task)
-                for config_name, task in snapshot.get("tasks", {}).items()
-            }
-            current_fallback = "scanning" if snapshot.get("connection_state") in {"stopped", "connecting", "initial_scanning"} else "disconnected"
-            if not statuses and current_fallback == "scanning" and self.current_config:
-                statuses = {self.current_config: "scanning"}
-                tasks = {self.current_config: ""}
             self.status_all_update_signal.emit(statuses, tasks)
-            self.status_update_signal.emit(
-                statuses.get(self.current_config, current_fallback),
-                tasks.get(self.current_config, ""),
-            )
+            self.status_update_signal.emit(current_status, current_task)
             # 根据配置动态更新轮询间隔
             try:
                 interval_ms = max(1, min(60, int(self.config.get("websocket_poll_interval", 3)))) * 1000
