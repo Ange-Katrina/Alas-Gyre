@@ -63,6 +63,7 @@ class WebSocketCommManager:
         self.config = dict(config or {})
         self._lock = threading.Lock()
         self._control_queue = []
+        self._pending_control_targets = {}
         self.configs = []
         self.statuses = {}
         self.tasks = {}
@@ -160,6 +161,11 @@ class WebSocketCommManager:
                 if item.config_name != command.config_name
             ]
             self._control_queue.append(command)
+            targets = getattr(self, "_pending_control_targets", None)
+            if targets is None:
+                targets = {}
+                self._pending_control_targets = targets
+            targets[command.config_name] = "running" if command.action == "start" else "idle"
             self.statuses[command.config_name] = "queued"
             self.tasks[command.config_name] = ""
             return {
@@ -247,8 +253,18 @@ class WebSocketCommManager:
         name = str(config_name)
         if status:
             with self._lock:
+                targets = getattr(self, "_pending_control_targets", None)
+                expected_status = targets.get(name) if targets else None
+                if expected_status and status not in {expected_status, "error", "disconnected"}:
+                    self.statuses[name] = "queued"
+                    self.tasks[name] = ""
+                    self.scan_errors.pop(name, None)
+                    self.last_scan_config = name
+                    return True
                 self.statuses[name] = status
                 self.tasks[name] = ""
+                if targets and status in {expected_status, "error", "disconnected"}:
+                    targets.pop(name, None)
                 self.scan_errors.pop(name, None)
                 self.last_scan_config = name
                 # 清除该配置的逐配置缺失跟踪（防御 __new__ 构造的未初始化对象）
