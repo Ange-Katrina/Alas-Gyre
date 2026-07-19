@@ -586,6 +586,8 @@ class CardWidget(QFrame):
         if fallback and not self._is_websocket_snapshot_usable(snapshot):
             return False
         if fallback:
+            if getattr(self, "_runtime_connection", "overlay") != "websocket_fallback":
+                print("[Log] Overlay 不可用，已自动切换到 WebSocket 通讯")
             self._runtime_connection = "websocket_fallback"
         configs, statuses, tasks, current_status, current_task = build_websocket_ui_snapshot(
             snapshot,
@@ -751,8 +753,9 @@ class CardWidget(QFrame):
                 configs = data.get("configs", ["alas"])
                 if isinstance(configs, list) and configs:
                     self.configs_update_signal.emit(configs)
-        except Exception:
-            pass
+        except Exception as exc:
+            if should_fallback_to_websocket(self.config, exc):
+                self._poll_via_websocket_manager(fallback=True)
         finally:
             with self._poll_lock:
                 self._configs_fetching = False

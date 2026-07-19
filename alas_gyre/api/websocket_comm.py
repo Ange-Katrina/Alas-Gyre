@@ -559,6 +559,7 @@ class WebSocketCommManager:
             for name in config_names:
                 self._mark_config_missing(name, ERROR_TARGET_SCOPE_NOT_FOUND)
         else:
+            print(f"[Log] WebSocket 扫描到配置：{', '.join(config_names)}")
             with self._lock:
                 self.configs = list(config_names)
 
