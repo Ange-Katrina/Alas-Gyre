@@ -489,19 +489,25 @@ class WebSocketCommManager:
                 self.configs = list(config_names)
 
         # 逐配置进入页面并提取状态
+        any_recovered = False
         for config_name in config_names:
             try:
                 self._navigate_to_config(ws, config_name)
                 page_state = self._collect_page_messages(ws, COLLECT_TIMEOUT_SECONDS)
                 status = extract_config_status(page_state)
-                self._apply_config_status(config_name, status)
+                if self._apply_config_status(config_name, status):
+                    any_recovered = True
             except Exception as exc:
                 self._mark_config_missing(config_name, str(exc))
 
         with self._lock:
             self.initial_scan_completed = True
-            self.connection_state = CONNECTION_STATE_READY
-            self.ready = True
+            if any_recovered:
+                self.connection_state = CONNECTION_STATE_READY
+                self.ready = True
+            else:
+                self.connection_state = CONNECTION_STATE_DEGRADED
+                self.ready = False
 
     def _navigate_to_config(self, ws, config_name):
         """通过 WebSocket 进入指定配置页。
