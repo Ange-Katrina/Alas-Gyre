@@ -581,13 +581,15 @@ class CardWidget(QFrame):
                 self._overlay_recovery_last_check_at = None
                 self._overlay_recovery_failure_count = 0
                 self._websocket_shutdown_deadline = None
+                is_overlay = (self._runtime_connection == "overlay")
         else:
             self._runtime_connection = "websocket" if self._use_websocket_comm() else "overlay"
             self._websocket_fallback_notice_shown = False
             self._overlay_recovery_last_check_at = None
             self._overlay_recovery_failure_count = 0
             self._websocket_shutdown_deadline = None
-        if self._runtime_connection == "overlay" and hasattr(self, "poll_timer"):
+            is_overlay = (self._runtime_connection == "overlay")
+        if is_overlay and hasattr(self, "poll_timer"):
             self.poll_timer.setInterval(3000)
 
     def _mark_websocket_fallback(self):
