@@ -483,7 +483,10 @@ class WebSocketCommManager:
             if message.command == "set_session_id":
                 new_session = state.session_id
                 if previous_session_id and new_session != previous_session_id:
-                    raise WebSocketCommError(ERROR_SESSION_CLOSED)
+                    # 清空旧 session 积累的页面状态，使用新 session 重新收集
+                    self._page_state = PyWebIOPageState()
+                    state = self._page_state
+                    state.apply_message(message)
                 previous_session_id = new_session
 
             # 检测服务端内部错误
@@ -816,6 +819,7 @@ class WebSocketCommManager:
                 self.consecutive_degraded_count = 0
                 self._sidebar_nav_callback_id = ""
                 self._sidebar_nav_callbacks = {}
+                self._page_state = PyWebIOPageState()
                 # 清除逐配置缺失跟踪（新连接后重新统计）
                 self._page_missing_counts.clear()
                 self._page_missing_skip_until.clear()
