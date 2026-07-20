@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # -_- coding: utf-8 -_-
 
+from collections import deque
 from dataclasses import dataclass
 from dataclasses import field
 import json
@@ -62,7 +63,7 @@ class WebSocketCommManager:
     def __init__(self, config):
         self.config = dict(config or {})
         self._lock = threading.Lock()
-        self._control_queue = []
+        self._control_queue = deque()
         self._pending_control_targets = {}
         self.configs = []
         self.statuses = {}
@@ -156,10 +157,10 @@ class WebSocketCommManager:
             raise WebSocketCommError("unsupported_action")
         command = ControlCommand(str(config_name), str(action))
         with self._lock:
-            self._control_queue = [
+            self._control_queue = deque(
                 item for item in self._control_queue
                 if item.config_name != command.config_name
-            ]
+            )
             self._control_queue.append(command)
             targets = getattr(self, "_pending_control_targets", None)
             if targets is None:
@@ -632,16 +633,26 @@ class WebSocketCommManager:
         self._apply_config_status(config_name, status)
 
     def _drain_control_queue(self, ws):
-        """处理控制队列中所有待执行的命令。"""
-        commands = []
-        with self._lock:
-            commands = list(self._control_queue)
-            self._control_queue.clear()
+        """处理控制队列中所有待执行的命令。
 
-        for cmd in commands:
+        逐条从队列取出并执行。传输异常（含 session 关闭）发生时将当前命令
+        放回队列头部并重新抛出，确保后续命令不会因清空而丢失。
+        """
+        with self._lock:
+            if not isinstance(self._control_queue, deque):
+                self._control_queue = deque(self._control_queue)
+
+        while True:
+            with self._lock:
+                if not self._control_queue:
+                    break
+                cmd = self._control_queue.popleft()
+
             try:
                 self._execute_control_command(ws, cmd)
             except (websocket.WebSocketException, ConnectionError, OSError, WebSocketCommError):
+                with self._lock:
+                    self._control_queue.appendleft(cmd)
                 raise
             except Exception as exc:
                 with self._lock:
