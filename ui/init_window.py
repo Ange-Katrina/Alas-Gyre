@@ -516,8 +516,11 @@ class InitSetupWindow(QDialog):
             pass
 
     def _ws_test_api(self):
+        btn = self.wsTestBtn
         try:
             result = test_connection_with_fallback(self.config)
+            if getattr(self, "_active_test_btn", None) is not btn:
+                return
             if result.success:
                 message = tr(result.message_key)
                 self._emit_test_result(True, message)
@@ -525,6 +528,8 @@ class InitSetupWindow(QDialog):
                 detail = result.websocket_error or result.overlay_error
                 self._emit_test_result(False, detail or tr("test_failed_short"))
         except Exception as exc:
+            if getattr(self, "_active_test_btn", None) is not btn:
+                return
             self._emit_test_result(False, str(exc))
 
 
@@ -758,8 +763,11 @@ class InitSetupWindow(QDialog):
 
     def _test_api(self):
         """使用统一连接测试接口，支持自动降级。"""
+        btn = self.testBtn
         try:
             result = test_connection_with_fallback(self.config)
+            if getattr(self, "_active_test_btn", None) is not btn:
+                return
             if result.success:
                 message = tr(result.message_key)
                 if result.source == "websocket_fallback" and result.overlay_error:
@@ -769,6 +777,8 @@ class InitSetupWindow(QDialog):
                 detail = result.websocket_error or result.overlay_error
                 self._emit_test_result(False, detail or tr("test_failed_short"))
         except Exception as exc:
+            if getattr(self, "_active_test_btn", None) is not btn:
+                return
             self._emit_test_result(False, str(exc))
 
     def _create_icon(self, state):
