@@ -788,7 +788,7 @@ class SettingsWindow(QDialog):
             self.websocketPollIntervalInput.text()
         )
         self.config["websocket_poll_mode"] = self.websocketPollModeInput.currentData() or "round_robin"
-        self.config["runtime_update_port"] = self._normalize_port(self.runtimePortInput.text())
+        self.config["runtime_update_port"] = self._normalize_port(self.runtimePortInput.text(), default=DEFAULT_RUNTIME_UPDATE_PORT)
         self.config["api_token"] = self.tokenInput.text().strip()
         self.config["mini_click_through"] = self.miniClickThroughCheck.isChecked()
         self.config["show_task_name"] = self.showTaskNameCheck.isChecked()
@@ -851,15 +851,15 @@ class SettingsWindow(QDialog):
         return host or "127.0.0.1"
 
     @staticmethod
-    def _normalize_port(port_str):
-        """规范化端口号：限制在 1..65535 范围内，非法默认 22267。"""
+    def _normalize_port(port_str, default="22267"):
+        """规范化端口号：限制在 1..65535 范围内，非法返回 default。"""
         try:
             port = int(str(port_str).strip())
         except (TypeError, ValueError):
-            return "22267"
+            return default
         if 1 <= port <= 65535:
             return str(port)
-        return "22267"
+        return default
 
     def _normalize_poll_interval(self, value):
         try:
