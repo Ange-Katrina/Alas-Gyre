@@ -334,6 +334,7 @@ class CardWidget(QFrame):
         self.status_all_update_signal.connect(self._on_status_all_updated)
         self.config_delete_result_signal.connect(self._on_config_delete_result)
         self.control_error_signal.connect(self._on_control_error)
+        self.websocket_fallback_notice_signal.connect(self._on_websocket_fallback_notice)
 
         self.poll_timer = QTimer(self)
         self.poll_timer.timeout.connect(self._start_poll_thread)
