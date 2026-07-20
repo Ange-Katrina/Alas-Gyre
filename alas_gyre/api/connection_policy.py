@@ -44,7 +44,15 @@ def should_use_websocket_directly(config) -> bool:
 
 
 def should_fallback_to_websocket(config, overlay_failure) -> bool:
-    """判断 overlay 失败后是否应降级到 WebSocket。"""
+    """判断 overlay 失败后是否应降级到 WebSocket。
+
+    Args:
+        config: 配置字典
+        overlay_failure: 保留参数，预留未来按失败类型决策
+
+    Returns:
+        当前 auto 模式下对所有 Overlay 失败均降级。
+    """
     return normalize_connection_mode(config) == "auto"
 
 
