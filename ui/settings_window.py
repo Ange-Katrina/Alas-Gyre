@@ -179,7 +179,7 @@ class SettingsWindow(QDialog):
         conn_mode_layout.addWidget(conn_mode_label)
         conn_mode_layout.addWidget(self.connectionModeCombo, stretch=1)
         self.connectionModeHint = QLabel(tr("connection_mode_hint"))
-        self.connectionModeHint.setStyleSheet("color: #8f96a3; font-size: 12px; font-family: 'Microsoft YaHei', 'Segoe UI';")
+        self.connectionModeHint.setObjectName("settingsHintLabel")
         self.connectionModeHint.setWordWrap(True)
 
         # IP 布局
@@ -195,7 +195,7 @@ class SettingsWindow(QDialog):
         ip_layout.addWidget(ip_label)
         ip_layout.addWidget(self.ipInput, stretch=1)
         self.ipHint = QLabel(tr("ip_address_hint"))
-        self.ipHint.setStyleSheet("color: #8f96a3; font-size: 12px; font-family: 'Microsoft YaHei', 'Segoe UI';")
+        self.ipHint.setObjectName("settingsHintLabel")
         self.ipHint.setWordWrap(True)
 
         # WebSocket 通讯轮询间隔
@@ -215,7 +215,7 @@ class SettingsWindow(QDialog):
         ws_interval_layout.addWidget(self.websocketPollIntervalInput)
         ws_interval_layout.addStretch()
         self.websocketPollIntervalHint = QLabel(tr("websocket_poll_interval_hint"))
-        self.websocketPollIntervalHint.setStyleSheet("color: #8f96a3; font-size: 12px; font-family: 'Microsoft YaHei', 'Segoe UI';")
+        self.websocketPollIntervalHint.setObjectName("settingsHintLabel")
         self.websocketPollIntervalHint.setWordWrap(True)
 
         # WebSocket 通讯轮询模式
@@ -241,12 +241,12 @@ class SettingsWindow(QDialog):
         ws_mode_layout.addWidget(ws_mode_label)
         ws_mode_layout.addWidget(self.websocketPollModeInput, stretch=1)
         self.websocketPollModeHint = QLabel(tr("websocket_poll_mode_hint"))
-        self.websocketPollModeHint.setStyleSheet("color: #8f96a3; font-size: 12px; font-family: 'Microsoft YaHei', 'Segoe UI';")
+        self.websocketPollModeHint.setObjectName("settingsHintLabel")
         self.websocketPollModeHint.setWordWrap(True)
 
         # WebSocket 通讯说明
         self.wsHint = QLabel(tr("websocket_comm_hint"))
-        self.wsHint.setStyleSheet("color: #8f96a3; font-size: 12px; font-family: 'Microsoft YaHei', 'Segoe UI';")
+        self.wsHint.setObjectName("settingsHintLabel")
         self.wsHint.setWordWrap(True)
 
         # 轮询模式切换时动态更新提示文本
@@ -267,7 +267,7 @@ class SettingsWindow(QDialog):
         port_layout.addWidget(self.portInput)
         port_layout.addStretch()
         self.alasPortHint = QLabel(tr("alas_port_hint"))
-        self.alasPortHint.setStyleSheet("color: #8f96a3; font-size: 12px; font-family: 'Microsoft YaHei', 'Segoe UI';")
+        self.alasPortHint.setObjectName("settingsHintLabel")
         self.alasPortHint.setWordWrap(True)
 
         self.testBtn = QPushButton(tr("test_connection"))
@@ -290,7 +290,7 @@ class SettingsWindow(QDialog):
         self.runtimePortInput.setFixedSize(96, 30)
         self.runtimePortInput.setText(str(self.config.get("runtime_update_port", DEFAULT_RUNTIME_UPDATE_PORT)))
         runtime_port_hint = QLabel(tr("runtime_update_port_hint"))
-        runtime_port_hint.setStyleSheet("color: #8f96a3; font-size: 12px; font-family: 'Microsoft YaHei', 'Segoe UI';")
+        runtime_port_hint.setObjectName("settingsHintLabel")
         self.runtimePortHint = runtime_port_hint
         runtime_port_layout.addWidget(runtime_port_label)
         runtime_port_layout.addWidget(self.runtimePortInput)
@@ -310,7 +310,7 @@ class SettingsWindow(QDialog):
         token_layout.addWidget(token_label)
         token_layout.addWidget(self.tokenInput, stretch=1)
         self.tokenHint = QLabel(tr("api_token_hint"))
-        self.tokenHint.setStyleSheet("color: #8f96a3; font-size: 12px; font-family: 'Microsoft YaHei', 'Segoe UI';")
+        self.tokenHint.setObjectName("settingsHintLabel")
         self.tokenHint.setWordWrap(True)
 
         self.tokenGenerateBtn = QPushButton(tr("generate"))
@@ -396,7 +396,7 @@ class SettingsWindow(QDialog):
         runtime_update_label.setFixedWidth(104)
 
         self.runtimeUpdateHint = QLabel(tr("runtime_update_hint"))
-        self.runtimeUpdateHint.setStyleSheet("color: #8f96a3; font-size: 12px; font-family: 'Microsoft YaHei', 'Segoe UI';")
+        self.runtimeUpdateHint.setObjectName("settingsHintLabel")
         self.runtimeUpdateHint.setWordWrap(True)
 
         self.runtimeUpdateBtn = QPushButton(tr("update_runtime"))

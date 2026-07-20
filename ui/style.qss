@@ -330,6 +330,12 @@ QLabel#settingsPageDesc {
     background: transparent;
 }
 
+QLabel#settingsHintLabel {
+    color: #8f96a3;
+    font-size: 12px;
+    font-family: "Microsoft YaHei", "Segoe UI";
+}
+
 QFrame#settingsPanel {
     background-color: #1f232a;
     border: 1px solid #303640;
