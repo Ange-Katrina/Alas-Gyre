@@ -449,8 +449,8 @@ class WebSocketCommManager:
         if state is None:
             state = PyWebIOPageState()
             self._page_state = state
-        # 记录当前 session_id 用于检测 session 重置
-        previous_session_id = None
+        # 记录当前 session_id 用于检测跨调用的 session 重置
+        previous_session_id = state.session_id if state.session_id else None
 
         ws.settimeout(min(timeout, 0.5))
         start = time.monotonic()
