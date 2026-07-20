@@ -892,7 +892,8 @@ class SettingsWindow(QDialog):
         port_str = self.portInput.text().strip()
         connection_mode = self.connectionModeCombo.currentData() or "auto"
 
-        if not ip or not port_str.isdigit():
+        normalized_port = self._normalize_port(port_str)
+        if not ip or not port_str.isdigit() or (normalized_port == "22267" and port_str != "22267"):
             self._on_test_result(False, tr("test_invalid"))
             return
 
@@ -905,8 +906,8 @@ class SettingsWindow(QDialog):
 
         test_config = dict(self.config)
         test_config.update({
-            "ip": ip,
-            "port": port_str,
+            "ip": self._normalize_host(ip),
+            "port": normalized_port,
             "api_token": self.tokenInput.text().strip(),
             "connection_mode": connection_mode,
         })
