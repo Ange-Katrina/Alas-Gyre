@@ -672,17 +672,32 @@ class CardWidget(QFrame):
 
     def _check_websocket_shutdown_deadline(self):
         """Overlay 恢复稳定后延迟关闭 WebSocket manager。"""
-        deadline = getattr(self, "_websocket_shutdown_deadline", None)
-        if deadline is None:
-            return
-        if time.monotonic() < deadline:
-            return
-        if getattr(self, "_runtime_connection", "overlay") != "overlay":
-            self._websocket_shutdown_deadline = None
-            return
-        if self._use_websocket_comm():
-            self._websocket_shutdown_deadline = None
-            return
+        lock = getattr(self, "_runtime_connection_lock", None)
+        if lock is not None:
+            with lock:
+                deadline = getattr(self, "_websocket_shutdown_deadline", None)
+                if deadline is None:
+                    return
+                if time.monotonic() < deadline:
+                    return
+                if getattr(self, "_runtime_connection", "overlay") != "overlay":
+                    self._websocket_shutdown_deadline = None
+                    return
+                if self._use_websocket_comm():
+                    self._websocket_shutdown_deadline = None
+                    return
+        else:
+            deadline = getattr(self, "_websocket_shutdown_deadline", None)
+            if deadline is None:
+                return
+            if time.monotonic() < deadline:
+                return
+            if getattr(self, "_runtime_connection", "overlay") != "overlay":
+                self._websocket_shutdown_deadline = None
+                return
+            if self._use_websocket_comm():
+                self._websocket_shutdown_deadline = None
+                return
         manager = get_persistent_manager()
         snapshot = manager.get_status_all()
         if self._websocket_control_active(snapshot):
@@ -691,7 +706,11 @@ class CardWidget(QFrame):
             manager.stop()
         except Exception:
             pass
-        self._websocket_shutdown_deadline = None
+        if lock is not None:
+            with lock:
+                self._websocket_shutdown_deadline = None
+        else:
+            self._websocket_shutdown_deadline = None
 
     def _websocket_control_active(self, snapshot):
         """判断 WebSocket manager 是否存在控制活动。"""
@@ -802,7 +821,12 @@ class CardWidget(QFrame):
         if snapshot.get("connection_state") == "stopped":
             manager.start()
             snapshot = manager.get_status_all()
-        was_fallback = getattr(self, "_runtime_connection", "overlay") == "websocket_fallback"
+        lock = getattr(self, "_runtime_connection_lock", None)
+        if lock is not None:
+            with lock:
+                was_fallback = getattr(self, "_runtime_connection", "overlay") == "websocket_fallback"
+        else:
+            was_fallback = getattr(self, "_runtime_connection", "overlay") == "websocket_fallback"
         if fallback and not self._is_websocket_snapshot_usable(snapshot):
             return False
         if fallback:
@@ -852,7 +876,13 @@ class CardWidget(QFrame):
         Returns:
             dict: 包含 status/error 的结果字典
         """
-        if self._use_websocket_comm() or getattr(self, "_runtime_connection", "overlay") == "websocket_fallback":
+        lock = getattr(self, "_runtime_connection_lock", None)
+        if lock is not None:
+            with lock:
+                is_fallback = getattr(self, "_runtime_connection", "overlay") == "websocket_fallback"
+        else:
+            is_fallback = getattr(self, "_runtime_connection", "overlay") == "websocket_fallback"
+        if self._use_websocket_comm() or is_fallback:
             return self._queue_websocket_control(config_name, action)
         try:
             resp = api_request(
@@ -972,8 +1002,13 @@ class CardWidget(QFrame):
                 self._polling_status = False
 
     def _fetch_configs_task(self):
-        # websocket 模式或 fallback 状态下，配置列表由 manager 快照提供，不走 Overlay API
-        if self._use_websocket_comm() or getattr(self, "_runtime_connection", "overlay") == "websocket_fallback":
+        lock = getattr(self, "_runtime_connection_lock", None)
+        if lock is not None:
+            with lock:
+                is_fallback = getattr(self, "_runtime_connection", "overlay") == "websocket_fallback"
+        else:
+            is_fallback = getattr(self, "_runtime_connection", "overlay") == "websocket_fallback"
+        if self._use_websocket_comm() or is_fallback:
             with self._poll_lock:
                 self._configs_fetching = False
             return
@@ -1050,7 +1085,12 @@ class CardWidget(QFrame):
             delattr(self, "_configs_fetched")
 
         if self._use_websocket_comm():
-            self._runtime_connection = "websocket"
+            lock = getattr(self, "_runtime_connection_lock", None)
+            if lock is not None:
+                with lock:
+                    self._runtime_connection = "websocket"
+            else:
+                self._runtime_connection = "websocket"
             self._poll_via_websocket_manager(fallback=False)
             # 根据配置动态更新轮询间隔
             try:
@@ -1061,7 +1101,13 @@ class CardWidget(QFrame):
                 self.poll_timer.setInterval(interval_ms)
             return
 
-        if getattr(self, "_runtime_connection", "overlay") == "websocket_fallback":
+        lock = getattr(self, "_runtime_connection_lock", None)
+        if lock is not None:
+            with lock:
+                is_fallback = getattr(self, "_runtime_connection", "overlay") == "websocket_fallback"
+        else:
+            is_fallback = getattr(self, "_runtime_connection", "overlay") == "websocket_fallback"
+        if is_fallback:
             self._poll_via_websocket_manager(fallback=True)
             return
 
