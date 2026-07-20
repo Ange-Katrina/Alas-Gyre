@@ -882,21 +882,21 @@ class SettingsWindow(QDialog):
         if not isValid(self):
             return
         ip = self.ipInput.text().strip()
-        port_str = self.portInput.text()
-        stripped_port = port_str.strip()
+        port_str = self.portInput.text().strip()
         connection_mode = self.connectionModeCombo.currentData() or "auto"
 
-        if (
-            not ip
-            or not stripped_port
-            or not stripped_port.isascii()
-            or not stripped_port.isdigit()
-            or len(stripped_port) > 5
-            or not 1 <= int(stripped_port) <= 65535
-        ):
+        if not ip or not port_str.isascii() or not port_str.isdigit():
             self._on_test_result(False, tr("test_invalid"))
             return
-        normalized_port = self._normalize_port(stripped_port)
+        try:
+            port = int(port_str)
+        except ValueError:
+            self._on_test_result(False, tr("test_invalid"))
+            return
+        if not 1 <= port <= 65535:
+            self._on_test_result(False, tr("test_invalid"))
+            return
+        normalized_port = self._normalize_port(str(port))
 
         self.testBtn.setText("...")
         self.testBtn.setIcon(QIcon())
