@@ -579,6 +579,8 @@ class CardWidget(QFrame):
             self._overlay_recovery_last_check_at = None
             self._overlay_recovery_failure_count = 0
             self._websocket_shutdown_deadline = None
+        if self._runtime_connection == "overlay":
+            self.poll_timer.setInterval(3000)
 
     def _mark_websocket_fallback(self):
         """标记已降级到 WebSocket，并在当前降级周期只提示一次。"""
@@ -1018,6 +1020,9 @@ class CardWidget(QFrame):
         if getattr(self, "_runtime_connection", "overlay") == "websocket_fallback":
             self._poll_via_websocket_manager(fallback=True)
             return
+
+        if self.poll_timer.interval() != 3000:
+            self.poll_timer.setInterval(3000)
 
         try:
             url = gyre_api_url(self.config, "status_all")
