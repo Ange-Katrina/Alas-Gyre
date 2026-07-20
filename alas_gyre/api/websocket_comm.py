@@ -638,6 +638,8 @@ class WebSocketCommManager:
         for cmd in commands:
             try:
                 self._execute_control_command(ws, cmd)
+            except (websocket.WebSocketException, ConnectionError, OSError):
+                raise
             except Exception as exc:
                 with self._lock:
                     self.control_errors[cmd.config_name] = str(exc)
