@@ -625,8 +625,14 @@ class CardWidget(QFrame):
         print(f"[Log] Overlay API 不可用，下次查询 {self._overlay_recovery_next_interval()}s")
 
     def _websocket_control_active(self, snapshot):
-        """判断当前是否有 WebSocket 发出的控制操作尚未完成。"""
-        return bool(snapshot.get("pending_controls"))
+        """判断 WebSocket manager 是否存在控制活动。"""
+        if snapshot.get("pending_controls"):
+            return True
+        statuses = snapshot.get("statuses", {}) or {}
+        for status in statuses.values():
+            if normalize_status(status) == "queued":
+                return True
+        return False
 
     def _try_overlay_recovery(self, snapshot):
         """在 WebSocket fallback 轮询后尝试恢复 Overlay。"""
