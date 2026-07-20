@@ -842,13 +842,12 @@ class SettingsWindow(QDialog):
 
     @staticmethod
     def _normalize_host(host):
-        """规范化主机地址：去除协议头、路径和尾部斜杠，空值默认 127.0.0.1。"""
+        """规范化主机地址：去除协议头（不区分大小写）、路径和端口，空值默认 127.0.0.1。"""
         host = str(host).strip()
         if not host:
             return "127.0.0.1"
-        host = re.sub(r'^https?://', '', host)
-        host = host.split('/')[0]
-        host = host.rstrip(':')
+        host = re.sub(r'^https?://', '', host, flags=re.IGNORECASE)
+        host = host.split('/')[0].split(':')[0]
         return host or "127.0.0.1"
 
     @staticmethod
