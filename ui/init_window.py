@@ -19,6 +19,13 @@ from PySide6.QtWidgets import (
 )
 
 from alas_gyre.api.client import alas_gui_url, api_headers, api_request, gyre_api_url
+
+try:
+    from shiboken6 import isValid
+except Exception:
+    def isValid(widget):
+        return widget is not None
+
 from alas_gyre.api.connection_policy import normalize_connection_mode, test_connection_with_fallback
 from alas_gyre.api.overlay_launcher import RUNTIME_DIR_NAME, generate_portable_overlay_launchers
 from alas_gyre.core.config import ensure_api_token, save_config
@@ -501,18 +508,25 @@ class InitSetupWindow(QDialog):
         self.wsTestBtn.style().polish(self.wsTestBtn)
         threading.Thread(target=self._ws_test_api, daemon=True).start()
 
+    def _emit_test_result(self, success, message):
+        """安全发射测试结果信号，忽略已删除信号源异常。"""
+        try:
+            if isValid(self):
+                self.test_result_signal.emit(success, message)
+        except RuntimeError:
+            pass
 
     def _ws_test_api(self):
         try:
             result = test_connection_with_fallback(self.config)
             if result.success:
                 message = tr(result.message_key)
-                self.test_result_signal.emit(True, message)
+                self._emit_test_result(True, message)
             else:
                 detail = result.websocket_error or result.overlay_error
-                self.test_result_signal.emit(False, detail or tr("test_failed_short"))
+                self._emit_test_result(False, detail or tr("test_failed_short"))
         except Exception as exc:
-            self.test_result_signal.emit(False, str(exc))
+            self._emit_test_result(False, str(exc))
 
 
     def _rebuild_step_nav(self):
@@ -751,12 +765,12 @@ class InitSetupWindow(QDialog):
                 message = tr(result.message_key)
                 if result.source == "websocket_fallback" and result.overlay_error:
                     message = f"{message}\nOverlay: {result.overlay_error}"
-                self.test_result_signal.emit(True, message)
+                self._emit_test_result(True, message)
             else:
                 detail = result.websocket_error or result.overlay_error
-                self.test_result_signal.emit(False, detail or tr("test_failed_short"))
+                self._emit_test_result(False, detail or tr("test_failed_short"))
         except Exception as exc:
-            self.test_result_signal.emit(False, str(exc))
+            self._emit_test_result(False, str(exc))
 
     def _create_icon(self, state):
         pixmap = QPixmap(24, 24)
