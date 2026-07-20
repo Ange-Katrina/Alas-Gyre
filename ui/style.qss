@@ -284,6 +284,35 @@ QStackedWidget#settingsStack, QWidget#settingsPage {
     background: transparent;
 }
 
+QScrollArea#settingsPageScroll {
+    background: transparent;
+    border: none;
+}
+QScrollArea#settingsPageScroll > QWidget > QWidget {
+    background: transparent;
+}
+QScrollArea#settingsPageScroll QScrollBar:vertical {
+    background: transparent;
+    width: 6px;
+    margin: 4px 1px 4px 0;
+}
+QScrollArea#settingsPageScroll QScrollBar::handle:vertical {
+    background-color: #4d5563;
+    border-radius: 3px;
+    min-height: 24px;
+}
+QScrollArea#settingsPageScroll QScrollBar::handle:vertical:hover {
+    background-color: #667085;
+}
+QScrollArea#settingsPageScroll QScrollBar::add-line:vertical,
+QScrollArea#settingsPageScroll QScrollBar::sub-line:vertical,
+QScrollArea#settingsPageScroll QScrollBar::add-page:vertical,
+QScrollArea#settingsPageScroll QScrollBar::sub-page:vertical {
+    background: transparent;
+    border: none;
+    height: 0;
+}
+
 QWidget#settingsPageHeader {
     background: transparent;
 }
