@@ -889,7 +889,9 @@ class SettingsWindow(QDialog):
         if (
             not ip
             or not stripped_port
+            or not stripped_port.isascii()
             or not stripped_port.isdigit()
+            or len(stripped_port) > 5
             or not 1 <= int(stripped_port) <= 65535
         ):
             self._on_test_result(False, tr("test_invalid"))
