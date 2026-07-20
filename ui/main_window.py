@@ -573,19 +573,39 @@ class CardWidget(QFrame):
 
     def _reset_runtime_connection(self):
         """按当前配置重置运行时连接来源和降级提示状态。"""
-        with self._runtime_connection_lock:
+        lock = getattr(self, "_runtime_connection_lock", None)
+        if lock is not None:
+            with lock:
+                self._runtime_connection = "websocket" if self._use_websocket_comm() else "overlay"
+                self._websocket_fallback_notice_shown = False
+                self._overlay_recovery_last_check_at = None
+                self._overlay_recovery_failure_count = 0
+                self._websocket_shutdown_deadline = None
+        else:
             self._runtime_connection = "websocket" if self._use_websocket_comm() else "overlay"
             self._websocket_fallback_notice_shown = False
             self._overlay_recovery_last_check_at = None
             self._overlay_recovery_failure_count = 0
             self._websocket_shutdown_deadline = None
-        if self._runtime_connection == "overlay":
+        if self._runtime_connection == "overlay" and hasattr(self, "poll_timer"):
             self.poll_timer.setInterval(3000)
 
     def _mark_websocket_fallback(self):
         """标记已降级到 WebSocket，并在当前降级周期只提示一次。"""
         should_notify = False
-        with self._runtime_connection_lock:
+        lock = getattr(self, "_runtime_connection_lock", None)
+        if lock is not None:
+            with lock:
+                if getattr(self, "_runtime_connection", "overlay") != "websocket_fallback":
+                    print("[Log] Overlay API 不可用，已自动切换到 WebSocket 通讯")
+                    self._overlay_recovery_last_check_at = None
+                    self._overlay_recovery_failure_count = 0
+                    self._websocket_shutdown_deadline = None
+                self._runtime_connection = "websocket_fallback"
+                if not getattr(self, "_websocket_fallback_notice_shown", False):
+                    self._websocket_fallback_notice_shown = True
+                    should_notify = True
+        else:
             if getattr(self, "_runtime_connection", "overlay") != "websocket_fallback":
                 print("[Log] Overlay API 不可用，已自动切换到 WebSocket 通讯")
                 self._overlay_recovery_last_check_at = None
@@ -620,7 +640,13 @@ class CardWidget(QFrame):
 
     def _mark_overlay_recovered(self):
         """切回 Overlay 并启动 WebSocket 延迟关闭窗口。"""
-        with self._runtime_connection_lock:
+        lock = getattr(self, "_runtime_connection_lock", None)
+        if lock is not None:
+            with lock:
+                self._runtime_connection = "overlay"
+                self._reset_overlay_recovery_state()
+                self._websocket_shutdown_deadline = time.monotonic() + 30
+        else:
             self._runtime_connection = "overlay"
             self._reset_overlay_recovery_state()
             self._websocket_shutdown_deadline = time.monotonic() + 30
@@ -628,7 +654,15 @@ class CardWidget(QFrame):
 
     def _mark_overlay_recovery_failed(self):
         """记录恢复探测失败并推进退避。"""
-        with self._runtime_connection_lock:
+        lock = getattr(self, "_runtime_connection_lock", None)
+        if lock is not None:
+            with lock:
+                self._overlay_recovery_last_check_at = time.monotonic()
+                self._overlay_recovery_failure_count = min(
+                    int(getattr(self, "_overlay_recovery_failure_count", 0)) + 1,
+                    len(getattr(self, "_overlay_recovery_backoff_steps", (15, 30, 60, 90, 180))),
+                )
+        else:
             self._overlay_recovery_last_check_at = time.monotonic()
             self._overlay_recovery_failure_count = min(
                 int(getattr(self, "_overlay_recovery_failure_count", 0)) + 1,
@@ -674,7 +708,17 @@ class CardWidget(QFrame):
         if should_use_websocket_directly(self.config):
             return
         should_probe = False
-        with self._runtime_connection_lock:
+        lock = getattr(self, "_runtime_connection_lock", None)
+        if lock is not None:
+            with lock:
+                if getattr(self, "_runtime_connection", "overlay") != "websocket_fallback":
+                    return
+                if self._websocket_control_active(snapshot):
+                    return
+                if not self._overlay_recovery_due():
+                    return
+                should_probe = True
+        else:
             if getattr(self, "_runtime_connection", "overlay") != "websocket_fallback":
                 return
             if self._websocket_control_active(snapshot):
@@ -1021,7 +1065,7 @@ class CardWidget(QFrame):
             self._poll_via_websocket_manager(fallback=True)
             return
 
-        if self.poll_timer.interval() != 3000:
+        if hasattr(self, "poll_timer") and self.poll_timer.interval() != 3000:
             self.poll_timer.setInterval(3000)
 
         try:
