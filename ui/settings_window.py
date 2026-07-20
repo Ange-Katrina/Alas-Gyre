@@ -5,6 +5,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, Signal, QTimer, QSize
 from PySide6.QtGui import QColor, QPixmap, QPainter, QPen, QIcon
+import re
 import secrets
 import threading
 
@@ -816,15 +817,14 @@ class SettingsWindow(QDialog):
         self.config["always_on_top"] = self.alwaysOnTopCheck.isChecked()
         self.config["theme"] = "light" if self.lightThemeCheck.isChecked() else "dark"
         self.config["lang"] = "en" if self.englishLangCheck.isChecked() else "zh"
-        self.config["ip"] = self.ipInput.text().strip() or "127.0.0.1"
-        self.config["port"] = self.portInput.text().strip() if self.portInput.text().strip().isdigit() else "22267"
+        self.config["ip"] = self._normalize_host(self.ipInput.text())
+        self.config["port"] = self._normalize_port(self.portInput.text())
         self.config["connection_mode"] = self.connectionModeCombo.currentData() or "auto"
         self.config["websocket_poll_interval"] = self._normalize_poll_interval(
             self.websocketPollIntervalInput.text()
         )
         self.config["websocket_poll_mode"] = self.websocketPollModeInput.currentData() or "round_robin"
-        runtime_port = self.runtimePortInput.text().strip()
-        self.config["runtime_update_port"] = runtime_port if runtime_port.isdigit() else DEFAULT_RUNTIME_UPDATE_PORT
+        self.config["runtime_update_port"] = self._normalize_port(self.runtimePortInput.text())
         self.config["api_token"] = self.tokenInput.text().strip()
         self.config["mini_click_through"] = self.miniClickThroughCheck.isChecked()
         self.config["show_task_name"] = self.showTaskNameCheck.isChecked()
@@ -875,6 +875,28 @@ class SettingsWindow(QDialog):
         except (TypeError, ValueError):
             value = 100
         return max(35, min(value, 100))
+
+    @staticmethod
+    def _normalize_host(host):
+        """规范化主机地址：去除协议头、路径和尾部斜杠，空值默认 127.0.0.1。"""
+        host = str(host).strip()
+        if not host:
+            return "127.0.0.1"
+        host = re.sub(r'^https?://', '', host)
+        host = host.split('/')[0]
+        host = host.rstrip(':')
+        return host or "127.0.0.1"
+
+    @staticmethod
+    def _normalize_port(port_str):
+        """规范化端口号：限制在 1..65535 范围内，非法默认 22267。"""
+        try:
+            port = int(str(port_str).strip())
+        except (TypeError, ValueError):
+            return "22267"
+        if 1 <= port <= 65535:
+            return str(port)
+        return "22267"
 
     def _normalize_poll_interval(self, value):
         try:
