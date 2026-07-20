@@ -668,6 +668,16 @@ QPushButton#settingsActionBtn:disabled {
 QPushButton#settingsActionBtn:focus {
     outline: none;
 }
+QPushButton#settingsActionBtn[state="update_available"] {
+    background-color: #28e06f;
+    border: none;
+    border-radius: 4px;
+    color: #1a1b26;
+    font-weight: bold;
+}
+QPushButton#settingsActionBtn[state="update_available"]:hover {
+    background-color: #42d392;
+}
 
 QLabel#settingsVersionLabel {
     color: #64748b;

@@ -624,18 +624,9 @@ class SettingsWindow(QDialog):
             self.updateBtn.setText(tr("download_update"))
             if result.get("version"):
                 self.updateBtn.setToolTip(result["version"])
-            self.updateBtn.setStyleSheet("""
-                QPushButton#settingsActionBtn {
-                    background-color: #28e06f;
-                    border: none;
-                    border-radius: 4px;
-                    color: #1a1b26;
-                    font-weight: bold;
-                }
-                QPushButton#settingsActionBtn:hover {
-                    background-color: #42d392;
-                }
-            """)
+            self.updateBtn.setProperty("state", "update_available")
+            self.updateBtn.style().unpolish(self.updateBtn)
+            self.updateBtn.style().polish(self.updateBtn)
             self.updateBtn.setEnabled(True)
             try:
                 self.updateBtn.clicked.disconnect()
@@ -717,7 +708,9 @@ class SettingsWindow(QDialog):
         self.updateBtn.setText(tr("check_update"))
         self.updateBtn.setToolTip("")
         self.updateBtn.setEnabled(True)
-        self.updateBtn.setStyleSheet("")
+        self.updateBtn.setProperty("state", "")
+        self.updateBtn.style().unpolish(self.updateBtn)
+        self.updateBtn.style().polish(self.updateBtn)
         try:
             self.updateBtn.clicked.disconnect()
         except Exception:
