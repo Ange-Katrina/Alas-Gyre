@@ -654,16 +654,13 @@ class WebSocketCommManager:
         # 进入目标配置页
         self._navigate_to_config(ws, cmd.config_name)
 
-        # 收集页面状态以查找按钮，优先复用会话缓存以减少控制延迟。
-        page_state = getattr(self, "_page_state", PyWebIOPageState())
+        # 先收集目标页消息，确保按钮查找基于当前页证据而非跨配置缓存
+        page_state = self._collect_page_messages(ws, CONTROL_COLLECT_TIMEOUT_SECONDS)
 
         target_labels = START_BUTTON_LABELS if cmd.action == "start" else STOP_BUTTON_LABELS
 
         # 在 scheduler_btn scope 中查找目标按钮
         callback_id, value = self._find_button_action(page_state, target_labels)
-        if not callback_id:
-            page_state = self._collect_page_messages(ws, CONTROL_COLLECT_TIMEOUT_SECONDS)
-            callback_id, value = self._find_button_action(page_state, target_labels)
 
         if not callback_id:
             with self._lock:
