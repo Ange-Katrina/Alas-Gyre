@@ -461,6 +461,9 @@ class WebSocketCommManager:
             except websocket.WebSocketTimeoutException:
                 # 超时是正常的——消息间可能没有新数据
                 continue
+            except (websocket.WebSocketException, ConnectionError, OSError):
+                # 传输异常应向外抛出，让外层统一恢复处理
+                raise
             except Exception:
                 break
 
@@ -551,7 +554,7 @@ class WebSocketCommManager:
             self._sidebar_nav_callback_id = sidebar_callback_id
             self._sidebar_nav_callbacks = dict(nav_callbacks)
 
-        # 无配置时回退为默认
+        # 无配置时回退为默认（优先使用 UI 当前配置名，否则用 "alas" 占位）
         if not config_names:
             config_names = ["alas"]
             with self._lock:
