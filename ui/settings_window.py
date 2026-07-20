@@ -1,6 +1,7 @@
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QWidget, QLabel, QLineEdit, QCheckBox,
-    QPushButton, QFrame, QSlider, QGridLayout, QStackedWidget, QComboBox
+    QPushButton, QFrame, QSlider, QGridLayout, QStackedWidget, QComboBox,
+    QScrollArea
 )
 from PySide6.QtCore import Qt, Signal, QTimer, QSize
 from PySide6.QtGui import QColor, QPixmap, QPainter, QPen, QIcon
@@ -486,7 +487,13 @@ class SettingsWindow(QDialog):
         connection_panel_layout.addWidget(self.tokenHint)
         connection_layout.addWidget(connection_panel)
         connection_layout.addStretch()
-        self.settingsStack.addWidget(connection_page)
+        connection_scroll = QScrollArea(self.settingsStack)
+        connection_scroll.setObjectName("settingsPageScroll")
+        connection_scroll.setWidgetResizable(True)
+        connection_scroll.setFrameShape(QFrame.NoFrame)
+        connection_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        connection_scroll.setWidget(connection_page)
+        self.settingsStack.addWidget(connection_scroll)
 
         maintenance_page = QWidget(self.settingsStack)
         maintenance_page.setObjectName("settingsPage")
