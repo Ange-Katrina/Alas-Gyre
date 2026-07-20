@@ -322,6 +322,10 @@ class CardWidget(QFrame):
 
         self._config_idx = 0
         self._runtime_connection = "websocket" if self._use_websocket_comm() else "overlay"
+        self._overlay_recovery_last_check_at = None
+        self._overlay_recovery_failure_count = 0
+        self._overlay_recovery_backoff_steps = (15, 30, 60, 90, 180)
+        self._websocket_shutdown_deadline = None
 
         self._build_ui()
 
@@ -569,6 +573,9 @@ class CardWidget(QFrame):
         """按当前配置重置运行时连接来源和降级提示状态。"""
         self._runtime_connection = "websocket" if self._use_websocket_comm() else "overlay"
         self._websocket_fallback_notice_shown = False
+        self._overlay_recovery_last_check_at = None
+        self._overlay_recovery_failure_count = 0
+        self._websocket_shutdown_deadline = None
 
     def _mark_websocket_fallback(self):
         """标记已降级到 WebSocket，并在当前降级周期只提示一次。"""
