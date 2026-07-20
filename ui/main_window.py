@@ -589,6 +589,20 @@ class CardWidget(QFrame):
             self._websocket_fallback_notice_shown = True
             safe_emit_signal(self.websocket_fallback_notice_signal)
 
+    def _overlay_recovery_next_interval(self):
+        """返回下一次 Overlay 恢复探测间隔秒数。"""
+        steps = getattr(self, "_overlay_recovery_backoff_steps", (15, 30, 60, 90, 180))
+        failure_count = max(0, int(getattr(self, "_overlay_recovery_failure_count", 0)))
+        index = min(failure_count, len(steps) - 1)
+        return steps[index]
+
+    def _overlay_recovery_due(self):
+        """判断当前 poll tick 是否应执行 Overlay 恢复探测。"""
+        last_check_at = getattr(self, "_overlay_recovery_last_check_at", None)
+        if last_check_at is None:
+            return True
+        return time.monotonic() - last_check_at >= self._overlay_recovery_next_interval()
+
     def _is_websocket_snapshot_usable(self, snapshot):
         """判断 WebSocket 快照是否可用（连接状态有效）。"""
         return snapshot.get("connection_state") in {"connecting", "initial_scanning", "ready", "degraded"}
