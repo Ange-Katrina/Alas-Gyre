@@ -603,6 +603,58 @@ class CardWidget(QFrame):
             return True
         return time.monotonic() - last_check_at >= self._overlay_recovery_next_interval()
 
+    def _overlay_probe_config(self, snapshot):
+        """选择旧状态接口恢复验证使用的配置名。"""
+        current = str(getattr(self, "current_config", "") or "").strip()
+        if current:
+            return current
+        for config_name in snapshot.get("configs", []) or []:
+            config_name = str(config_name or "").strip()
+            if config_name:
+                return config_name
+        return ""
+
+    def _probe_overlay_recovery(self, snapshot):
+        """双层验证 Overlay API 是否已恢复。"""
+        try:
+            health = api_request(
+                "GET",
+                gyre_api_url(self.config, "health"),
+                headers=api_headers(self.config),
+                timeout=1.0,
+            )
+            if health.status_code != 200:
+                return False
+
+            status_all = api_request(
+                "GET",
+                gyre_api_url(self.config, "status_all"),
+                headers=api_headers(self.config),
+                timeout=1.0,
+            )
+            if status_all.status_code == 200:
+                status_all.json()
+                return True
+            if status_all.status_code != 404:
+                return False
+
+            probe_config = self._overlay_probe_config(snapshot)
+            if not probe_config:
+                return False
+            status = api_request(
+                "GET",
+                gyre_api_url(self.config, "status"),
+                params={"config": probe_config},
+                headers=api_headers(self.config),
+                timeout=1.0,
+            )
+            if status.status_code != 200:
+                return False
+            status.json()
+            return True
+        except Exception:
+            return False
+
     def _is_websocket_snapshot_usable(self, snapshot):
         """判断 WebSocket 快照是否可用（连接状态有效）。"""
         return snapshot.get("connection_state") in {"connecting", "initial_scanning", "ready", "degraded"}
