@@ -346,7 +346,7 @@ class WebSocketCommManager:
             # 处理控制队列（优先级高于轮询）
             try:
                 self._drain_control_queue(ws)
-            except (websocket.WebSocketException, ConnectionError, OSError) as exc:
+            except (websocket.WebSocketException, ConnectionError, OSError, WebSocketCommError) as exc:
                 ws = self._handle_transport_error(ws, exc)
                 continue
 
@@ -641,7 +641,7 @@ class WebSocketCommManager:
         for cmd in commands:
             try:
                 self._execute_control_command(ws, cmd)
-            except (websocket.WebSocketException, ConnectionError, OSError):
+            except (websocket.WebSocketException, ConnectionError, OSError, WebSocketCommError):
                 raise
             except Exception as exc:
                 with self._lock:
