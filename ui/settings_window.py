@@ -816,8 +816,8 @@ class SettingsWindow(QDialog):
         self.config["always_on_top"] = self.alwaysOnTopCheck.isChecked()
         self.config["theme"] = "light" if self.lightThemeCheck.isChecked() else "dark"
         self.config["lang"] = "en" if self.englishLangCheck.isChecked() else "zh"
-        self.config["ip"] = self.ipInput.text()
-        self.config["port"] = self.portInput.text()
+        self.config["ip"] = self.ipInput.text().strip() or "127.0.0.1"
+        self.config["port"] = self.portInput.text().strip() if self.portInput.text().strip().isdigit() else "22267"
         self.config["connection_mode"] = self.connectionModeCombo.currentData() or "auto"
         self.config["websocket_poll_interval"] = self._normalize_poll_interval(
             self.websocketPollIntervalInput.text()
