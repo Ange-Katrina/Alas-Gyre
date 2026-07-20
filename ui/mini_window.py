@@ -2,8 +2,6 @@ from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QG
 from PySide6.QtCore import QPoint, Qt, Signal
 from PySide6.QtGui import QColor, QPainter, QPainterPath
 import sys
-from alas_gyre.api.client import api_headers, api_request, gyre_api_url
-from alas_gyre.api.websocket_comm import get_persistent_manager
 from alas_gyre.core.status import normalize_status
 from .widgets import StatusIndicator, ConfigActionButton, MarqueeLabel
 from .window_snap import snap_to_available_screen
@@ -117,36 +115,17 @@ class MiniConfigRow(QWidget):
 
     def _on_toggle_clicked(self):
         self.toggleBtn.setEnabled(False)
-        # 发送特定的 config 启停指令
         action = "stop" if self.current_status == "running" else "start"
         import threading
         def send_req():
             try:
-                if self.main_card._use_websocket_comm():
-                    result = get_persistent_manager().post_action(self.config_name, action)
-                    if result.get("queued"):
-                        self.main_card.status_all_update_signal.emit({self.config_name: "queued"}, {self.config_name: ""})
-                        if self.main_card.current_config == self.config_name:
-                            self.main_card.status_update_signal.emit("queued", "")
-                    return
-                url = gyre_api_url(self.main_card.config, action)
-                resp = api_request("POST",
-                    url,
-                    params={"config": self.config_name},
-                    headers=api_headers(self.main_card.config),
-                    timeout=3,
-                )
-                if resp.status_code == 200:
-                    status = normalize_status(resp.json().get("status", "idle"))
-                    self.main_card.status_all_update_signal.emit({self.config_name: status}, {self.config_name: ""})
-                    if self.main_card.current_config == self.config_name:
-                        self.main_card.status_update_signal.emit(status, "")
-                else:
-                    message = self.main_card.format_control_http_error(resp)
-                    self.main_card.control_error_signal.emit(action, message)
+                self.main_card._post_control_action(self.config_name, action)
             except Exception as exc:
                 print(f"[错误] 悬浮窗控制命令失败: {exc}")
-                self.main_card.status_all_update_signal.emit({self.config_name: "disconnected"}, {self.config_name: ""})
+                self.main_card.status_all_update_signal.emit(
+                    {self.config_name: "disconnected"},
+                    {self.config_name: ""},
+                )
                 if self.main_card.current_config == self.config_name:
                     self.main_card.status_update_signal.emit("disconnected", "")
                 self.main_card.control_error_signal.emit(action, tr("control_connect_failed"))
