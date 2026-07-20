@@ -644,6 +644,37 @@ QPushButton#testBtn[state="error"] {
     font-weight: bold;
 }
 
+/* 设置页操作按钮（向导/检查更新/运行时更新） */
+QPushButton#settingsActionBtn {
+    background-color: transparent;
+    border: 1px solid #cbd5e1;
+    border-radius: 4px;
+    color: #64748b;
+    font-size: 12px;
+}
+QPushButton#settingsActionBtn:hover {
+    background-color: #e2e8f0;
+    color: #0f172a;
+}
+QPushButton#settingsActionBtn:pressed {
+    background-color: #cbd5e1;
+    color: #0f172a;
+}
+QPushButton#settingsActionBtn:disabled {
+    background-color: #f8fafc;
+    color: #94a3b8;
+    border: 1px solid #e2e8f0;
+}
+QPushButton#settingsActionBtn:focus {
+    outline: none;
+}
+
+QLabel#settingsVersionLabel {
+    color: #64748b;
+    font-size: 13px;
+    font-family: "Microsoft YaHei", "Segoe UI";
+}
+
 /* 配置动作按钮（Play/Stop） */
 QPushButton#configActionBtn {
     background-color: #f1f5f9;

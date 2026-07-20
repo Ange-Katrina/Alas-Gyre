@@ -332,22 +332,10 @@ class SettingsWindow(QDialog):
         wizard_label.setFixedWidth(104)
 
         self.wizardBtn = QPushButton(tr("open_wizard"))
-        self.wizardBtn.setObjectName("updateBtn")
+        self.wizardBtn.setObjectName("settingsActionBtn")
         self.wizardBtn.setCursor(Qt.PointingHandCursor)
         self.wizardBtn.setFocusPolicy(Qt.NoFocus)
         self.wizardBtn.setFixedSize(116, 30)
-        self.wizardBtn.setStyleSheet("""
-            QPushButton#updateBtn {
-                background-color: transparent;
-                border: 1px solid #454852;
-                border-radius: 4px;
-                color: #a6abb4;
-            }
-            QPushButton#updateBtn:hover {
-                background-color: #454852;
-                color: #ffffff;
-            }
-        """)
         self.wizardBtn.clicked.connect(self._open_init_setup)
 
         wizard_layout.addWidget(wizard_label)
@@ -363,25 +351,13 @@ class SettingsWindow(QDialog):
         update_label.setFixedWidth(104)
         
         self.versionLabel = QLabel(f"{tr('current_version')} {get_current_version()}")
-        self.versionLabel.setStyleSheet("color: #a6abb4; font-size: 13px; font-family: 'Microsoft YaHei', 'Segoe UI';")
+        self.versionLabel.setObjectName("settingsVersionLabel")
         
         self.updateBtn = QPushButton(tr("check_update"))
-        self.updateBtn.setObjectName("updateBtn")
+        self.updateBtn.setObjectName("settingsActionBtn")
         self.updateBtn.setCursor(Qt.PointingHandCursor)
         self.updateBtn.setFocusPolicy(Qt.NoFocus)
         self.updateBtn.setFixedSize(116, 30)
-        self.updateBtn.setStyleSheet("""
-            QPushButton#updateBtn {
-                background-color: transparent;
-                border: 1px solid #454852;
-                border-radius: 4px;
-                color: #a6abb4;
-            }
-            QPushButton#updateBtn:hover {
-                background-color: #454852;
-                color: #ffffff;
-            }
-        """)
         self.updateBtn.clicked.connect(self._check_for_updates)
         
         update_layout.addWidget(update_label)
@@ -401,11 +377,10 @@ class SettingsWindow(QDialog):
         self.runtimeUpdateHint.setWordWrap(True)
 
         self.runtimeUpdateBtn = QPushButton(tr("update_runtime"))
-        self.runtimeUpdateBtn.setObjectName("updateBtn")
+        self.runtimeUpdateBtn.setObjectName("settingsActionBtn")
         self.runtimeUpdateBtn.setCursor(Qt.PointingHandCursor)
         self.runtimeUpdateBtn.setFocusPolicy(Qt.NoFocus)
         self.runtimeUpdateBtn.setFixedSize(116, 30)
-        self.runtimeUpdateBtn.setStyleSheet(self.updateBtn.styleSheet())
         self.runtimeUpdateBtn.clicked.connect(self._update_runtime)
 
         runtime_update_layout.addWidget(runtime_update_label)
@@ -650,14 +625,14 @@ class SettingsWindow(QDialog):
             if result.get("version"):
                 self.updateBtn.setToolTip(result["version"])
             self.updateBtn.setStyleSheet("""
-                QPushButton#updateBtn {
+                QPushButton#settingsActionBtn {
                     background-color: #28e06f;
                     border: none;
                     border-radius: 4px;
                     color: #1a1b26;
                     font-weight: bold;
                 }
-                QPushButton#updateBtn:hover {
+                QPushButton#settingsActionBtn:hover {
                     background-color: #42d392;
                 }
             """)
@@ -742,18 +717,7 @@ class SettingsWindow(QDialog):
         self.updateBtn.setText(tr("check_update"))
         self.updateBtn.setToolTip("")
         self.updateBtn.setEnabled(True)
-        self.updateBtn.setStyleSheet("""
-            QPushButton#updateBtn {
-                background-color: transparent;
-                border: 1px solid #454852;
-                border-radius: 4px;
-                color: #a6abb4;
-            }
-            QPushButton#updateBtn:hover {
-                background-color: #454852;
-                color: #ffffff;
-            }
-        """)
+        self.updateBtn.setStyleSheet("")
         try:
             self.updateBtn.clicked.disconnect()
         except Exception:
