@@ -593,7 +593,8 @@ class CardWidget(QFrame):
         """返回下一次 Overlay 恢复探测间隔秒数。"""
         steps = getattr(self, "_overlay_recovery_backoff_steps", (15, 30, 60, 90, 180))
         failure_count = max(0, int(getattr(self, "_overlay_recovery_failure_count", 0)))
-        index = min(failure_count, len(steps) - 1)
+        index = max(0, failure_count - 1)
+        index = min(index, len(steps) - 1)
         return steps[index]
 
     def _overlay_recovery_due(self):
@@ -620,7 +621,7 @@ class CardWidget(QFrame):
         self._overlay_recovery_last_check_at = time.monotonic()
         self._overlay_recovery_failure_count = min(
             int(getattr(self, "_overlay_recovery_failure_count", 0)) + 1,
-            len(getattr(self, "_overlay_recovery_backoff_steps", (15, 30, 60, 90, 180))) - 1,
+            len(getattr(self, "_overlay_recovery_backoff_steps", (15, 30, 60, 90, 180))),
         )
         print(f"[Log] Overlay API 不可用，下次查询 {self._overlay_recovery_next_interval()}s")
 
@@ -743,6 +744,7 @@ class CardWidget(QFrame):
         if snapshot.get("connection_state") == "stopped":
             manager.start()
             snapshot = manager.get_status_all()
+        was_fallback = getattr(self, "_runtime_connection", "overlay") == "websocket_fallback"
         if fallback and not self._is_websocket_snapshot_usable(snapshot):
             return False
         if fallback:
@@ -755,7 +757,7 @@ class CardWidget(QFrame):
             self.configs_update_signal.emit(configs)
         self.status_all_update_signal.emit(statuses, tasks)
         self.status_update_signal.emit(current_status, current_task)
-        if fallback:
+        if fallback and was_fallback:
             self._try_overlay_recovery(snapshot)
         return True
 
