@@ -427,7 +427,6 @@ class InitSetupWindow(QDialog):
         layout.addWidget(self.modeCombo)
 
         self.modeCombo.currentIndexChanged.connect(lambda: (
-            self._rebuild_step_nav(),
             self._set_step(0),
             mode_desc_label.setText(
                 tr("connection_mode_auto_desc") if self._is_auto_mode() else tr("connection_mode_websocket_desc")
