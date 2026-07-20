@@ -10,10 +10,10 @@ import threading
 import time
 from typing import Any
 
-import requests
 import websocket
 
 from alas_gyre.api.client import alas_gui_url
+from alas_gyre.api.client import api_request
 from alas_gyre.api.client import pywebio_ws_url
 
 CONNECTION_STATE_STOPPED = "stopped"
@@ -428,7 +428,7 @@ class WebSocketCommManager:
     def _http_probe_alas_gui(self):
         """HTTP GET ALAS GUI 根页面，确认包含 PyWebIO 特征。"""
         url = alas_gui_url(self.config)
-        resp = requests.get(url, timeout=5)
+        resp = api_request("GET", url, timeout=5)
         resp.raise_for_status()
         body = resp.text.lower()
         if "pywebio" not in body:
