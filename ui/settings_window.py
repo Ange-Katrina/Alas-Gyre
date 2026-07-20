@@ -882,13 +882,19 @@ class SettingsWindow(QDialog):
         if not isValid(self):
             return
         ip = self.ipInput.text().strip()
-        port_str = self.portInput.text().strip()
+        port_str = self.portInput.text()
+        stripped_port = port_str.strip()
         connection_mode = self.connectionModeCombo.currentData() or "auto"
 
-        normalized_port = self._normalize_port(port_str)
-        if not ip or not port_str.isdigit() or (normalized_port == "22267" and port_str != "22267"):
+        if (
+            not ip
+            or not stripped_port
+            or not stripped_port.isdigit()
+            or not 1 <= int(stripped_port) <= 65535
+        ):
             self._on_test_result(False, tr("test_invalid"))
             return
+        normalized_port = self._normalize_port(stripped_port)
 
         self.testBtn.setText("...")
         self.testBtn.setIcon(QIcon())
