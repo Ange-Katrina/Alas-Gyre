@@ -331,6 +331,8 @@ TRANSLATIONS = {
         "test_overlay_and_websocket_failed": "Both Overlay and WebSocket communication are unavailable.",
         "action_failed": "Action failed: {error}",
         "control_failed_title": "Action Failed",
+        "websocket_fallback_notice_title": "Connection Mode Switched",
+        "websocket_fallback_notice_message": "Overlay API unavailable, switched to WebSocket. The system will periodically check and switch back automatically when recovered.",
         "control_connect_failed": "Cannot connect to ALAS Overlay API.\nStart ALAS with start_gyre_alas.bat / start_gyre_alas.sh and try again.",
         "control_http_failed": "ALAS Overlay API returned HTTP {status}.",
         "control_http_failed_with_detail": "ALAS Overlay API returned HTTP {status}:\n{error}",
