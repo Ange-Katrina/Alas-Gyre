@@ -821,6 +821,19 @@ class SettingsWindow(QDialog):
         self.portInput.setText(str(self.config.get("port", "22267")))
         self.runtimePortInput.setText(str(self.config.get("runtime_update_port", DEFAULT_RUNTIME_UPDATE_PORT)))
         self.tokenInput.setText(self.config.get("api_token", ""))
+        current_mode = normalize_connection_mode(self.config)
+        idx = self.connectionModeCombo.findData(current_mode)
+        if idx >= 0:
+            self.connectionModeCombo.setCurrentIndex(idx)
+        self.websocketPollIntervalInput.setText(
+            str(self.config.get("websocket_poll_interval", 3))
+        )
+        current_poll_mode = self.config.get("websocket_poll_mode", "round_robin")
+        idx = self.websocketPollModeInput.findData(current_poll_mode)
+        if idx >= 0:
+            self.websocketPollModeInput.setCurrentIndex(idx)
+        self._refresh_connection_mode_visibility()
+        self._on_poll_mode_changed(-1)
 
     def _open_init_setup(self):
         self._sync_config_from_ui()
