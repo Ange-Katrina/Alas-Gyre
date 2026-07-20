@@ -800,7 +800,9 @@ class InitSetupWindow(QDialog):
         return QIcon(pixmap)
 
     def _on_test_result(self, success, message=""):
-        btn = getattr(self, "_active_test_btn", self.testBtn)
+        btn = getattr(self, "_active_test_btn", None)
+        if btn is None or not isValid(btn):
+            return
         btn.setEnabled(True)
         btn.setText("")
         btn.setToolTip(message)
@@ -815,7 +817,9 @@ class InitSetupWindow(QDialog):
         QTimer.singleShot(2000, self._reset_test_btn)
 
     def _reset_test_btn(self):
-        btn = getattr(self, "_active_test_btn", self.testBtn)
+        btn = getattr(self, "_active_test_btn", None)
+        if btn is None or not isValid(btn):
+            return
         btn.setIcon(QIcon())
         btn.setText(tr("test_connection_optional"))
         btn.setToolTip("")
