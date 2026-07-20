@@ -624,6 +624,29 @@ class CardWidget(QFrame):
         )
         print(f"[Log] Overlay API 不可用，下次查询 {self._overlay_recovery_next_interval()}s")
 
+    def _check_websocket_shutdown_deadline(self):
+        """Overlay 恢复稳定后延迟关闭 WebSocket manager。"""
+        deadline = getattr(self, "_websocket_shutdown_deadline", None)
+        if deadline is None:
+            return
+        if time.monotonic() < deadline:
+            return
+        if getattr(self, "_runtime_connection", "overlay") != "overlay":
+            self._websocket_shutdown_deadline = None
+            return
+        if self._use_websocket_comm():
+            self._websocket_shutdown_deadline = None
+            return
+        manager = get_persistent_manager()
+        snapshot = manager.get_status_all()
+        if self._websocket_control_active(snapshot):
+            return
+        try:
+            manager.stop()
+        except Exception:
+            pass
+        self._websocket_shutdown_deadline = None
+
     def _websocket_control_active(self, snapshot):
         """判断 WebSocket manager 是否存在控制活动。"""
         if snapshot.get("pending_controls"):
@@ -883,6 +906,7 @@ class CardWidget(QFrame):
     def _poll_status_task_guarded(self):
         try:
             self._poll_status_task()
+            self._check_websocket_shutdown_deadline()
         finally:
             with self._poll_lock:
                 self._polling_status = False
