@@ -573,8 +573,9 @@ class InitSetupWindow(QDialog):
             widget.update()
 
     def _set_step(self, index):
-        self._rebuild_step_nav()
         steps = self._current_step_keys()
+        if len(steps) != len(self.stepNavItems):
+            self._rebuild_step_nav()
         self.current_step = max(0, min(index, len(steps) - 1))
         step_key = steps[self.current_step]
         stack_indexes = {
