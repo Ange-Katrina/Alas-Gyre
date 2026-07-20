@@ -603,6 +603,46 @@ class CardWidget(QFrame):
             return True
         return time.monotonic() - last_check_at >= self._overlay_recovery_next_interval()
 
+    def _reset_overlay_recovery_state(self):
+        """清空 Overlay 恢复探测状态。"""
+        self._overlay_recovery_last_check_at = None
+        self._overlay_recovery_failure_count = 0
+
+    def _mark_overlay_recovered(self):
+        """切回 Overlay 并启动 WebSocket 延迟关闭窗口。"""
+        self._runtime_connection = "overlay"
+        self._reset_overlay_recovery_state()
+        self._websocket_shutdown_deadline = time.monotonic() + 30
+        print("[Log] Overlay API 可用，自动切回 Overlay API")
+
+    def _mark_overlay_recovery_failed(self):
+        """记录恢复探测失败并推进退避。"""
+        self._overlay_recovery_last_check_at = time.monotonic()
+        self._overlay_recovery_failure_count = min(
+            int(getattr(self, "_overlay_recovery_failure_count", 0)) + 1,
+            len(getattr(self, "_overlay_recovery_backoff_steps", (15, 30, 60, 90, 180))) - 1,
+        )
+        print(f"[Log] Overlay API 不可用，下次查询 {self._overlay_recovery_next_interval()}s")
+
+    def _websocket_control_active(self, snapshot):
+        """判断当前是否有 WebSocket 发出的控制操作尚未完成。"""
+        return bool(snapshot.get("pending_controls"))
+
+    def _try_overlay_recovery(self, snapshot):
+        """在 WebSocket fallback 轮询后尝试恢复 Overlay。"""
+        if should_use_websocket_directly(self.config):
+            return
+        if getattr(self, "_runtime_connection", "overlay") != "websocket_fallback":
+            return
+        if self._websocket_control_active(snapshot):
+            return
+        if not self._overlay_recovery_due():
+            return
+        if self._probe_overlay_recovery(snapshot):
+            self._mark_overlay_recovered()
+            return
+        self._mark_overlay_recovery_failed()
+
     def _overlay_probe_config(self, snapshot):
         """选择旧状态接口恢复验证使用的配置名。"""
         current = str(getattr(self, "current_config", "") or "").strip()
@@ -686,6 +726,8 @@ class CardWidget(QFrame):
             self.configs_update_signal.emit(configs)
         self.status_all_update_signal.emit(statuses, tasks)
         self.status_update_signal.emit(current_status, current_task)
+        if fallback:
+            self._try_overlay_recovery(snapshot)
         return True
 
     def _queue_websocket_control(self, config_name, action):
