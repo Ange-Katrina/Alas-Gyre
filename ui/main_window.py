@@ -580,7 +580,10 @@ class CardWidget(QFrame):
     def _mark_websocket_fallback(self):
         """标记已降级到 WebSocket，并在当前降级周期只提示一次。"""
         if getattr(self, "_runtime_connection", "overlay") != "websocket_fallback":
-            print("[Log] Overlay 不可用，已自动切换到 WebSocket 通讯")
+            print("[Log] Overlay API 不可用，已自动切换到 WebSocket 通讯")
+            self._overlay_recovery_last_check_at = None
+            self._overlay_recovery_failure_count = 0
+            self._websocket_shutdown_deadline = None
         self._runtime_connection = "websocket_fallback"
         if not getattr(self, "_websocket_fallback_notice_shown", False):
             self._websocket_fallback_notice_shown = True
