@@ -193,6 +193,9 @@ class SettingsWindow(QDialog):
         self.ipInput.setText(self.config.get("ip", "127.0.0.1"))
         ip_layout.addWidget(ip_label)
         ip_layout.addWidget(self.ipInput, stretch=1)
+        self.ipHint = QLabel(tr("ip_address_hint"))
+        self.ipHint.setStyleSheet("color: #8f96a3; font-size: 12px; font-family: 'Microsoft YaHei', 'Segoe UI';")
+        self.ipHint.setWordWrap(True)
 
         # WebSocket 通讯轮询间隔
         ws_interval_layout = QHBoxLayout()
@@ -210,6 +213,9 @@ class SettingsWindow(QDialog):
         ws_interval_layout.addWidget(ws_interval_label)
         ws_interval_layout.addWidget(self.websocketPollIntervalInput)
         ws_interval_layout.addStretch()
+        self.websocketPollIntervalHint = QLabel(tr("websocket_poll_interval_hint"))
+        self.websocketPollIntervalHint.setStyleSheet("color: #8f96a3; font-size: 12px; font-family: 'Microsoft YaHei', 'Segoe UI';")
+        self.websocketPollIntervalHint.setWordWrap(True)
 
         # WebSocket 通讯轮询模式
         ws_mode_layout = QHBoxLayout()
@@ -233,6 +239,9 @@ class SettingsWindow(QDialog):
 
         ws_mode_layout.addWidget(ws_mode_label)
         ws_mode_layout.addWidget(self.websocketPollModeInput, stretch=1)
+        self.websocketPollModeHint = QLabel(tr("websocket_poll_mode_hint"))
+        self.websocketPollModeHint.setStyleSheet("color: #8f96a3; font-size: 12px; font-family: 'Microsoft YaHei', 'Segoe UI';")
+        self.websocketPollModeHint.setWordWrap(True)
 
         # WebSocket 通讯说明
         self.wsHint = QLabel(tr("websocket_comm_hint"))
