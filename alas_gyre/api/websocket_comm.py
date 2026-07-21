@@ -125,13 +125,14 @@ class WebSocketCommManager:
         """停止后台通讯线程。"""
         self.stop_event.set()
         # 主动关闭当前 WebSocket 连接，打断阻塞中的 recv()
-        ws_to_close = getattr(self, '_current_ws', None)
+        with self._lock:
+            ws_to_close = self._current_ws
+            self._current_ws = None
         if ws_to_close is not None:
             try:
                 ws_to_close.close()
             except Exception:
                 pass
-            self._current_ws = None
         thread = self.worker_thread
         if thread is not None:
             thread.join(timeout=5)
@@ -390,6 +391,11 @@ class WebSocketCommManager:
                 ws.close()
             except Exception:
                 pass
+        lock = getattr(self, "_lock", None)
+        if lock is not None:
+            with lock:
+                if getattr(self, "_current_ws", None) is ws:
+                    self._current_ws = None
 
     def _handle_transport_error(self, ws, exc):
         """处理传输层异常，记录失败、关闭旧连接并返回 None。"""
@@ -399,6 +405,11 @@ class WebSocketCommManager:
                 ws.close()
             except Exception:
                 pass
+        lock = getattr(self, "_lock", None)
+        if lock is not None:
+            with lock:
+                if getattr(self, "_current_ws", None) is ws:
+                    self._current_ws = None
         self._interruptible_sleep(RECONNECT_DELAY_SECONDS)
         return None
 
@@ -457,7 +468,8 @@ class WebSocketCommManager:
         """建立 WebSocket 连接，返回 ws 对象。"""
         url = pywebio_ws_url(self.config)
         ws = websocket.create_connection(url, timeout=10)
-        self._current_ws = ws
+        with self._lock:
+            self._current_ws = ws
         return ws
 
     def _collect_page_messages(self, ws, timeout):
