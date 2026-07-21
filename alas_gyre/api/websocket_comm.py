@@ -122,13 +122,27 @@ class WebSocketCommManager:
     def stop(self):
         """停止后台通讯线程。"""
         self.stop_event.set()
+        # 主动关闭当前 WebSocket 连接，打断阻塞中的 recv()
+        ws_to_close = getattr(self, '_current_ws', None)
+        if ws_to_close is not None:
+            try:
+                ws_to_close.close()
+            except Exception:
+                pass
+            self._current_ws = None
         thread = self.worker_thread
         if thread is not None:
-            thread.join(timeout=3)
+            thread.join(timeout=5)
         with self._lock:
-            self.connection_state = CONNECTION_STATE_STOPPED
-            self.ready = False
-            self.transport_available = False
+            if thread is not None and thread.is_alive():
+                # 线程未能在超时内退出，不虚假声明 stopped
+                self.connection_state = CONNECTION_STATE_PAUSED
+                self.ready = False
+                self.transport_available = False
+            else:
+                self.connection_state = CONNECTION_STATE_STOPPED
+                self.ready = False
+                self.transport_available = False
 
     def update_config(self, config):
         """更新通讯配置。"""
@@ -439,6 +453,7 @@ class WebSocketCommManager:
         """建立 WebSocket 连接，返回 ws 对象。"""
         url = pywebio_ws_url(self.config)
         ws = websocket.create_connection(url, timeout=10)
+        self._current_ws = ws
         return ws
 
     def _collect_page_messages(self, ws, timeout, fresh_state=False):
