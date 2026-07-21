@@ -503,9 +503,10 @@ class InitSetupWindow(QDialog):
             self._active_test_btn = self.wsTestBtn
             self._on_test_result(False, tr("test_invalid"))
             return
-        self.config["ip"] = self.wsIpInput.text().strip()
-        self.config["port"] = self.wsPortInput.text().strip()
-        self.config["connection_mode"] = "websocket"
+        test_config = dict(self.config)
+        test_config["ip"] = self.wsIpInput.text().strip()
+        test_config["port"] = self.wsPortInput.text().strip()
+        test_config["connection_mode"] = "websocket"
 
         self._active_test_btn = self.wsTestBtn
         self.wsTestBtn.setText("...")
@@ -514,7 +515,6 @@ class InitSetupWindow(QDialog):
         self.wsTestBtn.setProperty("state", "testing")
         self.wsTestBtn.style().unpolish(self.wsTestBtn)
         self.wsTestBtn.style().polish(self.wsTestBtn)
-        test_config = dict(self.config)
         threading.Thread(target=self._ws_test_api, args=(test_config,), daemon=True).start()
 
     def _emit_test_result(self, success, message):
