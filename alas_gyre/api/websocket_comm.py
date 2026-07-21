@@ -1067,11 +1067,18 @@ _manager_lock = threading.Lock()
 
 
 def get_persistent_manager():
-    """返回进程级 WebSocket 通讯管理器。"""
+    """返回进程级 WebSocket 通讯管理器（不存在则创建）。"""
     global _manager
     with _manager_lock:
         if _manager is None:
             _manager = WebSocketCommManager({})
+        return _manager
+
+
+def get_existing_manager():
+    """返回已存在的 WebSocket 通讯管理器，不存在则返回 None。"""
+    global _manager
+    with _manager_lock:
         return _manager
 
 
