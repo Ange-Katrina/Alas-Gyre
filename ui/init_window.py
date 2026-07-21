@@ -509,6 +509,8 @@ class InitSetupWindow(QDialog):
         test_config["connection_mode"] = "websocket"
 
         self._active_test_btn = self.wsTestBtn
+        # 提前捕获按钮引用，避免后台线程访问可能已销毁的 Qt widget
+        btn = self.wsTestBtn
         self.wsTestBtn.setText("...")
         self.wsTestBtn.setIcon(QIcon())
         self.wsTestBtn.setEnabled(False)
@@ -519,7 +521,7 @@ class InitSetupWindow(QDialog):
         self._test_request_id = getattr(self, "_test_request_id", 0) + 1
         request_id = self._test_request_id
         threading.Thread(
-            target=self._ws_test_api, args=(test_config, request_id), daemon=True
+            target=self._ws_test_api, args=(test_config, btn, request_id), daemon=True
         ).start()
 
     def _emit_test_result(self, success, message):
@@ -530,8 +532,7 @@ class InitSetupWindow(QDialog):
         except RuntimeError:
             pass
 
-    def _ws_test_api(self, test_config=None, request_id=0):
-        btn = self.wsTestBtn
+    def _ws_test_api(self, test_config=None, btn=None, request_id=0):
         if test_config is None:
             test_config = self.config
         try:
