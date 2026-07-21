@@ -227,6 +227,13 @@ class WebSocketCommManager:
                 "initial_scan_completed": self.initial_scan_completed,
             }
 
+    def pop_control_errors(self):
+        """返回并清空控制错误（线程安全的一次性消费）。"""
+        with self._lock:
+            errors = dict(self.control_errors)
+            self.control_errors.clear()
+            return errors
+
     def get_status_all(self):
         """返回 UI 状态快照。"""
         snapshot = self.get_snapshot()
