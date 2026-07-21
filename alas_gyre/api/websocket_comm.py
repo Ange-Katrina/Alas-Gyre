@@ -328,8 +328,8 @@ class WebSocketCommManager:
             # 阶段二：初始化全量扫描
             try:
                 self._perform_initial_scan(ws)
-            except (websocket.WebSocketException, ConnectionError, OSError) as exc:
-                # 传输层异常——标记为传输失败，进入轮询循环尝试恢复
+            except (websocket.WebSocketException, ConnectionError, OSError, WebSocketCommError) as exc:
+                # 传输层或通讯异常——标记为传输失败，进入轮询循环尝试恢复
                 self._record_transport_failure(exc)
             except Exception as exc:
                 # 非传输异常（如 JSON decode）——记录日志，允许降级运行
@@ -375,7 +375,7 @@ class WebSocketCommManager:
                     self._poll_full_scan(ws)
                 else:
                     self._poll_round_robin(ws)
-            except (websocket.WebSocketException, ConnectionError, OSError) as exc:
+            except (websocket.WebSocketException, ConnectionError, OSError, WebSocketCommError) as exc:
                 ws = self._handle_transport_error(ws, exc)
                 continue
             except Exception as exc:
@@ -873,6 +873,11 @@ class WebSocketCommManager:
 
         try:
             self._scan_config(ws, config_name)
+        except WebSocketCommError as exc:
+            error_str = str(exc)
+            if error_str in {ERROR_SESSION_CLOSED, ERROR_INTERNAL_ALAS_GUI_ERROR}:
+                raise
+            self._mark_config_missing(config_name, error_str)
         except Exception as exc:
             self._mark_config_missing(config_name, str(exc))
 
@@ -887,6 +892,11 @@ class WebSocketCommManager:
                 continue
             try:
                 self._scan_config(ws, config_name)
+            except WebSocketCommError as exc:
+                error_str = str(exc)
+                if error_str in {ERROR_SESSION_CLOSED, ERROR_INTERNAL_ALAS_GUI_ERROR}:
+                    raise
+                self._mark_config_missing(config_name, error_str)
             except Exception as exc:
                 self._mark_config_missing(config_name, str(exc))
 
