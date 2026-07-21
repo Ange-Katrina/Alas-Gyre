@@ -2,6 +2,7 @@
 # -_- coding: utf-8 -*-
 """连接策略决策模块——连接模式判断和降级策略的唯一入口。"""
 
+import re
 from dataclasses import dataclass
 
 from alas_gyre.api.client import alas_gui_url
@@ -85,8 +86,11 @@ def _test_websocket(config):
     """
     try:
         import websocket as _ws_test
+        test_url = re.sub(
+            r'session=[^&]+', 'session=test', pywebio_ws_url(config)
+        )
         test_ws = _ws_test.create_connection(
-            pywebio_ws_url(config) + "&session=test",
+            test_url,
             timeout=3,
         )
         test_ws.close()
