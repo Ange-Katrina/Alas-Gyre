@@ -1098,10 +1098,14 @@ class PyWebIOPageState:
             return
         if method == "append":
             if data is not None:
+                if isinstance(data, dict) and not data.get("scope"):
+                    data = dict(data, scope=scope)
                 self.outputs.append(data)
             return
         self._clear_scope(scope)
         if method == "replace" and data is not None:
+            if isinstance(data, dict) and not data.get("scope"):
+                data = dict(data, scope=scope)
             self.outputs.append(data)
 
     def _clear_scope(self, scope):
