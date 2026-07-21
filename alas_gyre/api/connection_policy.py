@@ -81,9 +81,11 @@ def _test_overlay(config):
 def _test_websocket(config):
     """测试 ALAS WebUI WebSocket 通讯是否可达。
 
-    优先尝试建立一次短 WebSocket 连接验证通道；回退到 HTTP 页面探测。
+    优先尝试建立一次短 WebSocket 连接验证握手通道。
+    HTTP 页面探测仅作为诊断补充，不替代握手成功判定。
     成功返回空字符串，失败返回错误信息。
     """
+    ws_error = ""
     try:
         import websocket as _ws_test
         test_url = re.sub(
@@ -93,14 +95,21 @@ def _test_websocket(config):
             test_url,
             timeout=3,
         )
-        test_ws.close()
+    except Exception as exc:
+        ws_error = _format_error(exc)
+    else:
+        try:
+            test_ws.close()
+        except Exception:
+            pass
         return ""
-    except Exception:
-        pass
+
+    # WebSocket 握手失败时不将 HTTP 页面可达当作 WebSocket 通讯成功
     resp = api_request("GET", alas_gui_url(config), timeout=5)
-    if resp.status_code == 200 and "pywebio" in (resp.text or "").lower():
-        return ""
-    return f"HTTP {resp.status_code}"
+    http_detail = f"，HTTP 页面可达 (200)" if (
+        resp.status_code == 200 and "pywebio" in (resp.text or "").lower()
+    ) else ""
+    return f"WebSocket 握手失败: {ws_error}{http_detail}"
 
 
 def test_connection_with_fallback(config) -> ConnectionTestResult:
