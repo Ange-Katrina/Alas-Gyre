@@ -278,6 +278,7 @@ class CardWidget(QFrame):
     config_delete_result_signal = Signal(bool, str, str, list, str)
     control_error_signal = Signal(str, str)
     websocket_fallback_notice_signal = Signal()
+    poll_interval_update_signal = Signal(int)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -342,6 +343,7 @@ class CardWidget(QFrame):
         self.config_delete_result_signal.connect(self._on_config_delete_result)
         self.control_error_signal.connect(self._on_control_error)
         self.websocket_fallback_notice_signal.connect(self._on_websocket_fallback_notice)
+        self.poll_interval_update_signal.connect(self._apply_poll_interval)
 
         self.poll_timer = QTimer(self)
         self.poll_timer.timeout.connect(self._start_poll_thread)
@@ -971,6 +973,11 @@ class CardWidget(QFrame):
             tr("websocket_fallback_notice_message"),
         )
 
+    def _apply_poll_interval(self, interval_ms):
+        """在主线程安全地更新 poll timer 间隔，避免后台线程跨线程操作 QTimer。"""
+        if hasattr(self, "poll_timer") and self.poll_timer.interval() != interval_ms:
+            self.poll_timer.setInterval(interval_ms)
+
     def _forward_drag_press(self, event):
         if self.window():
             self.window().mousePressEvent(event)
@@ -1121,13 +1128,12 @@ class CardWidget(QFrame):
             else:
                 self._runtime_connection = "websocket"
             self._poll_via_websocket_manager(fallback=False)
-            # 根据配置动态更新轮询间隔
+            # 根据配置动态更新轮询间隔，通过 signal 转到主线程操作 QTimer
             try:
                 interval_ms = max(1, min(60, int(self.config.get("websocket_poll_interval", 3)))) * 1000
             except (ValueError, TypeError):
                 interval_ms = 3000
-            if self.poll_timer.interval() != interval_ms:
-                self.poll_timer.setInterval(interval_ms)
+            self.poll_interval_update_signal.emit(interval_ms)
             return
 
         lock = getattr(self, "_runtime_connection_lock", None)
@@ -1140,8 +1146,7 @@ class CardWidget(QFrame):
             self._poll_via_websocket_manager(fallback=True)
             return
 
-        if hasattr(self, "poll_timer") and self.poll_timer.interval() != 3000:
-            self.poll_timer.setInterval(3000)
+        self.poll_interval_update_signal.emit(3000)
 
         try:
             url = gyre_api_url(self.config, "status_all")
