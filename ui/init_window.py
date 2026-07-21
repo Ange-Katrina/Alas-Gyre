@@ -391,10 +391,14 @@ class InitSetupWindow(QDialog):
 
 
     def _current_step_keys(self):
-        """返回当前模式下的步骤键列表。"""
-        if self._is_auto_mode():
-            return ["mode", "runtime", "start", "test"]
-        return ["mode", "websocket"]
+        """返回当前模式下的步骤键列表。
+        首次进入只显示模式选择，当前步骤不是 mode 时才展开完整流程。
+        """
+        if self.current_step != 0:
+            if self._is_auto_mode():
+                return ["mode", "runtime", "start", "test"]
+            return ["mode", "websocket"]
+        return ["mode"]
 
 
     def _build_mode_page(self):
@@ -509,7 +513,8 @@ class InitSetupWindow(QDialog):
         self.wsTestBtn.setProperty("state", "testing")
         self.wsTestBtn.style().unpolish(self.wsTestBtn)
         self.wsTestBtn.style().polish(self.wsTestBtn)
-        threading.Thread(target=self._ws_test_api, daemon=True).start()
+        test_config = dict(self.config)
+        threading.Thread(target=self._ws_test_api, args=(test_config,), daemon=True).start()
 
     def _emit_test_result(self, success, message):
         """安全发射测试结果信号，忽略已删除信号源异常。"""
@@ -519,10 +524,12 @@ class InitSetupWindow(QDialog):
         except RuntimeError:
             pass
 
-    def _ws_test_api(self):
+    def _ws_test_api(self, test_config=None):
         btn = self.wsTestBtn
+        if test_config is None:
+            test_config = self.config
         try:
-            result = test_connection_with_fallback(self.config)
+            result = test_connection_with_fallback(test_config)
             if getattr(self, "_active_test_btn", None) is not btn:
                 return
             if result.success:
