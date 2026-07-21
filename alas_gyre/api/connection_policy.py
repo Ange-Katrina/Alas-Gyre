@@ -77,7 +77,21 @@ def _test_overlay(config):
 
 
 def _test_websocket(config):
-    """测试 WebSocket GUI 是否可达，成功返回空字符串，失败返回错误信息。"""
+    """测试 ALAS WebUI WebSocket 通讯是否可达。
+
+    优先尝试建立一次短 WebSocket 连接验证通道；回退到 HTTP 页面探测。
+    成功返回空字符串，失败返回错误信息。
+    """
+    try:
+        import websocket as _ws_test
+        test_ws = _ws_test.create_connection(
+            pywebio_ws_url(config) + "&session=test",
+            timeout=3,
+        )
+        test_ws.close()
+        return ""
+    except Exception:
+        pass
     resp = api_request("GET", alas_gui_url(config), timeout=5)
     if resp.status_code == 200 and "pywebio" in (resp.text or "").lower():
         return ""
