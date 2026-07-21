@@ -251,11 +251,13 @@ def build_websocket_ui_snapshot(snapshot, current_config=""):
     state = snapshot.get("connection_state", "")
     scanning_states = {"stopped", "connecting", "initial_scanning"}
     current_fallback = "scanning" if state in scanning_states else "disconnected"
-    if not configs and current_fallback == "scanning":
-        configs = [tr("app_scanning")]
-        statuses = {configs[0]: "scanning"}
-        tasks = {configs[0]: ""}
-        return configs, statuses, tasks, "scanning", ""
+    if not configs:
+        # 无真实配置时返回空列表和扫描/断开状态，不构造伪配置
+        current_status = current_fallback
+        current_task = ""
+        if current_fallback == "scanning" and current_config:
+            current_status = "scanning"
+        return configs, statuses, tasks, current_status, current_task
     if not statuses and current_fallback == "scanning" and current_config:
         statuses = {current_config: "scanning"}
         tasks = {current_config: ""}
