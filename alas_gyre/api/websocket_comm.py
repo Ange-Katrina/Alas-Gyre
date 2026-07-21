@@ -97,6 +97,7 @@ class WebSocketCommManager:
         self._nav_output_boundary = 0
         self._last_session_id = ""
         self._current_ws = None
+        self._active_control_targets = {}
 
     def _normalize_poll_interval(self, value):
         """规范化轮询间隔。"""
@@ -219,6 +220,7 @@ class WebSocketCommManager:
                     {"config": item.config_name, "action": item.action}
                     for item in self._control_queue
                 ],
+                "active_control_targets": dict(getattr(self, "_active_control_targets", {})),
                 "poll_interval": self.poll_interval,
                 "poll_mode": self.poll_mode,
                 "last_scan_config": self.last_scan_config,
@@ -709,15 +711,24 @@ class WebSocketCommManager:
                     break
                 cmd = self._control_queue.popleft()
 
+            # 标记控制命令执行中
+            with self._lock:
+                targets = getattr(self, "_pending_control_targets", None) or {}
+                self._active_control_targets = dict(targets)
             try:
                 self._execute_control_command(ws, cmd)
             except (websocket.WebSocketException, ConnectionError, OSError, WebSocketCommError):
                 with self._lock:
                     self._control_queue.appendleft(cmd)
+                    self._active_control_targets.pop(cmd.config_name, None)
                 raise
             except Exception as exc:
                 with self._lock:
                     self.control_errors[cmd.config_name] = str(exc)
+                    self._active_control_targets.pop(cmd.config_name, None)
+            else:
+                with self._lock:
+                    self._active_control_targets.pop(cmd.config_name, None)
 
     def _execute_control_command(self, ws, cmd):
         """执行单个控制命令（start/stop）。

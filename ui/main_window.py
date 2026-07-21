@@ -720,6 +720,9 @@ class CardWidget(QFrame):
         """判断 WebSocket manager 是否存在控制活动。"""
         if snapshot.get("pending_controls"):
             return True
+        active_targets = snapshot.get("active_control_targets", {})
+        if active_targets:
+            return True
         statuses = snapshot.get("statuses", {}) or {}
         for status in statuses.values():
             if normalize_status(status) == "queued":
