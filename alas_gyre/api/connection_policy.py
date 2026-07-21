@@ -8,6 +8,7 @@ from alas_gyre.api.client import alas_gui_url
 from alas_gyre.api.client import api_headers
 from alas_gyre.api.client import api_request
 from alas_gyre.api.client import gyre_api_url
+from alas_gyre.api.client import pywebio_ws_url
 
 VALID_MESSAGE_KEYS = {
     "test_success",
