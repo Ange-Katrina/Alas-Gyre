@@ -175,7 +175,11 @@ class MainConfigRow(QWidget):
 
     def update_status(self, status, task=""):
         status = normalize_status(status)
-        delete_enabled = status != "running" and len(self.main_card._configs) > 1
+        delete_enabled = (
+            status != "running"
+            and len(self.main_card._configs) > 1
+            and not self._use_websocket_comm()
+        )
         if self.current_status == status and getattr(self, "current_task", "") == task:
             if self.deleteBtn.isEnabled() != delete_enabled:
                 self.deleteBtn.setEnabled(delete_enabled)
@@ -706,8 +710,9 @@ class CardWidget(QFrame):
         snapshot = manager.get_status_all()
         if self._websocket_control_active(snapshot):
             return
+        # 异步关闭 manager，避免阻塞 poll 线程
         try:
-            manager.stop()
+            threading.Thread(target=manager.stop, daemon=True).start()
         except Exception:
             pass
         if lock is not None:
@@ -844,12 +849,16 @@ class CardWidget(QFrame):
         )
         if configs:
             self.configs_update_signal.emit(configs)
-        elif not configs and current_status == "scanning" and getattr(self, "_configs", None):
-            # 无新配置但处于扫描中时，为现有配置行同步扫描状态
+        elif (
+            not configs
+            and current_status == "scanning"
+            and not statuses
+            and getattr(self, "_configs", None)
+        ):
+            # 无新配置且无状态时，为已有配置行同步扫描中，不覆盖已有真实状态
             for config_name in self._configs:
-                if config_name not in statuses:
-                    statuses[str(config_name)] = "scanning"
-                    tasks[str(config_name)] = ""
+                statuses[str(config_name)] = "scanning"
+                tasks[str(config_name)] = ""
         self.status_all_update_signal.emit(statuses, tasks)
         self.status_update_signal.emit(current_status, current_task)
         # 消费控制错误——通知 UI 控制失败
