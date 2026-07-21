@@ -486,14 +486,16 @@ class WebSocketCommManager:
             except websocket.WebSocketTimeoutException:
                 # 超时是正常的——消息间可能没有新数据
                 continue
-            except (websocket.WebSocketException, ConnectionError, OSError):
-                # 传输异常应向外抛出，让外层统一恢复处理
-                raise
+            except (websocket.WebSocketException, ConnectionError, OSError) as exc:
+                # 传输异常——可能表示连接已断开，抛出 session closed 让外层熔断
+                raise WebSocketCommError(ERROR_SESSION_CLOSED) from exc
             except Exception:
-                break
+                # 其他未知异常通常表示连接状态异常
+                raise WebSocketCommError(ERROR_SESSION_CLOSED)
 
             if not raw_data:
-                break
+                # 对端关闭连接——空 recv 表示 EOF
+                raise WebSocketCommError(ERROR_SESSION_CLOSED)
 
             try:
                 raw = json.loads(raw_data)
@@ -523,8 +525,20 @@ class WebSocketCommManager:
                 js_code = ""
                 if isinstance(message.spec, dict):
                     js_code = str(message.spec.get("code", "") or "")
-                if "internal_error" in js_code.lower() or "traceback" in js_code.lower():
+                js_lower = js_code.lower()
+                if any(kw in js_lower for kw in ("internal_error", "traceback", "state_switch", "object has no attribute")):
                     raise WebSocketCommError(ERROR_INTERNAL_ALAS_GUI_ERROR)
+
+        # session 变化时无效化旧侧边栏导航状态
+        if not fresh_state:
+            last_sid = getattr(self, "_last_session_id", None)
+            new_sid = state.session_id
+            if last_sid and new_sid and last_sid != new_sid:
+                with self._lock:
+                    self._sidebar_nav_callback_id = ""
+                    self._sidebar_nav_callbacks = {}
+            if new_sid:
+                self._last_session_id = new_sid
 
         return state
 
