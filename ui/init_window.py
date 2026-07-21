@@ -785,6 +785,8 @@ class InitSetupWindow(QDialog):
             return
 
         self._active_test_btn = self.testBtn
+        # 提前捕获按钮引用，避免后台线程访问可能已销毁的 Qt widget
+        btn = self.testBtn
         self.testBtn.setText("...")
         self.testBtn.setIcon(QIcon())
         self.testBtn.setEnabled(False)
@@ -794,15 +796,16 @@ class InitSetupWindow(QDialog):
         # 递增请求序号，防止旧请求结果覆盖新请求
         self._test_request_id = getattr(self, "_test_request_id", 0) + 1
         request_id = self._test_request_id
+        # 在线程启动前生成配置快照，避免测试期间配置被用户修改
+        test_config = dict(self.config)
         threading.Thread(
-            target=self._test_api, args=(request_id,), daemon=True
+            target=self._test_api, args=(test_config, btn, request_id), daemon=True
         ).start()
 
-    def _test_api(self, request_id=0):
+    def _test_api(self, test_config=None, btn=None, request_id=0):
         """使用统一连接测试接口，支持自动降级。"""
-        btn = self.testBtn
         try:
-            result = test_connection_with_fallback(self.config)
+            result = test_connection_with_fallback(test_config)
             if getattr(self, "_active_test_btn", None) is not btn:
                 return
             if getattr(self, "_test_request_id", 0) != request_id:
