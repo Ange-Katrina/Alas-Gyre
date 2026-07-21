@@ -96,6 +96,7 @@ class WebSocketCommManager:
         self._page_state = PyWebIOPageState()
         self._nav_output_boundary = 0
         self._last_session_id = ""
+        self._current_ws = None
 
     def _normalize_poll_interval(self, value):
         """规范化轮询间隔。"""
