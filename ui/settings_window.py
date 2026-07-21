@@ -46,7 +46,7 @@ class CheckBox(QCheckBox):
         painter.end()
 
 class SettingsWindow(QDialog):
-    test_result_signal = Signal(bool, str)
+    test_result_signal = Signal(bool, str, int)
     update_result_signal = Signal(dict, int)
     update_progress_signal = Signal(int)
     update_finish_signal = Signal(bool, str)
@@ -913,9 +913,14 @@ class SettingsWindow(QDialog):
             "connection_mode": connection_mode,
         })
 
-        threading.Thread(target=self._test_api, args=(test_config,), daemon=True).start()
+        # 递增请求序号，防止旧请求结果覆盖新请求
+        self._test_request_id = getattr(self, "_test_request_id", 0) + 1
+        request_id = self._test_request_id
+        threading.Thread(
+            target=self._test_api, args=(test_config, request_id), daemon=True
+        ).start()
 
-    def _test_api(self, test_config):
+    def _test_api(self, test_config, request_id=0):
         """使用统一连接测试接口，支持自动降级。"""
         try:
             result = test_connection_with_fallback(test_config)
@@ -923,7 +928,7 @@ class SettingsWindow(QDialog):
                 message = tr(result.message_key)
                 if result.source == "websocket_fallback" and result.overlay_error:
                     message = f"{message}\nOverlay: {result.overlay_error}"
-                self._emit_test_result(True, message)
+                self._emit_test_result(True, message, request_id)
             else:
                 detail = result.websocket_error or result.overlay_error
                 # 优先使用 result.message_key 作为失败消息
@@ -931,16 +936,16 @@ class SettingsWindow(QDialog):
                     fallback_msg = tr(result.message_key)
                     if detail:
                         fallback_msg = f"{fallback_msg}: {detail}"
-                    self._emit_test_result(False, fallback_msg)
+                    self._emit_test_result(False, fallback_msg, request_id)
                 else:
-                    self._emit_test_result(False, detail or tr("test_failed_short"))
+                    self._emit_test_result(False, detail or tr("test_failed_short"), request_id)
         except Exception as exc:
-            self._emit_test_result(False, str(exc))
+            self._emit_test_result(False, str(exc), request_id)
 
-    def _emit_test_result(self, success, message):
+    def _emit_test_result(self, success, message, request_id=0):
         try:
             if isValid(self):
-                self.test_result_signal.emit(success, message)
+                self.test_result_signal.emit(success, message, request_id)
         except RuntimeError:
             pass
 
@@ -966,7 +971,11 @@ class SettingsWindow(QDialog):
         p.end()
         return QIcon(pixmap)
 
-    def _on_test_result(self, success, message=""):
+    def _on_test_result(self, success, message="", request_id=0):
+        # 只处理最新请求的结果，忽略旧请求
+        current_id = getattr(self, "_test_request_id", 0)
+        if request_id and request_id != current_id:
+            return
         if not isValid(self):
             return
         self.testBtn.setEnabled(True)
