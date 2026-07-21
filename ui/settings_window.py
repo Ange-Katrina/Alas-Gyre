@@ -987,7 +987,7 @@ class SettingsWindow(QDialog):
             self.testBtn.setProperty("state", "success")
             self.testBtn.style().unpolish(self.testBtn)
             self.testBtn.style().polish(self.testBtn)
-            QTimer.singleShot(2000, self._reset_test_btn)
+            QTimer.singleShot(2000, lambda rid=request_id: self._reset_test_btn(rid))
         else:
             self.testBtn.setIcon(self._create_icon("error"))
             self.testBtn.setProperty("state", "error")
@@ -998,7 +998,11 @@ class SettingsWindow(QDialog):
             self.testBtn.style().unpolish(self.testBtn)
             self.testBtn.style().polish(self.testBtn)
 
-    def _reset_test_btn(self):
+    def _reset_test_btn(self, request_id=0):
+        # 如果定时器触发时已有新请求，跳过此次 reset
+        current_id = getattr(self, "_test_request_id", 0)
+        if request_id and request_id != current_id:
+            return
         if not isValid(self):
             return
         self.testBtn.setIcon(QIcon())
