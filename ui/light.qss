@@ -90,7 +90,7 @@ QLabel#sectionTitle, QLabel#settingsTitle {
     background: transparent;
 }
 
-QLabel#settingsTitle, QLabel#logTitle, QLabel#screenshotTitle, QLabel#initTitle {
+QLabel#settingsTitle, QLabel#logTitle, QLabel#screenshotTitle, QLabel#initTitle, QLabel#updateTitle {
     color: #334155;
     font-size: 12px;
     font-weight: normal;
