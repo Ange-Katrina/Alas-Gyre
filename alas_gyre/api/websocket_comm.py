@@ -628,14 +628,8 @@ class WebSocketCommManager:
             except WebSocketCommError as exc:
                 error_str = str(exc)
                 if error_str in {ERROR_INTERNAL_ALAS_GUI_ERROR, ERROR_SESSION_CLOSED}:
-                    # ALAS GUI 内部异常或会话关闭，立即熔断
-                    with self._lock:
-                        self.connection_state = CONNECTION_STATE_PAUSED
-                        self.ready = False
-                        self.pause_until = time.monotonic() + PAUSE_SECONDS
-                    # 标记当前及后续未扫描配置为 disconnected
-                    for remaining in config_names[config_names.index(config_name):]:
-                        self._mark_config_missing(remaining, error_str)
+                    remaining = config_names[config_names.index(config_name):]
+                    self._handle_circuit_breaker(error_str, remaining)
                     return
                 self._mark_config_missing(config_name, error_str)
             except Exception as exc:
@@ -981,13 +975,8 @@ class WebSocketCommManager:
             except WebSocketCommError as exc:
                 error_str = str(exc)
                 if error_str in {ERROR_INTERNAL_ALAS_GUI_ERROR, ERROR_SESSION_CLOSED}:
-                    # ALAS GUI 内部异常或会话关闭，立即熔断
-                    with self._lock:
-                        self.connection_state = CONNECTION_STATE_PAUSED
-                        self.ready = False
-                        self.pause_until = time.monotonic() + PAUSE_SECONDS
-                    for remaining in config_names[config_names.index(config_name):]:
-                        self._mark_config_missing(remaining, error_str)
+                    remaining = config_names[config_names.index(config_name):]
+                    self._handle_circuit_breaker(error_str, remaining)
                     return
                 self._mark_config_missing(config_name, error_str)
             except Exception as exc:
@@ -1015,6 +1004,16 @@ class WebSocketCommManager:
                 self.consecutive_degraded_count += 1
             else:
                 self.connection_state = CONNECTION_STATE_DEGRADED
+
+    def _handle_circuit_breaker(self, error_str, unscanned_configs=None):
+        """统一熔断处理——立即进入暂停状态，标记未扫描配置为 disconnected。"""
+        with self._lock:
+            self.connection_state = CONNECTION_STATE_PAUSED
+            self.ready = False
+            self.pause_until = time.monotonic() + PAUSE_SECONDS
+        if unscanned_configs:
+            for name in unscanned_configs:
+                self._mark_config_missing(name, error_str)
 
 
 _manager = None
