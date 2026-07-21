@@ -37,7 +37,7 @@ from .window_behavior import install_title_bar_drag, schedule_frameless_stabiliz
 
 
 class InitSetupWindow(QDialog):
-    test_result_signal = Signal(bool, str)
+    test_result_signal = Signal(bool, str, int)
 
     def __init__(
         self,
@@ -529,11 +529,11 @@ class InitSetupWindow(QDialog):
             target=self._ws_test_api, args=(test_config, btn, request_id), daemon=True
         ).start()
 
-    def _emit_test_result(self, success, message):
+    def _emit_test_result(self, success, message, request_id=0):
         """安全发射测试结果信号，忽略已删除信号源异常。"""
         try:
             if isValid(self):
-                self.test_result_signal.emit(success, message)
+                self.test_result_signal.emit(success, message, request_id)
         except RuntimeError:
             pass
 
@@ -548,7 +548,7 @@ class InitSetupWindow(QDialog):
                 return
             if result.success:
                 message = tr(result.message_key)
-                self._emit_test_result(True, message)
+                self._emit_test_result(True, message, request_id)
             else:
                 detail = result.websocket_error or result.overlay_error
                 # 优先使用 result.message_key 作为失败消息
@@ -556,15 +556,15 @@ class InitSetupWindow(QDialog):
                     fallback_msg = tr(result.message_key)
                     if detail:
                         fallback_msg = f"{fallback_msg}: {detail}"
-                    self._emit_test_result(False, fallback_msg)
+                    self._emit_test_result(False, fallback_msg, request_id)
                 else:
-                    self._emit_test_result(False, detail or tr("test_failed_short"))
+                    self._emit_test_result(False, detail or tr("test_failed_short"), request_id)
         except Exception as exc:
             if getattr(self, "_active_test_btn", None) is not btn:
                 return
             if getattr(self, "_test_request_id", 0) != request_id:
                 return
-            self._emit_test_result(False, str(exc))
+            self._emit_test_result(False, str(exc), request_id)
 
 
     def _rebuild_step_nav(self):
@@ -819,7 +819,7 @@ class InitSetupWindow(QDialog):
                 message = tr(result.message_key)
                 if result.source == "websocket_fallback" and result.overlay_error:
                     message = f"{message}\nOverlay: {result.overlay_error}"
-                self._emit_test_result(True, message)
+                self._emit_test_result(True, message, request_id)
             else:
                 detail = result.websocket_error or result.overlay_error
                 # 优先使用 result.message_key 作为失败消息
@@ -827,15 +827,15 @@ class InitSetupWindow(QDialog):
                     fallback_msg = tr(result.message_key)
                     if detail:
                         fallback_msg = f"{fallback_msg}: {detail}"
-                    self._emit_test_result(False, fallback_msg)
+                    self._emit_test_result(False, fallback_msg, request_id)
                 else:
-                    self._emit_test_result(False, detail or tr("test_failed_short"))
+                    self._emit_test_result(False, detail or tr("test_failed_short"), request_id)
         except Exception as exc:
             if getattr(self, "_active_test_btn", None) is not btn:
                 return
             if getattr(self, "_test_request_id", 0) != request_id:
                 return
-            self._emit_test_result(False, str(exc))
+            self._emit_test_result(False, str(exc), request_id)
 
     def _create_icon(self, state):
         pixmap = QPixmap(24, 24)
@@ -855,7 +855,9 @@ class InitSetupWindow(QDialog):
         painter.end()
         return QIcon(pixmap)
 
-    def _on_test_result(self, success, message=""):
+    def _on_test_result(self, success, message="", request_id=0):
+        if request_id and request_id != getattr(self, "_test_request_id", 0):
+            return
         btn = getattr(self, "_active_test_btn", None)
         if btn is None or not isValid(btn):
             return
@@ -871,8 +873,8 @@ class InitSetupWindow(QDialog):
         if message and not success:
             print(f"[InitSetup] Connection test failed: {message}")
         # 捕获当前按钮和请求序号，避免旧定时器覆盖新请求状态
-        request_id = getattr(self, "_test_request_id", 0)
-        QTimer.singleShot(2000, lambda b=btn, rid=request_id: self._reset_test_btn(b, rid))
+        current_request_id = request_id or getattr(self, "_test_request_id", 0)
+        QTimer.singleShot(2000, lambda b=btn, rid=current_request_id: self._reset_test_btn(b, rid))
 
     def _reset_test_btn(self, btn=None, request_id=0):
         if request_id and request_id != getattr(self, "_test_request_id", 0):
