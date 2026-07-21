@@ -865,10 +865,13 @@ class InitSetupWindow(QDialog):
         self._set_status(tr("test_success") if success else (message or tr("test_failed_short")), "success" if success else "error")
         if message and not success:
             print(f"[InitSetup] Connection test failed: {message}")
-        # 捕获当前按钮引用，避免定时器触发时 _active_test_btn 已指向其他按钮
-        QTimer.singleShot(2000, lambda b=btn: self._reset_test_btn(b))
+        # 捕获当前按钮和请求序号，避免旧定时器覆盖新请求状态
+        request_id = getattr(self, "_test_request_id", 0)
+        QTimer.singleShot(2000, lambda b=btn, rid=request_id: self._reset_test_btn(b, rid))
 
-    def _reset_test_btn(self, btn=None):
+    def _reset_test_btn(self, btn=None, request_id=0):
+        if request_id and request_id != getattr(self, "_test_request_id", 0):
+            return
         if btn is None:
             btn = getattr(self, "_active_test_btn", None)
         if btn is None or not isValid(btn):
