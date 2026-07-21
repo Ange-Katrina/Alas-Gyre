@@ -841,6 +841,12 @@ class CardWidget(QFrame):
         )
         if configs:
             self.configs_update_signal.emit(configs)
+        elif not configs and current_status == "scanning" and getattr(self, "_configs", None):
+            # 无新配置但处于扫描中时，为现有配置行同步扫描状态
+            for config_name in self._configs:
+                if config_name not in statuses:
+                    statuses[str(config_name)] = "scanning"
+                    tasks[str(config_name)] = ""
         self.status_all_update_signal.emit(statuses, tasks)
         self.status_update_signal.emit(current_status, current_task)
         if fallback and was_fallback:

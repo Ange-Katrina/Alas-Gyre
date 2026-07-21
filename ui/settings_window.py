@@ -976,6 +976,9 @@ class SettingsWindow(QDialog):
         if success:
             self.testBtn.setIcon(self._create_icon("success"))
             self.testBtn.setProperty("state", "success")
+            self.testBtn.style().unpolish(self.testBtn)
+            self.testBtn.style().polish(self.testBtn)
+            QTimer.singleShot(2000, self._reset_test_btn)
         else:
             self.testBtn.setIcon(self._create_icon("error"))
             self.testBtn.setProperty("state", "error")
@@ -983,11 +986,8 @@ class SettingsWindow(QDialog):
             if message:
                 short = message[:80] + "..." if len(message) > 80 else message
                 self.testBtn.setText(short)
-
-        self.testBtn.style().unpolish(self.testBtn)
-        self.testBtn.style().polish(self.testBtn)
-
-        QTimer.singleShot(2000, self._reset_test_btn)
+            self.testBtn.style().unpolish(self.testBtn)
+            self.testBtn.style().polish(self.testBtn)
 
     def _reset_test_btn(self):
         if not isValid(self):

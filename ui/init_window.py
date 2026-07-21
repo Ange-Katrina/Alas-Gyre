@@ -530,7 +530,14 @@ class InitSetupWindow(QDialog):
                 self._emit_test_result(True, message)
             else:
                 detail = result.websocket_error or result.overlay_error
-                self._emit_test_result(False, detail or tr("test_failed_short"))
+                # 优先使用 result.message_key 作为失败消息
+                if result.message_key:
+                    fallback_msg = tr(result.message_key)
+                    if detail:
+                        fallback_msg = f"{fallback_msg}: {detail}"
+                    self._emit_test_result(False, fallback_msg)
+                else:
+                    self._emit_test_result(False, detail or tr("test_failed_short"))
         except Exception as exc:
             if getattr(self, "_active_test_btn", None) is not btn:
                 return
@@ -781,7 +788,14 @@ class InitSetupWindow(QDialog):
                 self._emit_test_result(True, message)
             else:
                 detail = result.websocket_error or result.overlay_error
-                self._emit_test_result(False, detail or tr("test_failed_short"))
+                # 优先使用 result.message_key 作为失败消息
+                if result.message_key:
+                    fallback_msg = tr(result.message_key)
+                    if detail:
+                        fallback_msg = f"{fallback_msg}: {detail}"
+                    self._emit_test_result(False, fallback_msg)
+                else:
+                    self._emit_test_result(False, detail or tr("test_failed_short"))
         except Exception as exc:
             if getattr(self, "_active_test_btn", None) is not btn:
                 return
