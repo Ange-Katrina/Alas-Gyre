@@ -852,6 +852,13 @@ class CardWidget(QFrame):
                     tasks[str(config_name)] = ""
         self.status_all_update_signal.emit(statuses, tasks)
         self.status_update_signal.emit(current_status, current_task)
+        # 消费控制错误——通知 UI 控制失败
+        control_errors = snapshot.get("control_errors", {}) or {}
+        for config_name, error_msg in control_errors.items():
+            if config_name not in statuses or statuses.get(config_name) == "queued":
+                self.status_all_update_signal.emit({config_name: "disconnected"}, {config_name: error_msg or ""})
+                if config_name == self.current_config:
+                    self.status_update_signal.emit("disconnected", error_msg or "")
         if fallback and was_fallback:
             self._try_overlay_recovery(snapshot)
         return True
