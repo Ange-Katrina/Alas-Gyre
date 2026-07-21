@@ -447,14 +447,18 @@ class WebSocketCommManager:
 
     def _establish_connection(self):
         """建立 HTTP 探测 + WebSocket 连接，成功返回 ws 对象，失败返回 None。"""
+        # 获取配置快照，避免连接过程中 UI 线程修改配置导致不一致
+        with self._lock:
+            config_snapshot = dict(self.config)
+
         try:
-            self._http_probe_alas_gui()
+            self._http_probe_alas_gui(config_snapshot)
         except Exception as exc:
             self._record_transport_failure(exc)
             return None
 
         try:
-            ws = self._connect_ws()
+            ws = self._connect_ws(config_snapshot)
             with self._lock:
                 self.transport_available = True
                 self._page_state = PyWebIOPageState()
@@ -465,18 +469,18 @@ class WebSocketCommManager:
             self._record_transport_failure(exc)
             return None
 
-    def _http_probe_alas_gui(self):
+    def _http_probe_alas_gui(self, config):
         """HTTP GET ALAS GUI 根页面，确认包含 PyWebIO 特征。"""
-        url = alas_gui_url(self.config)
+        url = alas_gui_url(config)
         resp = api_request("GET", url, timeout=5)
         resp.raise_for_status()
         body = resp.text.lower()
         if "pywebio" not in body:
             raise WebSocketCommError("alas_gui_no_pywebio_signature")
 
-    def _connect_ws(self):
+    def _connect_ws(self, config):
         """建立 WebSocket 连接，返回 ws 对象。"""
-        url = pywebio_ws_url(self.config)
+        url = pywebio_ws_url(config)
         ws = websocket.create_connection(url, timeout=10)
         with self._lock:
             self._current_ws = ws
@@ -932,9 +936,13 @@ class WebSocketCommManager:
             backoff = RECONNECT_DELAY_SECONDS * degraded
             self._interruptible_sleep(backoff)
 
+        # 获取配置快照，避免恢复过程中 UI 线程修改配置导致不一致
+        with self._lock:
+            config_snapshot = dict(self.config)
+
         try:
-            self._http_probe_alas_gui()
-            ws = self._connect_ws()
+            self._http_probe_alas_gui(config_snapshot)
+            ws = self._connect_ws(config_snapshot)
             with self._lock:
                 self.connection_state = CONNECTION_STATE_DEGRADED
                 self.failure_count = 0
