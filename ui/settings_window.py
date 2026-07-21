@@ -878,6 +878,11 @@ class SettingsWindow(QDialog):
         ):
             widget.setVisible(not websocket)
 
+    def _next_test_request_id(self):
+        """生成新的连接测试请求序号，用于过滤旧回调和旧定时器。"""
+        self._test_request_id = getattr(self, "_test_request_id", 0) + 1
+        return self._test_request_id
+
     def _run_connection_test(self):
         if not isValid(self):
             return
@@ -886,15 +891,18 @@ class SettingsWindow(QDialog):
         connection_mode = self.connectionModeCombo.currentData() or "auto"
 
         if not ip or not port_str.isascii() or not port_str.isdigit():
-            self._on_test_result(False, tr("test_invalid"))
+            request_id = self._next_test_request_id()
+            self._on_test_result(False, tr("test_invalid"), request_id)
             return
         try:
             port = int(port_str)
         except ValueError:
-            self._on_test_result(False, tr("test_invalid"))
+            request_id = self._next_test_request_id()
+            self._on_test_result(False, tr("test_invalid"), request_id)
             return
         if not 1 <= port <= 65535:
-            self._on_test_result(False, tr("test_invalid"))
+            request_id = self._next_test_request_id()
+            self._on_test_result(False, tr("test_invalid"), request_id)
             return
         normalized_port = self._normalize_port(str(port))
 
@@ -914,8 +922,7 @@ class SettingsWindow(QDialog):
         })
 
         # 递增请求序号，防止旧请求结果覆盖新请求
-        self._test_request_id = getattr(self, "_test_request_id", 0) + 1
-        request_id = self._test_request_id
+        request_id = self._next_test_request_id()
         threading.Thread(
             target=self._test_api, args=(test_config, request_id), daemon=True
         ).start()

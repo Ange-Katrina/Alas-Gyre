@@ -498,9 +498,15 @@ class InitSetupWindow(QDialog):
         layout.addStretch()
         return page
 
+    def _next_test_request_id(self):
+        """生成新的连接测试请求序号，用于过滤旧回调和旧定时器。"""
+        self._test_request_id = getattr(self, "_test_request_id", 0) + 1
+        return self._test_request_id
+
     def _run_ws_connection_test(self):
         if not self.wsIpInput.text().strip() or not self.wsPortInput.text().strip().isdigit():
             self._active_test_btn = self.wsTestBtn
+            self._next_test_request_id()
             self._on_test_result(False, tr("test_invalid"))
             return
         test_config = dict(self.config)
@@ -518,8 +524,7 @@ class InitSetupWindow(QDialog):
         self.wsTestBtn.style().unpolish(self.wsTestBtn)
         self.wsTestBtn.style().polish(self.wsTestBtn)
         # 递增请求序号，防止旧请求结果覆盖新请求
-        self._test_request_id = getattr(self, "_test_request_id", 0) + 1
-        request_id = self._test_request_id
+        request_id = self._next_test_request_id()
         threading.Thread(
             target=self._ws_test_api, args=(test_config, btn, request_id), daemon=True
         ).start()
@@ -781,6 +786,7 @@ class InitSetupWindow(QDialog):
         self._ensure_token()
         if not self.config["ip"] or not self.config["port"].isdigit():
             self._active_test_btn = self.testBtn
+            self._next_test_request_id()
             self._on_test_result(False, tr("test_invalid"))
             return
 
@@ -794,8 +800,7 @@ class InitSetupWindow(QDialog):
         self.testBtn.style().unpolish(self.testBtn)
         self.testBtn.style().polish(self.testBtn)
         # 递增请求序号，防止旧请求结果覆盖新请求
-        self._test_request_id = getattr(self, "_test_request_id", 0) + 1
-        request_id = self._test_request_id
+        request_id = self._next_test_request_id()
         # 在线程启动前生成配置快照，避免测试期间配置被用户修改
         test_config = dict(self.config)
         threading.Thread(
