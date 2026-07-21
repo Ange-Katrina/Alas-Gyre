@@ -94,6 +94,8 @@ class WebSocketCommManager:
         self._page_missing_counts = {}
         self._page_missing_skip_until = {}
         self._page_state = PyWebIOPageState()
+        self._nav_output_boundary = 0
+        self._last_session_id = ""
 
     def _normalize_poll_interval(self, value):
         """规范化轮询间隔。"""
@@ -435,6 +437,8 @@ class WebSocketCommManager:
             with self._lock:
                 self.transport_available = True
                 self._page_state = PyWebIOPageState()
+                self._nav_output_boundary = 0
+                self._last_session_id = ""
             return ws
         except Exception as exc:
             self._record_transport_failure(exc)
@@ -456,24 +460,15 @@ class WebSocketCommManager:
         self._current_ws = ws
         return ws
 
-    def _collect_page_messages(self, ws, timeout, fresh_state=False):
-        """从 WebSocket 收集消息直到超时，返回 PyWebIOPageState。
-
-        Args:
-            ws: WebSocket 连接对象。
-            timeout: 收集超时秒数。
-            fresh_state: True 时使用独立状态（用于单配置扫描），
-                False 时复用全局累积状态（用于侧边栏/配置发现）。
+    def _collect_page_messages(self, ws, timeout):
+        """从 WebSocket 收集消息直到超时，返回累积的 PyWebIOPageState。
 
         通过设置 socket 短超时来逐条读取消息，累积到页面状态中。
         """
-        if fresh_state:
+        state = getattr(self, "_page_state", None)
+        if state is None:
             state = PyWebIOPageState()
-        else:
-            state = getattr(self, "_page_state", None)
-            if state is None:
-                state = PyWebIOPageState()
-                self._page_state = state
+            self._page_state = state
         # 记录当前 session_id 用于检测跨调用的 session 重置
         previous_session_id = state.session_id if state.session_id else None
 
@@ -510,13 +505,9 @@ class WebSocketCommManager:
             if message.command == "set_session_id":
                 new_session = state.session_id
                 if previous_session_id and new_session != previous_session_id:
-                    if fresh_state:
-                        # 独立状态模式下重建本地状态，不影响全局累积
-                        state = PyWebIOPageState()
-                    else:
-                        # 清空旧 session 积累的页面状态，使用新 session 重新收集
-                        self._page_state = PyWebIOPageState()
-                        state = self._page_state
+                    # 清空旧 session 积累的页面状态，使用新 session 重新收集
+                    self._page_state = PyWebIOPageState()
+                    state = self._page_state
                     state.apply_message(message)
                 previous_session_id = new_session
 
@@ -530,15 +521,14 @@ class WebSocketCommManager:
                     raise WebSocketCommError(ERROR_INTERNAL_ALAS_GUI_ERROR)
 
         # session 变化时无效化旧侧边栏导航状态
-        if not fresh_state:
-            last_sid = getattr(self, "_last_session_id", None)
-            new_sid = state.session_id
-            if last_sid and new_sid and last_sid != new_sid:
-                with self._lock:
-                    self._sidebar_nav_callback_id = ""
-                    self._sidebar_nav_callbacks = {}
-            if new_sid:
-                self._last_session_id = new_sid
+        last_sid = getattr(self, "_last_session_id", None)
+        new_sid = state.session_id
+        if last_sid and new_sid and last_sid != new_sid:
+            with self._lock:
+                self._sidebar_nav_callback_id = ""
+                self._sidebar_nav_callbacks = {}
+        if new_sid:
+            self._last_session_id = new_sid
 
         return state
 
@@ -617,8 +607,8 @@ class WebSocketCommManager:
         for config_name in config_names:
             try:
                 self._navigate_to_config(ws, config_name)
-                page_state = self._collect_page_messages(ws, COLLECT_TIMEOUT_SECONDS, fresh_state=True)
-                status = extract_config_status(page_state)
+                page_state = self._collect_page_messages(ws, COLLECT_TIMEOUT_SECONDS)
+                status = extract_config_status(page_state, getattr(self, "_nav_output_boundary", 0))
                 if self._apply_config_status(config_name, status):
                     any_recovered = True
             except WebSocketCommError as exc:
@@ -653,7 +643,15 @@ class WebSocketCommManager:
         实际 ALAS GUI 侧边栏使用单一 selector 切换配置，因此取任意一个
         pin_onchange callback 即可完成导航。如果未来侧边栏引入了多个独立的
         pin_onchange 组件，则需要在此处按名称精确匹配。
+
+        导航前记录全局页面状态输出边界，后续状态提取和按钮查找仅考虑
+        导航后到达的新消息，避免跨配置页面证据复用。
         """
+        page_state = getattr(self, "_page_state", None)
+        if page_state is not None:
+            self._nav_output_boundary = len(page_state.outputs)
+        else:
+            self._nav_output_boundary = 0
         with self._lock:
             nav_callback = getattr(self, "_sidebar_nav_callbacks", {}).get(config_name)
             callback_id = self._sidebar_nav_callback_id
@@ -683,8 +681,8 @@ class WebSocketCommManager:
     def _scan_config(self, ws, config_name):
         """扫描单个配置页——进入页面、收集消息、提取状态。"""
         self._navigate_to_config(ws, config_name)
-        page_state = self._collect_page_messages(ws, COLLECT_TIMEOUT_SECONDS, fresh_state=True)
-        status = extract_config_status(page_state)
+        page_state = self._collect_page_messages(ws, COLLECT_TIMEOUT_SECONDS)
+        status = extract_config_status(page_state, getattr(self, "_nav_output_boundary", 0))
         self._apply_config_status(config_name, status)
 
     def _drain_control_queue(self, ws):
@@ -723,13 +721,14 @@ class WebSocketCommManager:
         # 进入目标配置页
         self._navigate_to_config(ws, cmd.config_name)
 
-        # 先收集目标页消息，使用独立状态确保只基于当前页证据查找按钮
-        page_state = self._collect_page_messages(ws, CONTROL_COLLECT_TIMEOUT_SECONDS, fresh_state=True)
+        # 收集目标页消息，基于导航边界过滤确保只基于当前页证据查找按钮
+        page_state = self._collect_page_messages(ws, CONTROL_COLLECT_TIMEOUT_SECONDS)
+        boundary = getattr(self, "_nav_output_boundary", 0)
 
         target_labels = START_BUTTON_LABELS if cmd.action == "start" else STOP_BUTTON_LABELS
 
-        # 在 scheduler_btn scope 中查找目标按钮
-        callback_id, value = self._find_button_action(page_state, target_labels)
+        # 在 scheduler_btn scope 中查找目标按钮（仅导航后消息）
+        callback_id, value = self._find_button_action(page_state, target_labels, boundary)
 
         if not callback_id:
             with self._lock:
@@ -750,18 +749,22 @@ class WebSocketCommManager:
         self._send_button_callback(ws, callback_id, value)
         time.sleep(CONTROL_RESYNC_DELAY_SECONDS)
 
-        # 重新扫描该配置状态，使用独立状态确保只基于当前页证据
-        page_state = self._collect_page_messages(ws, CONTROL_COLLECT_TIMEOUT_SECONDS, fresh_state=True)
-        status = extract_config_status(page_state)
+        # 重新扫描该配置状态，基于导航边界确保只基于当前页证据
+        page_state = self._collect_page_messages(ws, CONTROL_COLLECT_TIMEOUT_SECONDS)
+        boundary = getattr(self, "_nav_output_boundary", 0)
+        status = extract_config_status(page_state, boundary)
         self._apply_config_status(cmd.config_name, status)
 
         with self._lock:
             self.control_errors.pop(cmd.config_name, None)
 
     @staticmethod
-    def _find_button_action(page_state, target_labels):
-        """在页面状态中查找匹配标签的按钮并返回 callback_id 与 value。"""
-        for output in page_state.outputs:
+    def _find_button_action(page_state, target_labels, from_index=0):
+        """在页面状态中查找匹配标签的按钮并返回 callback_id 与 value。
+
+        仅搜索 from_index 及之后的 outputs，避免复用导航前的旧页面证据。
+        """
+        for output in page_state.outputs[from_index:]:
             if not isinstance(output, dict):
                 continue
             if "scheduler_btn" not in _scope_identity(output):
@@ -946,8 +949,8 @@ class WebSocketCommManager:
         for config_name in config_names:
             try:
                 self._navigate_to_config(ws, config_name)
-                page_state = self._collect_page_messages(ws, COLLECT_TIMEOUT_SECONDS, fresh_state=True)
-                status = extract_config_status(page_state)
+                page_state = self._collect_page_messages(ws, COLLECT_TIMEOUT_SECONDS)
+                status = extract_config_status(page_state, getattr(self, "_nav_output_boundary", 0))
                 if self._apply_config_status(config_name, status):
                     any_recovered = True
             except WebSocketCommError as exc:
@@ -1205,11 +1208,15 @@ def extract_instance_nav_callbacks(state):
     return callbacks
 
 
-def extract_config_status(state):
-    """从目标配置页提取配置状态。"""
+def extract_config_status(state, from_index=0):
+    """从目标配置页提取配置状态。
+
+    仅扫描 from_index 及之后的 outputs，确保状态只来自导航后的页面证据，
+    避免复用历史配置页的 header_status/scheduler_btn。
+    """
     header_text = ""
     scheduler_text = ""
-    for output in state.outputs:
+    for output in state.outputs[from_index:]:
         if not isinstance(output, dict):
             continue
         scope = _scope_identity(output)
