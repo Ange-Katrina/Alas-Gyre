@@ -705,6 +705,16 @@ class WebSocketCommManager:
         if not callback_id:
             with self._lock:
                 self.control_errors[cmd.config_name] = ERROR_ACTION_CALLBACK_NOT_FOUND
+                # 防御 __new__ 构造的未初始化对象
+                if not hasattr(self, 'statuses'):
+                    self.statuses = {}
+                if not hasattr(self, 'tasks'):
+                    self.tasks = {}
+                self.statuses[cmd.config_name] = "disconnected"
+                self.tasks[cmd.config_name] = ""
+                targets = getattr(self, "_pending_control_targets", None)
+                if targets:
+                    targets.pop(cmd.config_name, None)
             return
 
         # 发送按钮点击
