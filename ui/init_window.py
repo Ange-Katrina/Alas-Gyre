@@ -515,7 +515,12 @@ class InitSetupWindow(QDialog):
         self.wsTestBtn.setProperty("state", "testing")
         self.wsTestBtn.style().unpolish(self.wsTestBtn)
         self.wsTestBtn.style().polish(self.wsTestBtn)
-        threading.Thread(target=self._ws_test_api, args=(test_config,), daemon=True).start()
+        # 递增请求序号，防止旧请求结果覆盖新请求
+        self._test_request_id = getattr(self, "_test_request_id", 0) + 1
+        request_id = self._test_request_id
+        threading.Thread(
+            target=self._ws_test_api, args=(test_config, request_id), daemon=True
+        ).start()
 
     def _emit_test_result(self, success, message):
         """安全发射测试结果信号，忽略已删除信号源异常。"""
@@ -525,13 +530,15 @@ class InitSetupWindow(QDialog):
         except RuntimeError:
             pass
 
-    def _ws_test_api(self, test_config=None):
+    def _ws_test_api(self, test_config=None, request_id=0):
         btn = self.wsTestBtn
         if test_config is None:
             test_config = self.config
         try:
             result = test_connection_with_fallback(test_config)
             if getattr(self, "_active_test_btn", None) is not btn:
+                return
+            if getattr(self, "_test_request_id", 0) != request_id:
                 return
             if result.success:
                 message = tr(result.message_key)
@@ -548,6 +555,8 @@ class InitSetupWindow(QDialog):
                     self._emit_test_result(False, detail or tr("test_failed_short"))
         except Exception as exc:
             if getattr(self, "_active_test_btn", None) is not btn:
+                return
+            if getattr(self, "_test_request_id", 0) != request_id:
                 return
             self._emit_test_result(False, str(exc))
 
@@ -781,14 +790,21 @@ class InitSetupWindow(QDialog):
         self.testBtn.setProperty("state", "testing")
         self.testBtn.style().unpolish(self.testBtn)
         self.testBtn.style().polish(self.testBtn)
-        threading.Thread(target=self._test_api, daemon=True).start()
+        # 递增请求序号，防止旧请求结果覆盖新请求
+        self._test_request_id = getattr(self, "_test_request_id", 0) + 1
+        request_id = self._test_request_id
+        threading.Thread(
+            target=self._test_api, args=(request_id,), daemon=True
+        ).start()
 
-    def _test_api(self):
+    def _test_api(self, request_id=0):
         """使用统一连接测试接口，支持自动降级。"""
         btn = self.testBtn
         try:
             result = test_connection_with_fallback(self.config)
             if getattr(self, "_active_test_btn", None) is not btn:
+                return
+            if getattr(self, "_test_request_id", 0) != request_id:
                 return
             if result.success:
                 message = tr(result.message_key)
@@ -807,6 +823,8 @@ class InitSetupWindow(QDialog):
                     self._emit_test_result(False, detail or tr("test_failed_short"))
         except Exception as exc:
             if getattr(self, "_active_test_btn", None) is not btn:
+                return
+            if getattr(self, "_test_request_id", 0) != request_id:
                 return
             self._emit_test_result(False, str(exc))
 
@@ -843,10 +861,12 @@ class InitSetupWindow(QDialog):
         self._set_status(tr("test_success") if success else (message or tr("test_failed_short")), "success" if success else "error")
         if message and not success:
             print(f"[InitSetup] Connection test failed: {message}")
-        QTimer.singleShot(2000, self._reset_test_btn)
+        # 捕获当前按钮引用，避免定时器触发时 _active_test_btn 已指向其他按钮
+        QTimer.singleShot(2000, lambda b=btn: self._reset_test_btn(b))
 
-    def _reset_test_btn(self):
-        btn = getattr(self, "_active_test_btn", None)
+    def _reset_test_btn(self, btn=None):
+        if btn is None:
+            btn = getattr(self, "_active_test_btn", None)
         if btn is None or not isValid(btn):
             return
         btn.setIcon(QIcon())
