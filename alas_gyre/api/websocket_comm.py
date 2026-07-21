@@ -441,15 +441,24 @@ class WebSocketCommManager:
         ws = websocket.create_connection(url, timeout=10)
         return ws
 
-    def _collect_page_messages(self, ws, timeout):
-        """从 WebSocket 收集消息直到超时，返回累积的 PyWebIOPageState。
+    def _collect_page_messages(self, ws, timeout, fresh_state=False):
+        """从 WebSocket 收集消息直到超时，返回 PyWebIOPageState。
+
+        Args:
+            ws: WebSocket 连接对象。
+            timeout: 收集超时秒数。
+            fresh_state: True 时使用独立状态（用于单配置扫描），
+                False 时复用全局累积状态（用于侧边栏/配置发现）。
 
         通过设置 socket 短超时来逐条读取消息，累积到页面状态中。
         """
-        state = getattr(self, "_page_state", None)
-        if state is None:
+        if fresh_state:
             state = PyWebIOPageState()
-            self._page_state = state
+        else:
+            state = getattr(self, "_page_state", None)
+            if state is None:
+                state = PyWebIOPageState()
+                self._page_state = state
         # 记录当前 session_id 用于检测跨调用的 session 重置
         previous_session_id = state.session_id if state.session_id else None
 
@@ -484,9 +493,13 @@ class WebSocketCommManager:
             if message.command == "set_session_id":
                 new_session = state.session_id
                 if previous_session_id and new_session != previous_session_id:
-                    # 清空旧 session 积累的页面状态，使用新 session 重新收集
-                    self._page_state = PyWebIOPageState()
-                    state = self._page_state
+                    if fresh_state:
+                        # 独立状态模式下重建本地状态，不影响全局累积
+                        state = PyWebIOPageState()
+                    else:
+                        # 清空旧 session 积累的页面状态，使用新 session 重新收集
+                        self._page_state = PyWebIOPageState()
+                        state = self._page_state
                     state.apply_message(message)
                 previous_session_id = new_session
 
@@ -575,7 +588,7 @@ class WebSocketCommManager:
         for config_name in config_names:
             try:
                 self._navigate_to_config(ws, config_name)
-                page_state = self._collect_page_messages(ws, COLLECT_TIMEOUT_SECONDS)
+                page_state = self._collect_page_messages(ws, COLLECT_TIMEOUT_SECONDS, fresh_state=True)
                 status = extract_config_status(page_state)
                 if self._apply_config_status(config_name, status):
                     any_recovered = True
@@ -628,7 +641,7 @@ class WebSocketCommManager:
     def _scan_config(self, ws, config_name):
         """扫描单个配置页——进入页面、收集消息、提取状态。"""
         self._navigate_to_config(ws, config_name)
-        page_state = self._collect_page_messages(ws, COLLECT_TIMEOUT_SECONDS)
+        page_state = self._collect_page_messages(ws, COLLECT_TIMEOUT_SECONDS, fresh_state=True)
         status = extract_config_status(page_state)
         self._apply_config_status(config_name, status)
 
@@ -668,8 +681,8 @@ class WebSocketCommManager:
         # 进入目标配置页
         self._navigate_to_config(ws, cmd.config_name)
 
-        # 先收集目标页消息，确保按钮查找基于当前页证据而非跨配置缓存
-        page_state = self._collect_page_messages(ws, CONTROL_COLLECT_TIMEOUT_SECONDS)
+        # 先收集目标页消息，使用独立状态确保只基于当前页证据查找按钮
+        page_state = self._collect_page_messages(ws, CONTROL_COLLECT_TIMEOUT_SECONDS, fresh_state=True)
 
         target_labels = START_BUTTON_LABELS if cmd.action == "start" else STOP_BUTTON_LABELS
 
@@ -685,8 +698,8 @@ class WebSocketCommManager:
         self._send_button_callback(ws, callback_id, value)
         time.sleep(CONTROL_RESYNC_DELAY_SECONDS)
 
-        # 重新扫描该配置状态
-        page_state = self._collect_page_messages(ws, CONTROL_COLLECT_TIMEOUT_SECONDS)
+        # 重新扫描该配置状态，使用独立状态确保只基于当前页证据
+        page_state = self._collect_page_messages(ws, CONTROL_COLLECT_TIMEOUT_SECONDS, fresh_state=True)
         status = extract_config_status(page_state)
         self._apply_config_status(cmd.config_name, status)
 
@@ -881,7 +894,7 @@ class WebSocketCommManager:
         for config_name in config_names:
             try:
                 self._navigate_to_config(ws, config_name)
-                page_state = self._collect_page_messages(ws, COLLECT_TIMEOUT_SECONDS)
+                page_state = self._collect_page_messages(ws, COLLECT_TIMEOUT_SECONDS, fresh_state=True)
                 status = extract_config_status(page_state)
                 if self._apply_config_status(config_name, status):
                     any_recovered = True
