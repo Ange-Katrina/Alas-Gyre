@@ -510,9 +510,9 @@ class WebSocketCommManager:
             except (websocket.WebSocketException, ConnectionError, OSError) as exc:
                 # 传输异常——可能表示连接已断开，抛出 session closed 让外层熔断
                 raise WebSocketCommError(ERROR_SESSION_CLOSED) from exc
-            except Exception:
-                # 其他未知异常通常表示连接状态异常
-                raise WebSocketCommError(ERROR_SESSION_CLOSED)
+            except Exception as exc:
+                # 其他未知异常通常表示连接状态异常，保留异常链便于诊断
+                raise WebSocketCommError(ERROR_SESSION_CLOSED) from exc
 
             if not raw_data:
                 # 对端关闭连接——空 recv 表示 EOF
