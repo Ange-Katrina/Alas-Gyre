@@ -817,7 +817,7 @@ class InitSetupWindow(QDialog):
         btn.setProperty("state", "success" if success else "error")
         btn.style().unpolish(btn)
         btn.style().polish(btn)
-        self._set_status(tr("test_success") if success else tr("test_failed_short"), "success" if success else "error")
+        self._set_status(tr("test_success") if success else (message or tr("test_failed_short")), "success" if success else "error")
         if message and not success:
             print(f"[InitSetup] Connection test failed: {message}")
         QTimer.singleShot(2000, self._reset_test_btn)
