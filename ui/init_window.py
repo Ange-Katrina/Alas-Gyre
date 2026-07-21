@@ -51,6 +51,7 @@ class InitSetupWindow(QDialog):
         self.runtime_output_dir = os.path.join(app_base_dir(), RUNTIME_DIR_NAME)
         self.runtime_generated = os.path.isdir(self.runtime_output_dir)
         self.current_step = 0
+        self._steps_expanded = False
 
         self.setObjectName("initWindow")
         self.setFixedSize(680, 420)
@@ -394,7 +395,7 @@ class InitSetupWindow(QDialog):
         """返回当前模式下的步骤键列表。
         首次进入只显示模式选择，当前步骤不是 mode 时才展开完整流程。
         """
-        if self.current_step != 0:
+        if self._steps_expanded:
             if self._is_auto_mode():
                 return ["mode", "runtime", "start", "test"]
             return ["mode", "websocket"]
@@ -643,6 +644,7 @@ class InitSetupWindow(QDialog):
         self._set_step(self.current_step - 1)
 
     def _go_next(self):
+        self._steps_expanded = True
         self._set_step(self.current_step + 1)
 
     def _refresh_runtime_buttons(self):
