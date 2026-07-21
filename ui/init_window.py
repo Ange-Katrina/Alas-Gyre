@@ -420,7 +420,10 @@ class InitSetupWindow(QDialog):
         idx = self.modeCombo.findData(self._normalized_mode())
         self.modeCombo.setCurrentIndex(max(0, idx))
 
-        mode_desc_label = QLabel(tr("connection_mode_auto_desc"), page)
+        mode_desc_label = QLabel(
+            tr("connection_mode_auto_desc") if self._normalized_mode() == "auto" else tr("connection_mode_websocket_desc"),
+            page,
+        )
         mode_desc_label.setObjectName("initSubtle")
         mode_desc_label.setWordWrap(True)
         layout.addWidget(mode_desc_label)
