@@ -799,23 +799,24 @@ class WebSocketCommManager:
                         continue
                     return callback_id, button.get("value")
 
-        callback_id = WebSocketCommManager._find_button_callback(page_state, target_labels)
+        callback_id = WebSocketCommManager._find_button_callback(page_state, target_labels, from_index)
         if callback_id:
             return callback_id, ""
         return "", ""
 
     @staticmethod
-    def _find_button_callback(page_state, target_labels):
+    def _find_button_callback(page_state, target_labels, from_index=0):
         """在页面状态中查找匹配标签的按钮并返回其 callback_id。
 
         Args:
             page_state: PyWebIOPageState 实例。
             target_labels: 目标按钮标签元组。
+            from_index: 起始扫描索引，用于跳过导航前的旧页面证据。
 
         Returns:
             str: callback_id，未找到时返回空字符串。
         """
-        for output in page_state.outputs:
+        for output in page_state.outputs[from_index:]:
             if not isinstance(output, dict):
                 continue
             scope = str(output.get("scope", "") or "")
@@ -832,8 +833,8 @@ class WebSocketCommManager:
             if cid:
                 return cid
 
-        # 回退：尝试从 page_state.callback_ids 中按 scope 匹配
-        for output in page_state.outputs:
+        # 回退：尝试从 page_state.callback_ids 中按 scope 匹配（仅导航后输出）
+        for output in page_state.outputs[from_index:]:
             if not isinstance(output, dict):
                 continue
             scope = str(output.get("scope", "") or "")
