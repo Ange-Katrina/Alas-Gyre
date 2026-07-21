@@ -6,6 +6,7 @@ from alas_gyre.core.status import normalize_status
 from .widgets import StatusIndicator, ConfigActionButton, MarqueeLabel
 from .window_snap import snap_to_available_screen
 from .i18n import tr
+from .main_window import safe_emit_signal
 from .window_behavior import schedule_frameless_stabilize
 
 class MiniActionButton(ConfigActionButton):
@@ -116,21 +117,27 @@ class MiniConfigRow(QWidget):
     def _on_toggle_clicked(self):
         self.toggleBtn.setEnabled(False)
         action = "stop" if self.current_status == "running" else "start"
+        # 捕获必要引用，避免后台线程通过 self 访问已销毁控件
+        main_card = self.main_card
+        config_name = self.config_name
+        btn_enable_signal = self.btn_enable_signal
+
         import threading
         def send_req():
             try:
-                self.main_card._post_control_action(self.config_name, action)
+                main_card._post_control_action(config_name, action)
             except Exception as exc:
                 print(f"[错误] 悬浮窗控制命令失败: {exc}")
-                self.main_card.status_all_update_signal.emit(
-                    {self.config_name: "disconnected"},
-                    {self.config_name: ""},
+                main_card.status_all_update_signal.emit(
+                    {config_name: "disconnected"},
+                    {config_name: ""},
                 )
-                if self.main_card.current_config == self.config_name:
-                    self.main_card.status_update_signal.emit("disconnected", "")
-                self.main_card.control_error_signal.emit(action, tr("control_connect_failed"))
+                if main_card.current_config == config_name:
+                    main_card.status_update_signal.emit("disconnected", "")
+                main_card.control_error_signal.emit(action, tr("control_connect_failed"))
             finally:
-                self.btn_enable_signal.emit(True)
+                safe_emit_signal(btn_enable_signal, True)
+
         threading.Thread(target=send_req, daemon=True).start()
 
 class MiniWindow(QWidget):
