@@ -521,6 +521,7 @@ class WebSocketCommManager:
                     # 清空旧 session 积累的页面状态，使用新 session 重新收集
                     self._page_state = PyWebIOPageState()
                     state = self._page_state
+                    self._nav_output_boundary = 0
                     state.apply_message(message)
                 previous_session_id = new_session
 
