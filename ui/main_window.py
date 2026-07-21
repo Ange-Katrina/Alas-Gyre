@@ -224,20 +224,25 @@ class MainConfigRow(QWidget):
         self.toggleBtn.setEnabled(False)
         action = "stop" if self.current_status == "running" else "start"
 
+        # 捕获必要引用，避免后台线程通过 self 访问已销毁控件
+        main_card = self.main_card
+        config_name = self.config_name
+        btn_enable_signal = self.btn_enable_signal
+
         def send_req():
             try:
-                self.main_card._post_control_action(self.config_name, action)
+                main_card._post_control_action(config_name, action)
             except Exception as e:
                 print(f"[Error] Failed to send control command: {e}")
-                self.main_card.status_all_update_signal.emit(
-                    {self.config_name: "disconnected"},
-                    {self.config_name: ""},
+                main_card.status_all_update_signal.emit(
+                    {config_name: "disconnected"},
+                    {config_name: ""},
                 )
-                if self.main_card.current_config == self.config_name:
-                    self.main_card.status_update_signal.emit("disconnected", "")
-                self.main_card.control_error_signal.emit(action, tr("control_connect_failed"))
+                if main_card.current_config == config_name:
+                    main_card.status_update_signal.emit("disconnected", "")
+                main_card.control_error_signal.emit(action, tr("control_connect_failed"))
             finally:
-                self.btn_enable_signal.emit(True)
+                safe_emit_signal(btn_enable_signal, True)
 
         threading.Thread(target=send_req, daemon=True).start()
 
