@@ -675,11 +675,18 @@ class WebSocketCommManager:
         if not callback_id:
             # 侧边栏 callback_id 缺失，尝试重新从当前页面收集
             state = self._collect_page_messages(ws, COLLECT_TIMEOUT_SECONDS)
-            for pin_name, cid in state.callback_ids.items():
-                callback_id = cid
+            # 优先使用 extract_instance_nav_callbacks 获得精确 callback
+            nav_callbacks = extract_instance_nav_callbacks(state)
+            if config_name in nav_callbacks:
+                callback_id, value = nav_callbacks[config_name]
                 with self._lock:
-                    self._sidebar_nav_callback_id = cid
-                break
+                    self._sidebar_nav_callbacks[config_name] = (callback_id, value)
+            if not callback_id:
+                for pin_name, cid in state.callback_ids.items():
+                    callback_id = cid
+                    with self._lock:
+                        self._sidebar_nav_callback_id = cid
+                    break
 
         if not callback_id:
             raise WebSocketCommError(ERROR_CONFIG_CALLBACK_NOT_FOUND)
@@ -1138,8 +1145,10 @@ class PyWebIOPageState:
         self.outputs = [
             item for item in self.outputs
             if not isinstance(item, dict)
-            or normalized not in _scope_identity(item)
-            and raw not in _scope_identity(item)
+            or (normalized not in _scope_identity(item)
+                and raw not in _scope_identity(item)
+                and normalized not in str(item.get("dom_id", "") or "")
+                and normalized not in str(item.get("container", "") or ""))
         ]
 
 
@@ -1261,36 +1270,40 @@ def extract_instance_nav_callbacks(state):
 
 
 def extract_config_status(state, from_index=0):
-    """从目标配置页提取配置状态。
+    """从目标配置页提取配置状态。仅基于按钮 label 精准匹配。
 
     仅扫描 from_index 及之后的 outputs，确保状态只来自导航后的页面证据，
     避免复用历史配置页的 header_status/scheduler_btn。
     """
-    header_text = ""
-    scheduler_text = ""
     for output in state.outputs[from_index:]:
         if not isinstance(output, dict):
             continue
         scope = _scope_identity(output)
-        text = _flatten_text(output).lower()
-        if "header_status" in scope:
-            header_text += " " + text
-        if "scheduler_btn" in scope:
-            scheduler_text += " " + text
-    if any(label in header_text for label in ("运行中", "running")):
-        return "running"
-    if any(label in header_text for label in ("空闲", "idle", "未运行")):
-        return "idle"
-    if any(label in header_text for label in ("错误", "error")):
-        return "error"
-    if any(label in header_text for label in ("更新中", "update")):
-        return "update"
-    if any(label in header_text for label in ("未连接", "disconnected")):
-        return "disconnected"
-    if any(label.lower() in scheduler_text for label in STOP_BUTTON_LABELS):
-        return "running"
-    if any(label.lower() in scheduler_text for label in START_BUTTON_LABELS):
-        return "idle"
+        for _, buttons in _extract_buttons(output):
+            for btn in buttons:
+                if not isinstance(btn, dict):
+                    continue
+                label = str(btn.get("label", "") or btn.get("value", "") or "").strip().lower()
+                if not label:
+                    continue
+                # header_status scope：匹配状态标签
+                if "header_status" in scope:
+                    if label in ("运行中", "running"):
+                        return "running"
+                    if label in ("空闲", "idle", "未运行"):
+                        return "idle"
+                    if label in ("错误", "error"):
+                        return "error"
+                    if label in ("更新中", "update"):
+                        return "update"
+                    if label in ("未连接", "disconnected"):
+                        return "disconnected"
+                # scheduler_btn scope：匹配启动/停止按钮
+                if "scheduler_btn" in scope:
+                    if label in tuple(l.lower() for l in STOP_BUTTON_LABELS):
+                        return "running"
+                    if label in tuple(l.lower() for l in START_BUTTON_LABELS):
+                        return "idle"
     return ""
 
 
