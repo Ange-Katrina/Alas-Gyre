@@ -629,7 +629,7 @@ class WebSocketCommManager:
                 error_str = str(exc)
                 if error_str in {ERROR_INTERNAL_ALAS_GUI_ERROR, ERROR_SESSION_CLOSED}:
                     remaining = config_names[config_names.index(config_name):]
-                    self._handle_circuit_breaker(error_str, remaining)
+                    self._handle_circuit_breaker(error_str, remaining, ws)
                     return
                 self._mark_config_missing(config_name, error_str)
             except Exception as exc:
@@ -976,7 +976,7 @@ class WebSocketCommManager:
                 error_str = str(exc)
                 if error_str in {ERROR_INTERNAL_ALAS_GUI_ERROR, ERROR_SESSION_CLOSED}:
                     remaining = config_names[config_names.index(config_name):]
-                    self._handle_circuit_breaker(error_str, remaining)
+                    self._handle_circuit_breaker(error_str, remaining, ws)
                     return
                 self._mark_config_missing(config_name, error_str)
             except Exception as exc:
@@ -1005,12 +1005,25 @@ class WebSocketCommManager:
             else:
                 self.connection_state = CONNECTION_STATE_DEGRADED
 
-    def _handle_circuit_breaker(self, error_str, unscanned_configs=None):
+    def _handle_circuit_breaker(self, error_str, unscanned_configs=None, ws=None):
         """统一熔断处理——立即进入暂停状态，标记未扫描配置为 disconnected。"""
         with self._lock:
             self.connection_state = CONNECTION_STATE_PAUSED
             self.ready = False
             self.pause_until = time.monotonic() + PAUSE_SECONDS
+            self.transport_available = False
+            self.last_transport_error = error_str
+        # 熔断时关闭当前 WebSocket 连接并清理引用
+        if ws is not None:
+            try:
+                ws.close()
+            except Exception:
+                pass
+        lock = getattr(self, "_lock", None)
+        if lock is not None and ws is not None:
+            with lock:
+                if getattr(self, "_current_ws", None) is ws:
+                    self._current_ws = None
         if unscanned_configs:
             for name in unscanned_configs:
                 self._mark_config_missing(name, error_str)
