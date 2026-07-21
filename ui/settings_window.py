@@ -959,8 +959,6 @@ class SettingsWindow(QDialog):
     def _create_icon(self, state):
         pixmap = QPixmap(24, 24)
         pixmap.fill(Qt.transparent)
-        p = QPixmap(24, 24)
-        pixmap.fill(Qt.transparent)
         p = QPainter(pixmap)
         p.setRenderHint(QPainter.Antialiasing)
         
