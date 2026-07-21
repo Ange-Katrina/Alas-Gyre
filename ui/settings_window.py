@@ -926,7 +926,14 @@ class SettingsWindow(QDialog):
                 self._emit_test_result(True, message)
             else:
                 detail = result.websocket_error or result.overlay_error
-                self._emit_test_result(False, detail or tr("test_failed_short"))
+                # 优先使用 result.message_key 作为失败消息
+                if result.message_key:
+                    fallback_msg = tr(result.message_key)
+                    if detail:
+                        fallback_msg = f"{fallback_msg}: {detail}"
+                    self._emit_test_result(False, fallback_msg)
+                else:
+                    self._emit_test_result(False, detail or tr("test_failed_short"))
         except Exception as exc:
             self._emit_test_result(False, str(exc))
 
@@ -972,10 +979,14 @@ class SettingsWindow(QDialog):
         else:
             self.testBtn.setIcon(self._create_icon("error"))
             self.testBtn.setProperty("state", "error")
-            
+            # 失败时将详情作为按钮文本展示，tooltip 保留完整信息
+            if message:
+                short = message[:80] + "..." if len(message) > 80 else message
+                self.testBtn.setText(short)
+
         self.testBtn.style().unpolish(self.testBtn)
         self.testBtn.style().polish(self.testBtn)
-        
+
         QTimer.singleShot(2000, self._reset_test_btn)
 
     def _reset_test_btn(self):
