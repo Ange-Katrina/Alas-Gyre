@@ -873,25 +873,19 @@ class CardWidget(QFrame):
         else:
             was_fallback = getattr(self, "_runtime_connection", "overlay") == "websocket_fallback"
         if fallback and not self._is_websocket_snapshot_usable(snapshot):
+            self._set_ws_initial_scanning_placeholder(False)
             return False
         if fallback:
             self._mark_websocket_fallback()
+        self._set_ws_initial_scanning_placeholder(
+            self._is_ws_initial_scanning_placeholder(snapshot)
+        )
         configs, statuses, tasks, current_status, current_task = build_websocket_ui_snapshot(
             snapshot,
             self.current_config,
         )
         if configs:
             self.configs_update_signal.emit(configs)
-        elif (
-            not configs
-            and current_status == "scanning"
-            and not statuses
-            and getattr(self, "_configs", None)
-        ):
-            # 无新配置且无状态时，为已有配置行同步扫描中，不覆盖已有真实状态
-            for config_name in self._configs:
-                statuses[str(config_name)] = "scanning"
-                tasks[str(config_name)] = ""
         self.status_all_update_signal.emit(statuses, tasks)
         self.status_update_signal.emit(current_status, current_task)
         # 消费控制错误——通知 UI 控制失败（一次性消费，避免重复触发）
