@@ -1390,7 +1390,7 @@ class AlasConsole(QWidget):
 
     def showEvent(self, event):
         super().showEvent(event)
-        schedule_frameless_stabilize(self, self.card)
+        schedule_frameless_stabilize(self, self.card, stable_input_region=False)
 
     def mousePressEvent(self, event):
         super().mousePressEvent(event)

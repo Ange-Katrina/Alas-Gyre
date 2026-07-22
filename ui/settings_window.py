@@ -540,7 +540,7 @@ class SettingsWindow(QDialog):
         super().showEvent(event)
         self._force_layout()
         QTimer.singleShot(0, self._force_layout)
-        schedule_frameless_stabilize(self, self.card, self.topBg, self.formBg)
+        schedule_frameless_stabilize(self, self.card, self.topBg, self.formBg, stable_input_region=False)
 
     def _force_layout(self):
         widgets = [self, self.card, self.topBg, self.formBg]
