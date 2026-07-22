@@ -1316,7 +1316,7 @@ class AlasConsole(QWidget):
         self.setObjectName("mainWindow")
         self.setWindowTitle("Alas-Gyre")
         self.setFixedSize(MAIN_CARD_WIDTH, MAIN_CARD_HEIGHT)
-        self.setWindowFlags(Qt.FramelessWindowHint)
+        self.setWindowFlags(Qt.Window | Qt.FramelessWindowHint)
         self.setAttribute(Qt.WA_StyledBackground, True)
 
         main_layout = QVBoxLayout(self)
