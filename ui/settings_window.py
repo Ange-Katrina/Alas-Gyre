@@ -168,7 +168,6 @@ class SettingsWindow(QDialog):
         self.connectionModeCombo.setCursor(Qt.PointingHandCursor)
         self.connectionModeCombo.setFocusPolicy(Qt.NoFocus)
         self.connectionModeCombo.setFixedHeight(30)
-        self._stabilize_combo_popup(self.connectionModeCombo)
         self.connectionModeCombo.addItem(tr("connection_mode_auto"), "auto")
         self.connectionModeCombo.addItem(tr("connection_mode_websocket"), "websocket")
         current_mode = normalize_connection_mode(self.config)
@@ -233,7 +232,6 @@ class SettingsWindow(QDialog):
         self.websocketPollModeInput.setCursor(Qt.PointingHandCursor)
         self.websocketPollModeInput.setFocusPolicy(Qt.NoFocus)
         self.websocketPollModeInput.setFixedHeight(30)
-        self._stabilize_combo_popup(self.websocketPollModeInput)
         self.websocketPollModeInput.addItem(tr("websocket_poll_round_robin"), "round_robin")
         self.websocketPollModeInput.addItem(tr("websocket_poll_full_scan"), "full_scan")
         current_poll_mode = self.config.get("websocket_poll_mode", "round_robin")
@@ -568,11 +566,6 @@ class SettingsWindow(QDialog):
         layout.addWidget(title_label)
         layout.addWidget(desc_label)
         return box
-
-    def _stabilize_combo_popup(self, combo):
-        popup = combo.view().window()
-        if popup is not None:
-            popup.setWindowFlags(Qt.Popup | Qt.FramelessWindowHint | Qt.NoDropShadowWindowHint)
 
     def _set_settings_page(self, index):
         if not hasattr(self, "settingsStack"):
