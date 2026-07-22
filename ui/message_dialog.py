@@ -183,13 +183,7 @@ class MessageDialog(QDialog):
         if parent:
             center = parent.frameGeometry().center()
             self.move(center - self.rect().center())
-        schedule_frameless_stabilize(
-            self,
-            self.card,
-            self.topBg,
-            self.body,
-            stable_input_region=False,
-        )
+        schedule_frameless_stabilize(self, self.card, self.topBg, self.body)
 
 
 def show_message(parent, title, message, kind="info"):
