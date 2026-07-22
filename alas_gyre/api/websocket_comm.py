@@ -1292,15 +1292,42 @@ def extract_instance_nav_callbacks(state):
 
 
 def extract_config_status(state, from_index=0):
-    """从目标配置页提取配置状态。仅基于按钮 label 精准匹配。
+    """从目标配置页提取配置状态。"""
+    start_labels = tuple(label.lower() for label in START_BUTTON_LABELS)
+    stop_labels = tuple(label.lower() for label in STOP_BUTTON_LABELS)
+    status_labels = {
+        "运行中": "running",
+        "running": "running",
+        "空闲": "idle",
+        "idle": "idle",
+        "未运行": "idle",
+        "错误": "error",
+        "error": "error",
+        "更新中": "update",
+        "update": "update",
+        "未连接": "disconnected",
+        "disconnected": "disconnected",
+    }
 
-    仅扫描 from_index 及之后的 outputs，确保状态只来自导航后的页面证据，
-    避免复用历史配置页的 header_status/scheduler_btn。
-    """
     for output in state.outputs[from_index:]:
         if not isinstance(output, dict):
             continue
         scope = _scope_identity(output)
+        text = _flatten_text(output).strip().lower()
+
+        # header_status scope：优先匹配页面文本状态，也兼容按钮 label。
+        if "header_status" in scope:
+            for label, status in status_labels.items():
+                if label.lower() in text:
+                    return status
+
+        # scheduler_btn scope：可通过启动/停止文本推断调度器状态。
+        if "scheduler_btn" in scope:
+            if any(label in text for label in stop_labels):
+                return "running"
+            if any(label in text for label in start_labels):
+                return "idle"
+
         for _, buttons in _extract_buttons(output):
             for btn in buttons:
                 if not isinstance(btn, dict):
@@ -1308,23 +1335,12 @@ def extract_config_status(state, from_index=0):
                 label = str(btn.get("label", "") or btn.get("value", "") or "").strip().lower()
                 if not label:
                     continue
-                # header_status scope：匹配状态标签
-                if "header_status" in scope:
-                    if label in ("运行中", "running"):
-                        return "running"
-                    if label in ("空闲", "idle", "未运行"):
-                        return "idle"
-                    if label in ("错误", "error"):
-                        return "error"
-                    if label in ("更新中", "update"):
-                        return "update"
-                    if label in ("未连接", "disconnected"):
-                        return "disconnected"
-                # scheduler_btn scope：匹配启动/停止按钮
+                if "header_status" in scope and label in status_labels:
+                    return status_labels[label]
                 if "scheduler_btn" in scope:
-                    if label in tuple(l.lower() for l in STOP_BUTTON_LABELS):
+                    if label in stop_labels:
                         return "running"
-                    if label in tuple(l.lower() for l in START_BUTTON_LABELS):
+                    if label in start_labels:
                         return "idle"
     return ""
 
