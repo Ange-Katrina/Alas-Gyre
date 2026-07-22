@@ -669,12 +669,12 @@ class WebSocketCommManager:
         pin_onchange callback 即可完成导航。如果未来侧边栏引入了多个独立的
         pin_onchange 组件，则需要在此处按名称精确匹配。
 
-        导航前记录全局页面状态输出边界，后续状态提取和按钮查找仅考虑
-        导航后到达的新消息，避免跨配置页面证据复用。
+        导航前记录单调输出序号边界，后续状态提取仅考虑导航后到达的新消息，
+        避免 PyWebIO 清理 scope 后 outputs 列表长度回退导致新状态被过滤。
         """
         page_state = getattr(self, "_page_state", None)
         if page_state is not None:
-            self._nav_output_boundary = len(page_state.outputs)
+            self._nav_output_boundary = page_state.output_sequence
         else:
             self._nav_output_boundary = 0
         with self._lock:
@@ -805,7 +805,13 @@ class WebSocketCommManager:
 
         仅搜索 from_index 及之后的 outputs，避免复用导航前的旧页面证据。
         """
-        for output in page_state.outputs[from_index:]:
+        output_history = getattr(page_state, "output_history", ())
+        if output_history:
+            outputs = [output for sequence, output in output_history if sequence > from_index]
+        else:
+            outputs = page_state.outputs[from_index:]
+
+        for output in outputs:
             if not isinstance(output, dict):
                 continue
             if "scheduler_btn" not in _scope_identity(output):
@@ -1104,6 +1110,8 @@ class PyWebIOPageState:
     task_ids: set = field(default_factory=set)
     callback_ids: dict = field(default_factory=dict)
     outputs: list = field(default_factory=list)
+    output_history: list = field(default_factory=list)
+    output_sequence: int = 0
     inputs: list = field(default_factory=list)
     scripts: list = field(default_factory=list)
     current_scope: str = ""
@@ -1125,13 +1133,19 @@ class PyWebIOPageState:
             if isinstance(output, dict) and self.current_scope and "scope" not in output:
                 output = dict(output)
                 output["scope"] = self.current_scope
-            self.outputs.append(output)
+            self._append_output(output)
         elif message.command == "input":
             self.inputs.append(message.spec)
         elif message.command == "run_script":
             self.scripts.append(message.spec)
         elif message.command == "output_ctl":
             self._apply_output_ctl(message.spec)
+
+    def _append_output(self, output):
+        """追加当前页面输出，并保留单调历史序号。"""
+        self.output_sequence += 1
+        self.outputs.append(output)
+        self.output_history.append((self.output_sequence, output))
 
     def _apply_output_ctl(self, spec):
         """应用 output_ctl 到 outputs。"""
@@ -1156,13 +1170,13 @@ class PyWebIOPageState:
             if data is not None:
                 if isinstance(data, dict) and not data.get("scope"):
                     data = dict(data, scope=scope)
-                self.outputs.append(data)
+                self._append_output(data)
             return
         self._clear_scope(scope)
         if method == "replace" and data is not None:
             if isinstance(data, dict) and not data.get("scope"):
                 data = dict(data, scope=scope)
-            self.outputs.append(data)
+            self._append_output(data)
 
     def _clear_scope(self, scope):
         """清理指定 PyWebIO scope 的输出。"""
@@ -1297,6 +1311,13 @@ def extract_instance_nav_callbacks(state):
 
 def extract_config_status(state, from_index=0):
     """从目标配置页提取配置状态。"""
+    output_history = getattr(state, "output_history", ())
+    if output_history:
+        outputs = [output for sequence, output in output_history if sequence > from_index]
+    else:
+        # 兼容仅构造 outputs 的旧调用方。
+        outputs = state.outputs[from_index:]
+
     start_labels = tuple(label.lower() for label in START_BUTTON_LABELS)
     stop_labels = tuple(label.lower() for label in STOP_BUTTON_LABELS)
     status_labels = {
@@ -1313,7 +1334,7 @@ def extract_config_status(state, from_index=0):
         "disconnected": "disconnected",
     }
 
-    for output in state.outputs[from_index:]:
+    for output in outputs:
         if not isinstance(output, dict):
             continue
         scope = _scope_identity(output)
