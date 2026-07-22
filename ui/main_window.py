@@ -178,7 +178,7 @@ class MainConfigRow(QWidget):
         delete_enabled = (
             status != "running"
             and len(self.main_card._configs) > 1
-            and not self._use_websocket_comm()
+            and not self.main_card._use_websocket_comm()
         )
         if self.current_status == status and getattr(self, "current_task", "") == task:
             if self.deleteBtn.isEnabled() != delete_enabled:
