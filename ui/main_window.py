@@ -996,7 +996,7 @@ class CardWidget(QFrame):
         parent = self.window()
         if hasattr(self, "mini_dialog") and self.mini_dialog.isVisible():
             parent = self.mini_dialog
-        show_info(
+        show_warning(
             parent or self,
             tr("websocket_fallback_notice_title"),
             tr("websocket_fallback_notice_message"),
