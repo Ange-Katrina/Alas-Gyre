@@ -1,13 +1,17 @@
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QWidget, QLabel, QLineEdit, QCheckBox,
-    QPushButton, QFrame, QSlider, QGridLayout, QStackedWidget
+    QPushButton, QFrame, QSlider, QGridLayout, QStackedWidget, QComboBox,
+    QScrollArea
 )
 from PySide6.QtCore import Qt, Signal, QTimer, QSize
 from PySide6.QtGui import QColor, QPixmap, QPainter, QPen, QIcon
+import re
 import secrets
 import threading
 
-from alas_gyre.api.client import api_headers, api_request, gyre_api_url
+from alas_gyre.api.client import alas_gui_url, api_headers, api_request, gyre_api_url
+from alas_gyre.api.connection_policy import normalize_connection_mode
+from alas_gyre.api.connection_policy import test_connection_with_fallback
 from alas_gyre.api.runtime_update import DEFAULT_RUNTIME_UPDATE_PORT, update_remote_runtime
 from alas_gyre.services.updater import check_for_updates, do_update
 from alas_gyre.core.version import get_current_version
@@ -42,7 +46,7 @@ class CheckBox(QCheckBox):
         painter.end()
 
 class SettingsWindow(QDialog):
-    test_result_signal = Signal(bool, str)
+    test_result_signal = Signal(bool, str, int)
     update_result_signal = Signal(dict, int)
     update_progress_signal = Signal(int)
     update_finish_signal = Signal(bool, str)
@@ -151,6 +155,34 @@ class SettingsWindow(QDialog):
         opacity_layout.addWidget(self.miniOpacitySlider, stretch=1)
         opacity_layout.addWidget(self.miniOpacityValue)
 
+        # 连接模式
+        conn_mode_layout = QHBoxLayout()
+        conn_mode_layout.setSpacing(10)
+
+        conn_mode_label = QLabel(tr("connection_mode"))
+        conn_mode_label.setObjectName("formLabel")
+        conn_mode_label.setFixedWidth(104)
+
+        self.connectionModeCombo = QComboBox()
+        self.connectionModeCombo.setObjectName("settingsInput")
+        self.connectionModeCombo.setCursor(Qt.PointingHandCursor)
+        self.connectionModeCombo.setFocusPolicy(Qt.NoFocus)
+        self.connectionModeCombo.setFixedHeight(30)
+        self.connectionModeCombo.addItem(tr("connection_mode_auto"), "auto")
+        self.connectionModeCombo.addItem(tr("connection_mode_websocket"), "websocket")
+        current_mode = normalize_connection_mode(self.config)
+        idx = self.connectionModeCombo.findData(current_mode)
+        if idx >= 0:
+            self.connectionModeCombo.setCurrentIndex(idx)
+
+        self.connectionModeCombo.currentIndexChanged.connect(self._refresh_connection_mode_visibility)
+
+        conn_mode_layout.addWidget(conn_mode_label)
+        conn_mode_layout.addWidget(self.connectionModeCombo, stretch=1)
+        self.connectionModeHint = QLabel(tr("connection_mode_hint"))
+        self.connectionModeHint.setObjectName("settingsHintLabel")
+        self.connectionModeHint.setWordWrap(True)
+
         # IP 布局
         ip_layout = QHBoxLayout()
         ip_layout.setSpacing(10)
@@ -163,6 +195,63 @@ class SettingsWindow(QDialog):
         self.ipInput.setText(self.config.get("ip", "127.0.0.1"))
         ip_layout.addWidget(ip_label)
         ip_layout.addWidget(self.ipInput, stretch=1)
+        self.ipHint = QLabel(tr("ip_address_hint"))
+        self.ipHint.setObjectName("settingsHintLabel")
+        self.ipHint.setWordWrap(True)
+
+        # WebSocket 通讯轮询间隔
+        ws_interval_layout = QHBoxLayout()
+        ws_interval_layout.setSpacing(10)
+
+        ws_interval_label = QLabel(tr("websocket_poll_interval"))
+        ws_interval_label.setObjectName("formLabel")
+        ws_interval_label.setFixedWidth(104)
+
+        self.websocketPollIntervalInput = QLineEdit()
+        self.websocketPollIntervalInput.setObjectName("settingsInput")
+        self.websocketPollIntervalInput.setFixedSize(96, 30)
+        self.websocketPollIntervalInput.setText(str(self.config.get("websocket_poll_interval", 3)))
+
+        ws_interval_layout.addWidget(ws_interval_label)
+        ws_interval_layout.addWidget(self.websocketPollIntervalInput)
+        ws_interval_layout.addStretch()
+        self.websocketPollIntervalHint = QLabel(tr("websocket_poll_interval_hint"))
+        self.websocketPollIntervalHint.setObjectName("settingsHintLabel")
+        self.websocketPollIntervalHint.setWordWrap(True)
+
+        # WebSocket 通讯轮询模式
+        ws_mode_layout = QHBoxLayout()
+        ws_mode_layout.setSpacing(10)
+
+        ws_mode_label = QLabel(tr("websocket_poll_mode"))
+        ws_mode_label.setObjectName("formLabel")
+        ws_mode_label.setFixedWidth(104)
+
+        self.websocketPollModeInput = QComboBox()
+        self.websocketPollModeInput.setObjectName("settingsInput")
+        self.websocketPollModeInput.setCursor(Qt.PointingHandCursor)
+        self.websocketPollModeInput.setFocusPolicy(Qt.NoFocus)
+        self.websocketPollModeInput.setFixedHeight(30)
+        self.websocketPollModeInput.addItem(tr("websocket_poll_round_robin"), "round_robin")
+        self.websocketPollModeInput.addItem(tr("websocket_poll_full_scan"), "full_scan")
+        current_poll_mode = self.config.get("websocket_poll_mode", "round_robin")
+        idx = self.websocketPollModeInput.findData(current_poll_mode)
+        if idx >= 0:
+            self.websocketPollModeInput.setCurrentIndex(idx)
+
+        ws_mode_layout.addWidget(ws_mode_label)
+        ws_mode_layout.addWidget(self.websocketPollModeInput, stretch=1)
+        self.websocketPollModeHint = QLabel(tr("websocket_poll_mode_hint"))
+        self.websocketPollModeHint.setObjectName("settingsHintLabel")
+        self.websocketPollModeHint.setWordWrap(True)
+
+        # WebSocket 通讯说明
+        self.wsHint = QLabel(tr("websocket_comm_hint"))
+        self.wsHint.setObjectName("settingsHintLabel")
+        self.wsHint.setWordWrap(True)
+
+        # 轮询模式切换时动态更新提示文本
+        self.websocketPollModeInput.currentIndexChanged.connect(self._on_poll_mode_changed)
 
         # 端口与测试按钮布局
         port_layout = QHBoxLayout()
@@ -178,6 +267,9 @@ class SettingsWindow(QDialog):
         port_layout.addWidget(port_label)
         port_layout.addWidget(self.portInput)
         port_layout.addStretch()
+        self.alasPortHint = QLabel(tr("alas_port_hint"))
+        self.alasPortHint.setObjectName("settingsHintLabel")
+        self.alasPortHint.setWordWrap(True)
 
         self.testBtn = QPushButton(tr("test_connection"))
         self.testBtn.setObjectName("testBtn")
@@ -193,12 +285,14 @@ class SettingsWindow(QDialog):
         runtime_port_label = QLabel(tr("runtime_update_port"))
         runtime_port_label.setObjectName("formLabel")
         runtime_port_label.setFixedWidth(104)
+        self.runtimePortLabel = runtime_port_label
         self.runtimePortInput = QLineEdit()
         self.runtimePortInput.setObjectName("settingsInput")
         self.runtimePortInput.setFixedSize(96, 30)
         self.runtimePortInput.setText(str(self.config.get("runtime_update_port", DEFAULT_RUNTIME_UPDATE_PORT)))
         runtime_port_hint = QLabel(tr("runtime_update_port_hint"))
-        runtime_port_hint.setStyleSheet("color: #8f96a3; font-size: 12px; font-family: 'Microsoft YaHei', 'Segoe UI';")
+        runtime_port_hint.setObjectName("settingsHintLabel")
+        self.runtimePortHint = runtime_port_hint
         runtime_port_layout.addWidget(runtime_port_label)
         runtime_port_layout.addWidget(self.runtimePortInput)
         runtime_port_layout.addWidget(runtime_port_hint, stretch=1)
@@ -208,6 +302,7 @@ class SettingsWindow(QDialog):
         token_label = QLabel("API Token")
         token_label.setObjectName("formLabel")
         token_label.setFixedWidth(104)
+        self.tokenLabel = token_label
         self.tokenInput = QLineEdit()
         self.tokenInput.setObjectName("settingsInput")
         self.tokenInput.setFixedHeight(30)
@@ -215,6 +310,9 @@ class SettingsWindow(QDialog):
         self.tokenInput.setText(self.config.get("api_token", ""))
         token_layout.addWidget(token_label)
         token_layout.addWidget(self.tokenInput, stretch=1)
+        self.tokenHint = QLabel(tr("api_token_hint"))
+        self.tokenHint.setObjectName("settingsHintLabel")
+        self.tokenHint.setWordWrap(True)
 
         self.tokenGenerateBtn = QPushButton(tr("generate"))
         self.tokenGenerateBtn.setObjectName("tokenBtn")
@@ -232,22 +330,10 @@ class SettingsWindow(QDialog):
         wizard_label.setFixedWidth(104)
 
         self.wizardBtn = QPushButton(tr("open_wizard"))
-        self.wizardBtn.setObjectName("updateBtn")
+        self.wizardBtn.setObjectName("settingsActionBtn")
         self.wizardBtn.setCursor(Qt.PointingHandCursor)
         self.wizardBtn.setFocusPolicy(Qt.NoFocus)
         self.wizardBtn.setFixedSize(116, 30)
-        self.wizardBtn.setStyleSheet("""
-            QPushButton#updateBtn {
-                background-color: transparent;
-                border: 1px solid #454852;
-                border-radius: 4px;
-                color: #a6abb4;
-            }
-            QPushButton#updateBtn:hover {
-                background-color: #454852;
-                color: #ffffff;
-            }
-        """)
         self.wizardBtn.clicked.connect(self._open_init_setup)
 
         wizard_layout.addWidget(wizard_label)
@@ -263,25 +349,13 @@ class SettingsWindow(QDialog):
         update_label.setFixedWidth(104)
         
         self.versionLabel = QLabel(f"{tr('current_version')} {get_current_version()}")
-        self.versionLabel.setStyleSheet("color: #a6abb4; font-size: 13px; font-family: 'Microsoft YaHei', 'Segoe UI';")
+        self.versionLabel.setObjectName("settingsVersionLabel")
         
         self.updateBtn = QPushButton(tr("check_update"))
-        self.updateBtn.setObjectName("updateBtn")
+        self.updateBtn.setObjectName("settingsActionBtn")
         self.updateBtn.setCursor(Qt.PointingHandCursor)
         self.updateBtn.setFocusPolicy(Qt.NoFocus)
         self.updateBtn.setFixedSize(116, 30)
-        self.updateBtn.setStyleSheet("""
-            QPushButton#updateBtn {
-                background-color: transparent;
-                border: 1px solid #454852;
-                border-radius: 4px;
-                color: #a6abb4;
-            }
-            QPushButton#updateBtn:hover {
-                background-color: #454852;
-                color: #ffffff;
-            }
-        """)
         self.updateBtn.clicked.connect(self._check_for_updates)
         
         update_layout.addWidget(update_label)
@@ -297,15 +371,14 @@ class SettingsWindow(QDialog):
         runtime_update_label.setFixedWidth(104)
 
         self.runtimeUpdateHint = QLabel(tr("runtime_update_hint"))
-        self.runtimeUpdateHint.setStyleSheet("color: #8f96a3; font-size: 12px; font-family: 'Microsoft YaHei', 'Segoe UI';")
+        self.runtimeUpdateHint.setObjectName("settingsHintLabel")
         self.runtimeUpdateHint.setWordWrap(True)
 
         self.runtimeUpdateBtn = QPushButton(tr("update_runtime"))
-        self.runtimeUpdateBtn.setObjectName("updateBtn")
+        self.runtimeUpdateBtn.setObjectName("settingsActionBtn")
         self.runtimeUpdateBtn.setCursor(Qt.PointingHandCursor)
         self.runtimeUpdateBtn.setFocusPolicy(Qt.NoFocus)
         self.runtimeUpdateBtn.setFixedSize(116, 30)
-        self.runtimeUpdateBtn.setStyleSheet(self.updateBtn.styleSheet())
         self.runtimeUpdateBtn.clicked.connect(self._update_runtime)
 
         runtime_update_layout.addWidget(runtime_update_label)
@@ -372,13 +445,30 @@ class SettingsWindow(QDialog):
         connection_panel_layout = QVBoxLayout(connection_panel)
         connection_panel_layout.setContentsMargins(14, 14, 14, 14)
         connection_panel_layout.setSpacing(12)
+        connection_panel_layout.addLayout(conn_mode_layout)
+        connection_panel_layout.addWidget(self.connectionModeHint)
         connection_panel_layout.addLayout(ip_layout)
+        connection_panel_layout.addWidget(self.ipHint)
         connection_panel_layout.addLayout(port_layout)
+        connection_panel_layout.addWidget(self.alasPortHint)
+        connection_panel_layout.addLayout(ws_interval_layout)
+        connection_panel_layout.addWidget(self.websocketPollIntervalHint)
+        connection_panel_layout.addLayout(ws_mode_layout)
+        connection_panel_layout.addWidget(self.websocketPollModeHint)
+        connection_panel_layout.addWidget(self.wsHint)
         connection_panel_layout.addLayout(runtime_port_layout)
         connection_panel_layout.addLayout(token_layout)
+        connection_panel_layout.addWidget(self.tokenHint)
+        self._refresh_connection_mode_visibility()
         connection_layout.addWidget(connection_panel)
         connection_layout.addStretch()
-        self.settingsStack.addWidget(connection_page)
+        connection_scroll = QScrollArea(self.settingsStack)
+        connection_scroll.setObjectName("settingsPageScroll")
+        connection_scroll.setWidgetResizable(True)
+        connection_scroll.setFrameShape(QFrame.NoFrame)
+        connection_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        connection_scroll.setWidget(connection_page)
+        self.settingsStack.addWidget(connection_scroll)
 
         maintenance_page = QWidget(self.settingsStack)
         maintenance_page.setObjectName("settingsPage")
@@ -447,7 +537,7 @@ class SettingsWindow(QDialog):
         super().showEvent(event)
         self._force_layout()
         QTimer.singleShot(0, self._force_layout)
-        schedule_frameless_stabilize(self, self.card, self.topBg, self.formBg)
+        schedule_frameless_stabilize(self, self.card, self.topBg, self.formBg, stable_input_region=False)
 
     def _force_layout(self):
         widgets = [self, self.card, self.topBg, self.formBg]
@@ -533,18 +623,9 @@ class SettingsWindow(QDialog):
             self.updateBtn.setText(tr("download_update"))
             if result.get("version"):
                 self.updateBtn.setToolTip(result["version"])
-            self.updateBtn.setStyleSheet("""
-                QPushButton#updateBtn {
-                    background-color: #28e06f;
-                    border: none;
-                    border-radius: 4px;
-                    color: #1a1b26;
-                    font-weight: bold;
-                }
-                QPushButton#updateBtn:hover {
-                    background-color: #42d392;
-                }
-            """)
+            self.updateBtn.setProperty("state", "update_available")
+            self.updateBtn.style().unpolish(self.updateBtn)
+            self.updateBtn.style().polish(self.updateBtn)
             self.updateBtn.setEnabled(True)
             try:
                 self.updateBtn.clicked.disconnect()
@@ -626,18 +707,9 @@ class SettingsWindow(QDialog):
         self.updateBtn.setText(tr("check_update"))
         self.updateBtn.setToolTip("")
         self.updateBtn.setEnabled(True)
-        self.updateBtn.setStyleSheet("""
-            QPushButton#updateBtn {
-                background-color: transparent;
-                border: 1px solid #454852;
-                border-radius: 4px;
-                color: #a6abb4;
-            }
-            QPushButton#updateBtn:hover {
-                background-color: #454852;
-                color: #ffffff;
-            }
-        """)
+        self.updateBtn.setProperty("state", "")
+        self.updateBtn.style().unpolish(self.updateBtn)
+        self.updateBtn.style().polish(self.updateBtn)
         try:
             self.updateBtn.clicked.disconnect()
         except Exception:
@@ -701,10 +773,14 @@ class SettingsWindow(QDialog):
         self.config["always_on_top"] = self.alwaysOnTopCheck.isChecked()
         self.config["theme"] = "light" if self.lightThemeCheck.isChecked() else "dark"
         self.config["lang"] = "en" if self.englishLangCheck.isChecked() else "zh"
-        self.config["ip"] = self.ipInput.text()
-        self.config["port"] = self.portInput.text()
-        runtime_port = self.runtimePortInput.text().strip()
-        self.config["runtime_update_port"] = runtime_port if runtime_port.isdigit() else DEFAULT_RUNTIME_UPDATE_PORT
+        self.config["ip"] = self._normalize_host(self.ipInput.text())
+        self.config["port"] = self._normalize_port(self.portInput.text())
+        self.config["connection_mode"] = self.connectionModeCombo.currentData() or "auto"
+        self.config["websocket_poll_interval"] = self._normalize_poll_interval(
+            self.websocketPollIntervalInput.text()
+        )
+        self.config["websocket_poll_mode"] = self.websocketPollModeInput.currentData() or "round_robin"
+        self.config["runtime_update_port"] = self._normalize_port(self.runtimePortInput.text(), default=DEFAULT_RUNTIME_UPDATE_PORT)
         self.config["api_token"] = self.tokenInput.text().strip()
         self.config["mini_click_through"] = self.miniClickThroughCheck.isChecked()
         self.config["show_task_name"] = self.showTaskNameCheck.isChecked()
@@ -717,6 +793,19 @@ class SettingsWindow(QDialog):
         self.portInput.setText(str(self.config.get("port", "22267")))
         self.runtimePortInput.setText(str(self.config.get("runtime_update_port", DEFAULT_RUNTIME_UPDATE_PORT)))
         self.tokenInput.setText(self.config.get("api_token", ""))
+        current_mode = normalize_connection_mode(self.config)
+        idx = self.connectionModeCombo.findData(current_mode)
+        if idx >= 0:
+            self.connectionModeCombo.setCurrentIndex(idx)
+        self.websocketPollIntervalInput.setText(
+            str(self.config.get("websocket_poll_interval", 3))
+        )
+        current_poll_mode = self.config.get("websocket_poll_mode", "round_robin")
+        idx = self.websocketPollModeInput.findData(current_poll_mode)
+        if idx >= 0:
+            self.websocketPollModeInput.setCurrentIndex(idx)
+        self._refresh_connection_mode_visibility()
+        self._on_poll_mode_changed(-1)
 
     def _open_init_setup(self):
         self._sync_config_from_ui()
@@ -743,70 +832,131 @@ class SettingsWindow(QDialog):
             value = 100
         return max(35, min(value, 100))
 
+    @staticmethod
+    def _normalize_host(host):
+        """规范化主机地址：去除协议头（不区分大小写）、路径和端口，空值默认 127.0.0.1。"""
+        host = str(host).strip()
+        if not host:
+            return "127.0.0.1"
+        host = re.sub(r'^https?://', '', host, flags=re.IGNORECASE)
+        host = host.split('/')[0].split(':')[0]
+        return host or "127.0.0.1"
+
+    @staticmethod
+    def _normalize_port(port_str, default="22267"):
+        """规范化端口号：限制在 1..65535 范围内，非法返回 default。"""
+        try:
+            port = int(str(port_str).strip())
+        except (TypeError, ValueError):
+            return default
+        if 1 <= port <= 65535:
+            return str(port)
+        return default
+
+    def _normalize_poll_interval(self, value):
+        try:
+            value = int(str(value).strip())
+        except (TypeError, ValueError):
+            value = 3
+        return max(1, min(value, 60))
+
     def _generate_token(self):
         self.tokenInput.setText(secrets.token_urlsafe(32))
         self.tokenInput.setFocus()
+
+    def _refresh_connection_mode_visibility(self):
+        websocket = (self.connectionModeCombo.currentData() == "websocket")
+        for widget in (
+            self.runtimePortLabel,
+            self.runtimePortInput,
+            self.runtimePortHint,
+            self.tokenLabel,
+            self.tokenInput,
+            self.tokenHint,
+            self.tokenGenerateBtn,
+        ):
+            widget.setVisible(not websocket)
+
+    def _next_test_request_id(self):
+        """生成新的连接测试请求序号，用于过滤旧回调和旧定时器。"""
+        self._test_request_id = getattr(self, "_test_request_id", 0) + 1
+        return self._test_request_id
 
     def _run_connection_test(self):
         if not isValid(self):
             return
         ip = self.ipInput.text().strip()
         port_str = self.portInput.text().strip()
-        
-        if not ip or not port_str.isdigit():
-            self._on_test_result(False, tr("test_invalid"))
+        connection_mode = self.connectionModeCombo.currentData() or "auto"
+
+        if not ip or not port_str.isascii() or not port_str.isdigit():
+            request_id = self._next_test_request_id()
+            self._on_test_result(False, tr("test_invalid"), request_id)
             return
-            
+        try:
+            port = int(port_str)
+        except ValueError:
+            request_id = self._next_test_request_id()
+            self._on_test_result(False, tr("test_invalid"), request_id)
+            return
+        if not 1 <= port <= 65535:
+            request_id = self._next_test_request_id()
+            self._on_test_result(False, tr("test_invalid"), request_id)
+            return
+        normalized_port = self._normalize_port(str(port))
+
         self.testBtn.setText("...")
         self.testBtn.setIcon(QIcon())
         self.testBtn.setEnabled(False)
         self.testBtn.setProperty("state", "testing")
         self.testBtn.style().unpolish(self.testBtn)
         self.testBtn.style().polish(self.testBtn)
-        
+
+        test_config = dict(self.config)
+        test_config.update({
+            "ip": self._normalize_host(ip),
+            "port": normalized_port,
+            "api_token": self.tokenInput.text().strip(),
+            "connection_mode": connection_mode,
+        })
+
+        # 递增请求序号，防止旧请求结果覆盖新请求
+        request_id = self._next_test_request_id()
         threading.Thread(
-            target=self._test_api,
-            args=(ip, port_str, self.tokenInput.text().strip()),
-            daemon=True,
+            target=self._test_api, args=(test_config, request_id), daemon=True
         ).start()
 
-    def _test_api(self, ip, port, token):
-        success = False
-        message = ""
+    def _test_api(self, test_config, request_id=0):
+        """使用统一连接测试接口，支持自动降级。"""
         try:
-            test_config = {
-                "ip": ip,
-                "port": port,
-                "api_token": token,
-            }
-            resp = api_request(
-                "GET",
-                gyre_api_url(test_config, "health"),
-                headers=api_headers(test_config),
-                timeout=2.0,
-            )
-            success = resp.status_code == 200
-            if resp.status_code == 401:
-                message = tr("test_unauthorized")
-            elif resp.status_code == 404:
-                message = tr("test_overlay_missing")
-            elif not success:
-                message = f"HTTP {resp.status_code}"
+            result = test_connection_with_fallback(test_config)
+            if result.success:
+                message = tr(result.message_key)
+                if result.source == "websocket_fallback" and result.overlay_error:
+                    message = f"{message}\nOverlay: {result.overlay_error}"
+                self._emit_test_result(True, message, request_id)
+            else:
+                detail = result.websocket_error or result.overlay_error
+                # 优先使用 result.message_key 作为失败消息
+                if result.message_key:
+                    fallback_msg = tr(result.message_key)
+                    if detail:
+                        fallback_msg = f"{fallback_msg}: {detail}"
+                    self._emit_test_result(False, fallback_msg, request_id)
+                else:
+                    self._emit_test_result(False, detail or tr("test_failed_short"), request_id)
         except Exception as exc:
-            message = str(exc)
-        self._emit_test_result(success, message)
+            self._emit_test_result(False, str(exc), request_id)
 
-    def _emit_test_result(self, success, message):
+    def _emit_test_result(self, success, message, request_id=0):
         try:
             if isValid(self):
-                self.test_result_signal.emit(success, message)
+                self.test_result_signal.emit(success, message, request_id)
         except RuntimeError:
             pass
 
     def _create_icon(self, state):
         pixmap = QPixmap(24, 24)
-        pixmap.fill(Qt.transparent)
-        p = QPixmap(24, 24)
         pixmap.fill(Qt.transparent)
         p = QPainter(pixmap)
         p.setRenderHint(QPainter.Antialiasing)
@@ -825,7 +975,11 @@ class SettingsWindow(QDialog):
         p.end()
         return QIcon(pixmap)
 
-    def _on_test_result(self, success, message=""):
+    def _on_test_result(self, success, message="", request_id=0):
+        # 只处理最新请求的结果，忽略旧请求
+        current_id = getattr(self, "_test_request_id", 0)
+        if request_id and request_id != current_id:
+            return
         if not isValid(self):
             return
         self.testBtn.setEnabled(True)
@@ -835,16 +989,24 @@ class SettingsWindow(QDialog):
         if success:
             self.testBtn.setIcon(self._create_icon("success"))
             self.testBtn.setProperty("state", "success")
+            self.testBtn.style().unpolish(self.testBtn)
+            self.testBtn.style().polish(self.testBtn)
+            QTimer.singleShot(2000, lambda rid=request_id: self._reset_test_btn(rid))
         else:
             self.testBtn.setIcon(self._create_icon("error"))
             self.testBtn.setProperty("state", "error")
-            
-        self.testBtn.style().unpolish(self.testBtn)
-        self.testBtn.style().polish(self.testBtn)
-        
-        QTimer.singleShot(2000, self._reset_test_btn)
+            # 失败时将详情作为按钮文本展示，tooltip 保留完整信息
+            if message:
+                short = message[:80] + "..." if len(message) > 80 else message
+                self.testBtn.setText(short)
+            self.testBtn.style().unpolish(self.testBtn)
+            self.testBtn.style().polish(self.testBtn)
 
-    def _reset_test_btn(self):
+    def _reset_test_btn(self, request_id=0):
+        # 如果定时器触发时已有新请求，跳过此次 reset
+        current_id = getattr(self, "_test_request_id", 0)
+        if request_id and request_id != current_id:
+            return
         if not isValid(self):
             return
         self.testBtn.setIcon(QIcon())
@@ -853,3 +1015,11 @@ class SettingsWindow(QDialog):
         self.testBtn.setProperty("state", "normal")
         self.testBtn.style().unpolish(self.testBtn)
         self.testBtn.style().polish(self.testBtn)
+
+    def _on_poll_mode_changed(self, index):
+        """轮询模式切换时动态更新提示文本。"""
+        mode = self.websocketPollModeInput.currentData()
+        if mode == "full_scan":
+            self.wsHint.setText(tr("websocket_full_scan_hint"))
+        else:
+            self.wsHint.setText(tr("websocket_comm_hint"))

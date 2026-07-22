@@ -159,4 +159,14 @@ def main(current_version):
     window.show()
     QTimer.singleShot(1500, lambda: window.start_auto_update_check(current_version))
 
+    from alas_gyre.api.websocket_comm import get_existing_manager
+
+    def stop_existing_websocket_manager():
+        """退出时停止 WebSocket manager，仅在 manager 已存在时执行。"""
+        manager = get_existing_manager()
+        if manager is not None:
+            manager.stop()
+
+    app.aboutToQuit.connect(stop_existing_websocket_manager)
+
     sys.exit(app.exec())

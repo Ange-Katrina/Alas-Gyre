@@ -5,6 +5,7 @@ import threading
 from PySide6.QtCore import Qt, Signal, QTimer, QSize, QUrl
 from PySide6.QtGui import QColor, QDesktopServices, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
+    QComboBox,
     QDialog,
     QFrame,
     QHBoxLayout,
@@ -17,7 +18,15 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from alas_gyre.api.client import api_headers, api_request, gyre_api_url
+from alas_gyre.api.client import alas_gui_url, api_headers, api_request, gyre_api_url
+
+try:
+    from shiboken6 import isValid
+except Exception:
+    def isValid(widget):
+        return widget is not None
+
+from alas_gyre.api.connection_policy import normalize_connection_mode, test_connection_with_fallback
 from alas_gyre.api.overlay_launcher import RUNTIME_DIR_NAME, generate_portable_overlay_launchers
 from alas_gyre.core.config import ensure_api_token, save_config
 from alas_gyre.core.paths import app_base_dir
@@ -28,7 +37,7 @@ from .window_behavior import install_title_bar_drag, schedule_frameless_stabiliz
 
 
 class InitSetupWindow(QDialog):
-    test_result_signal = Signal(bool, str)
+    test_result_signal = Signal(bool, str, int)
 
     def __init__(
         self,
@@ -42,6 +51,7 @@ class InitSetupWindow(QDialog):
         self.runtime_output_dir = os.path.join(app_base_dir(), RUNTIME_DIR_NAME)
         self.runtime_generated = os.path.isdir(self.runtime_output_dir)
         self.current_step = 0
+        self._steps_expanded = False
 
         self.setObjectName("initWindow")
         self.setFixedSize(680, 420)
@@ -93,18 +103,14 @@ class InitSetupWindow(QDialog):
         rail_layout.setContentsMargins(14, 14, 14, 14)
         rail_layout.setSpacing(8)
 
+        self.stepNavLayout = rail_layout
+
         self.stepProgressLabel = QLabel(self.stepRail)
         self.stepProgressLabel.setObjectName("initStepProgress")
         rail_layout.addWidget(self.stepProgressLabel)
         rail_layout.addSpacing(4)
 
         self.stepNavItems = []
-        for number, key in (
-            (1, "init_nav_runtime"),
-            (2, "init_nav_start"),
-            (3, "init_nav_test"),
-        ):
-            rail_layout.addWidget(self._build_step_nav_item(number, key))
         rail_layout.addStretch()
         content_layout.addWidget(self.stepRail)
 
@@ -126,9 +132,11 @@ class InitSetupWindow(QDialog):
 
         self.stack = QStackedWidget(right_panel)
         self.stack.setObjectName("initStepStack")
-        self.stack.addWidget(self._build_runtime_page())
-        self.stack.addWidget(self._build_start_page())
-        self.stack.addWidget(self._build_test_page())
+        self.stack.addWidget(self._build_mode_page())      # index 0: mode
+        self.stack.addWidget(self._build_runtime_page())    # index 1: runtime
+        self.stack.addWidget(self._build_start_page())      # index 2: start
+        self.stack.addWidget(self._build_test_page())       # index 3: test
+        self.stack.addWidget(self._build_websocket_page())  # index 4: websocket
         right_layout.addWidget(self.stack, stretch=1)
         content_layout.addWidget(right_panel, stretch=1)
         body_layout.addLayout(content_layout, stretch=1)
@@ -184,7 +192,8 @@ class InitSetupWindow(QDialog):
         self._force_layout()
         QTimer.singleShot(0, self._force_layout)
 
-    def _build_step_nav_item(self, number, text_key):
+    def _build_step_nav_item_triple(self, number, text_key):
+        """构建步骤导航项，返回 (row, badge, label) 三元组。"""
         row = QFrame(self.stepRail)
         row.setObjectName("initStepNavItem")
         row_layout = QHBoxLayout(row)
@@ -203,6 +212,12 @@ class InitSetupWindow(QDialog):
         row_layout.addWidget(label, stretch=1)
 
         self.stepNavItems.append((row, badge, label))
+        return row, badge, label
+
+
+    def _build_step_nav_item(self, number, text_key):
+        """构建步骤导航项，返回 row 供旧代码兼容。"""
+        row, _, _ = self._build_step_nav_item_triple(number, text_key)
         return row
 
     def _build_runtime_page(self):
@@ -355,10 +370,226 @@ class InitSetupWindow(QDialog):
         connection_layout.addWidget(self.testBtn, 1, 3)
         connection_layout.setColumnStretch(2, 1)
         test_layout.addLayout(connection_layout)
+
+        websocket_hint = QLabel(tr("init_websocket_hint"))
+        websocket_hint.setWordWrap(True)
+        websocket_hint.setStyleSheet("color: #8f96a3; font-size: 12px;")
+        test_layout.addWidget(websocket_hint)
+
         layout.addWidget(test_panel)
 
         layout.addStretch()
         return page
+
+    def _normalized_mode(self):
+        """获取标准化后的连接模式。"""
+        return normalize_connection_mode(self.config)
+
+
+    def _is_auto_mode(self):
+        """判断当前是否为自动模式。"""
+        return self.modeCombo.currentData() == "auto"
+
+
+    def _current_step_keys(self):
+        """返回当前模式下的步骤键列表。
+        首次进入只显示模式选择，当前步骤不是 mode 时才展开完整流程。
+        """
+        if self._steps_expanded:
+            if self._is_auto_mode():
+                return ["mode", "runtime", "start", "test"]
+            return ["mode", "websocket"]
+        return ["mode"]
+
+
+    def _build_mode_page(self):
+        page = QWidget(self.bodyBg)
+        page.setObjectName("initStepPage")
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(12)
+
+        desc = QLabel(tr("init_mode_select_desc"), page)
+        desc.setObjectName("initSubtle")
+        desc.setWordWrap(True)
+        layout.addWidget(desc)
+
+        self.modeCombo = QComboBox(page)
+        self.modeCombo.setObjectName("settingsInput")
+        self.modeCombo.setCursor(Qt.PointingHandCursor)
+        self.modeCombo.setFocusPolicy(Qt.NoFocus)
+        self.modeCombo.setFixedHeight(30)
+        self.modeCombo.setFixedWidth(280)
+        self.modeCombo.addItem(tr("connection_mode_auto"), "auto")
+        self.modeCombo.addItem(tr("connection_mode_websocket"), "websocket")
+        idx = self.modeCombo.findData(self._normalized_mode())
+        self.modeCombo.setCurrentIndex(max(0, idx))
+
+        mode_desc_label = QLabel(
+            tr("connection_mode_auto_desc") if self._normalized_mode() == "auto" else tr("connection_mode_websocket_desc"),
+            page,
+        )
+        mode_desc_label.setObjectName("initSubtle")
+        mode_desc_label.setWordWrap(True)
+        layout.addWidget(mode_desc_label)
+        layout.addWidget(self.modeCombo)
+
+        self.modeCombo.currentIndexChanged.connect(lambda: (
+            self._set_step(0),
+            mode_desc_label.setText(
+                tr("connection_mode_auto_desc") if self._is_auto_mode() else tr("connection_mode_websocket_desc")
+            ),
+        ))
+        layout.addStretch()
+        return page
+
+    def _build_websocket_page(self):
+        page = QWidget(self.bodyBg)
+        page.setObjectName("initStepPage")
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(10)
+
+        panel = QFrame(page)
+        panel.setObjectName("initPanel")
+        panel_layout = QVBoxLayout(panel)
+        panel_layout.setContentsMargins(14, 14, 14, 14)
+        panel_layout.setSpacing(10)
+
+        connection_layout = QGridLayout()
+        connection_layout.setHorizontalSpacing(10)
+        connection_layout.setVerticalSpacing(10)
+
+        ip_label = QLabel(tr("ip_address"))
+        ip_label.setObjectName("formLabel")
+        ip_label.setFixedWidth(62)
+        self.wsIpInput = QLineEdit(self.config.get("ip", "127.0.0.1"))
+        self.wsIpInput.setObjectName("settingsInput")
+        self.wsIpInput.setFixedHeight(30)
+        self.wsIpInput.setMinimumWidth(260)
+        connection_layout.addWidget(ip_label, 0, 0)
+        connection_layout.addWidget(self.wsIpInput, 0, 1, 1, 3)
+
+        port_label = QLabel(tr("service_port"))
+        port_label.setObjectName("formLabel")
+        port_label.setFixedWidth(64)
+        self.wsPortInput = QLineEdit(str(self.config.get("port", "22267")))
+        self.wsPortInput.setObjectName("settingsInput")
+        self.wsPortInput.setFixedSize(86, 30)
+        connection_layout.addWidget(port_label, 1, 0)
+        connection_layout.addWidget(self.wsPortInput, 1, 1)
+
+        self.wsTestBtn = QPushButton(tr("test_connection_optional"))
+        self.wsTestBtn.setObjectName("testBtn")
+        self.wsTestBtn.setCursor(Qt.PointingHandCursor)
+        self.wsTestBtn.setFocusPolicy(Qt.NoFocus)
+        self.wsTestBtn.setFixedSize(132, 30)
+        self.wsTestBtn.clicked.connect(self._run_ws_connection_test)
+        connection_layout.addWidget(self.wsTestBtn, 1, 3)
+        connection_layout.setColumnStretch(2, 1)
+        panel_layout.addLayout(connection_layout)
+
+        hint = QLabel(tr("init_websocket_hint"), panel)
+        hint.setWordWrap(True)
+        hint.setStyleSheet("color: #8f96a3; font-size: 12px;")
+        panel_layout.addWidget(hint)
+
+        layout.addWidget(panel)
+        layout.addStretch()
+        return page
+
+    def _next_test_request_id(self):
+        """生成新的连接测试请求序号，用于过滤旧回调和旧定时器。"""
+        self._test_request_id = getattr(self, "_test_request_id", 0) + 1
+        return self._test_request_id
+
+    def _run_ws_connection_test(self):
+        if not self.wsIpInput.text().strip() or not self.wsPortInput.text().strip().isdigit():
+            self._active_test_btn = self.wsTestBtn
+            request_id = self._next_test_request_id()
+            self._on_test_result(False, tr("test_invalid"), request_id)
+            return
+        test_config = dict(self.config)
+        test_config["ip"] = self.wsIpInput.text().strip()
+        test_config["port"] = self.wsPortInput.text().strip()
+        test_config["connection_mode"] = "websocket"
+
+        self._active_test_btn = self.wsTestBtn
+        # 提前捕获按钮引用，避免后台线程访问可能已销毁的 Qt widget
+        btn = self.wsTestBtn
+        self.wsTestBtn.setText("...")
+        self.wsTestBtn.setIcon(QIcon())
+        self.wsTestBtn.setEnabled(False)
+        self.wsTestBtn.setProperty("state", "testing")
+        self.wsTestBtn.style().unpolish(self.wsTestBtn)
+        self.wsTestBtn.style().polish(self.wsTestBtn)
+        # 递增请求序号，防止旧请求结果覆盖新请求
+        request_id = self._next_test_request_id()
+        threading.Thread(
+            target=self._ws_test_api, args=(test_config, btn, request_id), daemon=True
+        ).start()
+
+    def _emit_test_result(self, success, message, request_id=0):
+        """安全发射测试结果信号，忽略已删除信号源异常。"""
+        try:
+            if isValid(self):
+                self.test_result_signal.emit(success, message, request_id)
+        except RuntimeError:
+            pass
+
+    def _ws_test_api(self, test_config=None, btn=None, request_id=0):
+        if test_config is None:
+            test_config = self.config
+        try:
+            result = test_connection_with_fallback(test_config)
+            if getattr(self, "_active_test_btn", None) is not btn:
+                return
+            if getattr(self, "_test_request_id", 0) != request_id:
+                return
+            if result.success:
+                message = tr(result.message_key)
+                self._emit_test_result(True, message, request_id)
+            else:
+                detail = result.websocket_error or result.overlay_error
+                # 优先使用 result.message_key 作为失败消息
+                if result.message_key:
+                    fallback_msg = tr(result.message_key)
+                    if detail:
+                        fallback_msg = f"{fallback_msg}: {detail}"
+                    self._emit_test_result(False, fallback_msg, request_id)
+                else:
+                    self._emit_test_result(False, detail or tr("test_failed_short"), request_id)
+        except Exception as exc:
+            if getattr(self, "_active_test_btn", None) is not btn:
+                return
+            if getattr(self, "_test_request_id", 0) != request_id:
+                return
+            self._emit_test_result(False, str(exc), request_id)
+
+
+    def _rebuild_step_nav(self):
+        """根据当前模式重建步骤导航栏。"""
+        for idx in range(self.stepNavLayout.count() - 1, -1, -1):
+            item = self.stepNavLayout.takeAt(idx)
+            widget = item.widget()
+            if widget is self.stepProgressLabel:
+                self.stepNavLayout.insertWidget(0, widget)
+                continue
+            if widget:
+                widget.deleteLater()
+        self.stepNavItems = []
+        labels = {
+            "mode": "init_nav_mode",
+            "runtime": "init_nav_runtime",
+            "start": "init_nav_start",
+            "test": "init_nav_test",
+            "websocket": "init_nav_websocket",
+        }
+        for number, key in enumerate(self._current_step_keys(), start=1):
+            row, badge, label = self._build_step_nav_item_triple(number, labels[key])
+            self.stepNavLayout.addWidget(row)
+        self.stepNavLayout.addStretch()
+
 
     def showEvent(self, event):
         super().showEvent(event)
@@ -376,24 +607,42 @@ class InitSetupWindow(QDialog):
             widget.update()
 
     def _set_step(self, index):
-        self.current_step = max(0, min(index, 2))
-        self.stack.setCurrentIndex(self.current_step)
-        self.stepProgressLabel.setText(tr("wizard_step_progress", current=self.current_step + 1, total=3))
-        titles = [
-            tr("init_step_runtime_title"),
-            tr("init_step_start_title"),
-            tr("init_step_test_title"),
-        ]
-        descs = [
-            tr("init_step_runtime_desc"),
-            tr("init_step_start_desc"),
-            tr("init_step_test_desc"),
-        ]
-        self.stepTitleLabel.setText(titles[self.current_step])
-        self.stepDescLabel.setText(descs[self.current_step])
+        steps = self._current_step_keys()
+        if len(steps) != len(self.stepNavItems):
+            self._rebuild_step_nav()
+        self.current_step = max(0, min(index, len(steps) - 1))
+        step_key = steps[self.current_step]
+        stack_indexes = {
+            "mode": 0,
+            "runtime": 1,
+            "start": 2,
+            "test": 3,
+            "websocket": 4,
+        }
+        self.stack.setCurrentIndex(stack_indexes[step_key])
+
+        titles = {
+            "mode": tr("init_mode_select_title"),
+            "runtime": tr("init_step_runtime_title"),
+            "start": tr("init_step_start_title"),
+            "test": tr("init_step_test_title"),
+            "websocket": tr("init_websocket_connect_title"),
+        }
+        descs = {
+            "mode": "",
+            "runtime": tr("init_step_runtime_desc"),
+            "start": tr("init_step_start_desc"),
+            "test": tr("init_step_test_desc"),
+            "websocket": "",
+        }
+        self.stepTitleLabel.setText(titles.get(step_key, ""))
+        self.stepDescLabel.setText(descs.get(step_key, ""))
+
+        self.stepProgressLabel.setText(tr("wizard_step_progress", current=self.current_step + 1, total=len(steps)))
         self.backBtn.setEnabled(self.current_step > 0)
-        self.nextBtn.setVisible(self.current_step < 2)
-        self.finishBtn.setVisible(self.current_step == 2)
+        self.nextBtn.setVisible(self.current_step < len(steps) - 1)
+        self.finishBtn.setVisible(self.current_step == len(steps) - 1)
+
         for idx, (row, badge, label) in enumerate(getattr(self, "stepNavItems", [])):
             active = idx == self.current_step
             done = idx < self.current_step
@@ -410,6 +659,7 @@ class InitSetupWindow(QDialog):
         self._set_step(self.current_step - 1)
 
     def _go_next(self):
+        self._steps_expanded = True
         self._set_step(self.current_step + 1)
 
     def _refresh_runtime_buttons(self):
@@ -427,9 +677,14 @@ class InitSetupWindow(QDialog):
             self.move(x, y)
 
     def _sync_config_from_ui(self):
-        self.config["ip"] = self.ipInput.text().strip() or "127.0.0.1"
-        self.config["port"] = self.portInput.text().strip() or "22267"
-        self.config["api_token"] = self.tokenInput.text().strip()
+        self.config["connection_mode"] = self.modeCombo.currentData() or "auto"
+        if self._is_auto_mode():
+            self.config["ip"] = self.ipInput.text().strip() or "127.0.0.1"
+            self.config["port"] = self.portInput.text().strip() or "22267"
+            self.config["api_token"] = self.tokenInput.text().strip()
+        else:
+            self.config["ip"] = self.wsIpInput.text().strip() or "127.0.0.1"
+            self.config["port"] = self.wsPortInput.text().strip() or "22267"
 
     def _set_status(self, text, state="normal", tooltip=None):
         self.statusLabel.setText(text)
@@ -509,7 +764,7 @@ class InitSetupWindow(QDialog):
 
     def _finish_setup(self):
         self._sync_config_from_ui()
-        if not self.runtime_generated:
+        if self._is_auto_mode() and not self.runtime_generated:
             if not ask_confirm(
                 self,
                 tr("runtime_missing_confirm_title"),
@@ -518,7 +773,8 @@ class InitSetupWindow(QDialog):
                 tr("cancel"),
             ):
                 return
-        self._ensure_token()
+        if self._is_auto_mode():
+            self._ensure_token()
         self.config["setup_completed"] = True
         try:
             save_config(self.config, self.config_path)
@@ -529,36 +785,57 @@ class InitSetupWindow(QDialog):
     def _run_connection_test(self):
         self._ensure_token()
         if not self.config["ip"] or not self.config["port"].isdigit():
-            self._on_test_result(False, tr("test_invalid"))
+            self._active_test_btn = self.testBtn
+            request_id = self._next_test_request_id()
+            self._on_test_result(False, tr("test_invalid"), request_id)
             return
 
+        self._active_test_btn = self.testBtn
+        # 提前捕获按钮引用，避免后台线程访问可能已销毁的 Qt widget
+        btn = self.testBtn
         self.testBtn.setText("...")
         self.testBtn.setIcon(QIcon())
         self.testBtn.setEnabled(False)
         self.testBtn.setProperty("state", "testing")
         self.testBtn.style().unpolish(self.testBtn)
         self.testBtn.style().polish(self.testBtn)
-        threading.Thread(target=self._test_api, daemon=True).start()
+        # 递增请求序号，防止旧请求结果覆盖新请求
+        request_id = self._next_test_request_id()
+        # 在线程启动前生成配置快照，避免测试期间配置被用户修改
+        test_config = dict(self.config)
+        threading.Thread(
+            target=self._test_api, args=(test_config, btn, request_id), daemon=True
+        ).start()
 
-    def _test_api(self):
-        success = False
-        message = ""
+    def _test_api(self, test_config=None, btn=None, request_id=0):
+        """使用统一连接测试接口，支持自动降级。"""
         try:
-            resp = api_request("GET",
-                gyre_api_url(self.config, "health"),
-                headers=api_headers(self.config),
-                timeout=2.0,
-            )
-            success = resp.status_code == 200
-            if resp.status_code == 401:
-                message = tr("test_unauthorized")
-            elif resp.status_code == 404:
-                message = tr("test_overlay_missing")
-            elif not success:
-                message = f"HTTP {resp.status_code}"
+            result = test_connection_with_fallback(test_config)
+            if getattr(self, "_active_test_btn", None) is not btn:
+                return
+            if getattr(self, "_test_request_id", 0) != request_id:
+                return
+            if result.success:
+                message = tr(result.message_key)
+                if result.source == "websocket_fallback" and result.overlay_error:
+                    message = f"{message}\nOverlay: {result.overlay_error}"
+                self._emit_test_result(True, message, request_id)
+            else:
+                detail = result.websocket_error or result.overlay_error
+                # 优先使用 result.message_key 作为失败消息
+                if result.message_key:
+                    fallback_msg = tr(result.message_key)
+                    if detail:
+                        fallback_msg = f"{fallback_msg}: {detail}"
+                    self._emit_test_result(False, fallback_msg, request_id)
+                else:
+                    self._emit_test_result(False, detail or tr("test_failed_short"), request_id)
         except Exception as exc:
-            message = str(exc)
-        self.test_result_signal.emit(success, message)
+            if getattr(self, "_active_test_btn", None) is not btn:
+                return
+            if getattr(self, "_test_request_id", 0) != request_id:
+                return
+            self._emit_test_result(False, str(exc), request_id)
 
     def _create_icon(self, state):
         pixmap = QPixmap(24, 24)
@@ -578,27 +855,40 @@ class InitSetupWindow(QDialog):
         painter.end()
         return QIcon(pixmap)
 
-    def _on_test_result(self, success, message=""):
-        self.testBtn.setEnabled(True)
-        self.testBtn.setText("")
-        self.testBtn.setToolTip(message)
-        self.testBtn.setIconSize(QSize(20, 20))
-        self.testBtn.setIcon(self._create_icon("success" if success else "error"))
-        self.testBtn.setProperty("state", "success" if success else "error")
-        self.testBtn.style().unpolish(self.testBtn)
-        self.testBtn.style().polish(self.testBtn)
-        self._set_status(tr("test_success") if success else tr("test_failed_short"), "success" if success else "error")
+    def _on_test_result(self, success, message="", request_id=0):
+        if request_id and request_id != getattr(self, "_test_request_id", 0):
+            return
+        btn = getattr(self, "_active_test_btn", None)
+        if btn is None or not isValid(btn):
+            return
+        btn.setEnabled(True)
+        btn.setText("")
+        btn.setToolTip(message)
+        btn.setIconSize(QSize(20, 20))
+        btn.setIcon(self._create_icon("success" if success else "error"))
+        btn.setProperty("state", "success" if success else "error")
+        btn.style().unpolish(btn)
+        btn.style().polish(btn)
+        self._set_status(tr("test_success") if success else (message or tr("test_failed_short")), "success" if success else "error")
         if message and not success:
             print(f"[InitSetup] Connection test failed: {message}")
-        QTimer.singleShot(2000, self._reset_test_btn)
+        # 捕获当前按钮和请求序号，避免旧定时器覆盖新请求状态
+        current_request_id = request_id or getattr(self, "_test_request_id", 0)
+        QTimer.singleShot(2000, lambda b=btn, rid=current_request_id: self._reset_test_btn(b, rid))
 
-    def _reset_test_btn(self):
-        self.testBtn.setIcon(QIcon())
-        self.testBtn.setText(tr("test_connection_optional"))
-        self.testBtn.setToolTip("")
-        self.testBtn.setProperty("state", "normal")
-        self.testBtn.style().unpolish(self.testBtn)
-        self.testBtn.style().polish(self.testBtn)
+    def _reset_test_btn(self, btn=None, request_id=0):
+        if request_id and request_id != getattr(self, "_test_request_id", 0):
+            return
+        if btn is None:
+            btn = getattr(self, "_active_test_btn", None)
+        if btn is None or not isValid(btn):
+            return
+        btn.setIcon(QIcon())
+        btn.setText(tr("test_connection_optional"))
+        btn.setToolTip("")
+        btn.setProperty("state", "normal")
+        btn.style().unpolish(btn)
+        btn.style().polish(btn)
 
     def mousePressEvent(self, event):
         super().mousePressEvent(event)

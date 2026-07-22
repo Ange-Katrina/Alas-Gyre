@@ -90,7 +90,7 @@ QLabel#sectionTitle, QLabel#settingsTitle {
     background: transparent;
 }
 
-QLabel#settingsTitle, QLabel#logTitle, QLabel#screenshotTitle, QLabel#initTitle {
+QLabel#settingsTitle, QLabel#logTitle, QLabel#screenshotTitle, QLabel#initTitle, QLabel#updateTitle {
     color: #334155;
     font-size: 12px;
     font-weight: normal;
@@ -254,6 +254,35 @@ QStackedWidget#settingsStack, QWidget#settingsPage {
     background: transparent;
 }
 
+QScrollArea#settingsPageScroll {
+    background: transparent;
+    border: none;
+}
+QScrollArea#settingsPageScroll > QWidget > QWidget {
+    background: transparent;
+}
+QScrollArea#settingsPageScroll QScrollBar:vertical {
+    background: transparent;
+    width: 6px;
+    margin: 4px 1px 4px 0;
+}
+QScrollArea#settingsPageScroll QScrollBar::handle:vertical {
+    background-color: #cbd5e1;
+    border-radius: 3px;
+    min-height: 24px;
+}
+QScrollArea#settingsPageScroll QScrollBar::handle:vertical:hover {
+    background-color: #94a3b8;
+}
+QScrollArea#settingsPageScroll QScrollBar::add-line:vertical,
+QScrollArea#settingsPageScroll QScrollBar::sub-line:vertical,
+QScrollArea#settingsPageScroll QScrollBar::add-page:vertical,
+QScrollArea#settingsPageScroll QScrollBar::sub-page:vertical {
+    background: transparent;
+    border: none;
+    height: 0;
+}
+
 QWidget#settingsPageHeader {
     background: transparent;
 }
@@ -269,6 +298,12 @@ QLabel#settingsPageDesc {
     color: #64748b;
     font-size: 12px;
     background: transparent;
+}
+
+QLabel#settingsHintLabel {
+    color: #64748b;
+    font-size: 12px;
+    font-family: "Microsoft YaHei", "Segoe UI";
 }
 
 QFrame#settingsPanel {
@@ -403,6 +438,43 @@ QLineEdit#settingsInput:hover {
 QLineEdit#settingsInput:focus {
     background-color: #ffffff;
     border: 1px solid #10b981;
+}
+
+QComboBox#settingsInput {
+    background-color: #ffffff;
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    color: #0f172a;
+    padding: 0px 10px;
+    font-size: 13px;
+}
+QComboBox#settingsInput:hover {
+    background-color: #f8fafc;
+    border: 1px solid #94a3b8;
+}
+QComboBox#settingsInput:focus {
+    outline: none;
+}
+QComboBox#settingsInput::drop-down {
+    subcontrol-origin: padding;
+    subcontrol-position: top right;
+    border: none;
+    width: 20px;
+}
+QComboBox#settingsInput::down-arrow {
+    image: none;
+    width: 0px;
+    height: 0px;
+}
+QComboBox#settingsInput QAbstractItemView {
+    background-color: #ffffff;
+    color: #0f172a;
+    border: 1px solid #cbd5e1;
+    border-radius: 5px;
+    selection-background-color: #f1f5f9;
+    outline: none;
+    padding: 4px;
+    font-size: 13px;
 }
 
 /* 复选框 */
@@ -570,6 +642,47 @@ QPushButton#testBtn[state="error"] {
     color: #991b1b;
     border: 1px solid #ef4444;
     font-weight: bold;
+}
+
+/* 设置页操作按钮（向导/检查更新/运行时更新） */
+QPushButton#settingsActionBtn {
+    background-color: transparent;
+    border: 1px solid #cbd5e1;
+    border-radius: 4px;
+    color: #64748b;
+    font-size: 12px;
+}
+QPushButton#settingsActionBtn:hover {
+    background-color: #e2e8f0;
+    color: #0f172a;
+}
+QPushButton#settingsActionBtn:pressed {
+    background-color: #cbd5e1;
+    color: #0f172a;
+}
+QPushButton#settingsActionBtn:disabled {
+    background-color: #f8fafc;
+    color: #94a3b8;
+    border: 1px solid #e2e8f0;
+}
+QPushButton#settingsActionBtn:focus {
+    outline: none;
+}
+QPushButton#settingsActionBtn[state="update_available"] {
+    background-color: #28e06f;
+    border: none;
+    border-radius: 4px;
+    color: #1a1b26;
+    font-weight: bold;
+}
+QPushButton#settingsActionBtn[state="update_available"]:hover {
+    background-color: #42d392;
+}
+
+QLabel#settingsVersionLabel {
+    color: #64748b;
+    font-size: 13px;
+    font-family: "Microsoft YaHei", "Segoe UI";
 }
 
 /* 配置动作按钮（Play/Stop） */
