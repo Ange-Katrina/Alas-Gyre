@@ -331,6 +331,7 @@ class CardWidget(QFrame):
         self._runtime_connection_lock = threading.Lock()
         self._statuses = {}
         self._tasks = {}
+        self._ws_initial_scanning_placeholder = False
         self.rows = {}
 
         self._config_idx = 0
@@ -820,6 +821,25 @@ class CardWidget(QFrame):
             return True
         except Exception:
             return False
+
+    def _is_ws_initial_scanning_placeholder(self, snapshot):
+        """判断当前 WebSocket 快照是否应显示初始化扫描占位文案。"""
+        return (
+            snapshot.get("connection_state") in {"connecting", "initial_scanning"}
+            and not snapshot.get("configs")
+            and not snapshot.get("statuses")
+            and bool(getattr(self, "_configs", None))
+        )
+
+    def _set_ws_initial_scanning_placeholder(self, enabled):
+        """更新主界面 WebSocket 初始化扫描占位显示状态。"""
+        enabled = bool(enabled)
+        if getattr(self, "_ws_initial_scanning_placeholder", False) == enabled:
+            return
+        self._ws_initial_scanning_placeholder = enabled
+        row = self.rows.get(self.current_config)
+        if row is not None:
+            row._refresh_label()
 
     def _is_websocket_snapshot_usable(self, snapshot):
         """判断 WebSocket 快照是否可用（连接状态有效）。"""
