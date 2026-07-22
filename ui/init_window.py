@@ -506,8 +506,8 @@ class InitSetupWindow(QDialog):
     def _run_ws_connection_test(self):
         if not self.wsIpInput.text().strip() or not self.wsPortInput.text().strip().isdigit():
             self._active_test_btn = self.wsTestBtn
-            self._next_test_request_id()
-            self._on_test_result(False, tr("test_invalid"))
+            request_id = self._next_test_request_id()
+            self._on_test_result(False, tr("test_invalid"), request_id)
             return
         test_config = dict(self.config)
         test_config["ip"] = self.wsIpInput.text().strip()
@@ -786,8 +786,8 @@ class InitSetupWindow(QDialog):
         self._ensure_token()
         if not self.config["ip"] or not self.config["port"].isdigit():
             self._active_test_btn = self.testBtn
-            self._next_test_request_id()
-            self._on_test_result(False, tr("test_invalid"))
+            request_id = self._next_test_request_id()
+            self._on_test_result(False, tr("test_invalid"), request_id)
             return
 
         self._active_test_btn = self.testBtn
