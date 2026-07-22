@@ -322,8 +322,6 @@ class SettingsWindow(QDialog):
         self.tokenGenerateBtn.clicked.connect(self._generate_token)
         token_layout.addWidget(self.tokenGenerateBtn)
 
-        self._refresh_connection_mode_visibility()
-
         wizard_layout = QHBoxLayout()
         wizard_layout.setSpacing(10)
 
@@ -461,6 +459,7 @@ class SettingsWindow(QDialog):
         connection_panel_layout.addLayout(runtime_port_layout)
         connection_panel_layout.addLayout(token_layout)
         connection_panel_layout.addWidget(self.tokenHint)
+        self._refresh_connection_mode_visibility()
         connection_layout.addWidget(connection_panel)
         connection_layout.addStretch()
         connection_scroll = QScrollArea(self.settingsStack)
