@@ -992,8 +992,15 @@ class CardWidget(QFrame):
         )
 
     def _on_websocket_fallback_notice(self):
-        """记录当前已自动切换到 WebSocket 通讯，避免弹窗阻塞用户操作。"""
-        print(f"[Log] {tr('websocket_fallback_notice_message')}")
+        """提示用户当前已自动切换到 WebSocket 通讯。"""
+        parent = self.window()
+        if hasattr(self, "mini_dialog") and self.mini_dialog.isVisible():
+            parent = self.mini_dialog
+        show_info(
+            parent or self,
+            tr("websocket_fallback_notice_title"),
+            tr("websocket_fallback_notice_message"),
+        )
 
     def _apply_poll_interval(self, interval_ms):
         """在主线程安全地更新 poll timer 间隔，避免后台线程跨线程操作 QTimer。"""
