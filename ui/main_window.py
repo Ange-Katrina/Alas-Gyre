@@ -519,11 +519,16 @@ class CardWidget(QFrame):
     def set_current_config(self, config_name):
         if not config_name or self.current_config == config_name:
             return
+        previous_config = self.current_config
         self.current_config = config_name
         self.config["current_config"] = self.current_config
         self._save_config()
         if self.current_config not in self.rows:
             self._rebuild_rows()
+        for row_config in (previous_config, self.current_config):
+            row = self.rows.get(row_config)
+            if row is not None:
+                row._refresh_label()
         if hasattr(self, "log_dialog") and self.log_dialog.isVisible():
             self.log_dialog.set_config(self.current_config)
 
