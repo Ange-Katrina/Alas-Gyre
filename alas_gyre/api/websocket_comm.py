@@ -1316,10 +1316,8 @@ def extract_config_status(state, from_index=0):
         text = _flatten_text(output).strip().lower()
 
         # header_status scope：优先匹配页面文本状态，也兼容按钮 label。
-        if "header_status" in scope:
-            for label, status in status_labels.items():
-                if label.lower() in text:
-                    return status
+        if "header_status" in scope and text in status_labels:
+            return status_labels[text]
 
         # scheduler_btn scope：可通过启动/停止文本推断调度器状态。
         if "scheduler_btn" in scope:
