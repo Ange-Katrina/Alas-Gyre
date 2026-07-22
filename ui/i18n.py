@@ -23,7 +23,7 @@ TRANSLATIONS = {
         "config_label": "配置:",
         "status_label": "状态:",
         "idle": "空闲",
-        "app_scanning": "程序正在扫描",
+        "app_scanning": "正在扫描配置",
         "running": "运行中",
         "error": "出错",
         "update": "更新中",

@@ -159,7 +159,13 @@ class MainConfigRow(QWidget):
         self._refresh_label()
 
     def _refresh_label(self):
-        full_text = f"{self.config_name}: {get_status_text(self.current_status)}"
+        if (
+            getattr(self.main_card, "_ws_initial_scanning_placeholder", False)
+            and self.config_name == self.main_card.current_config
+        ):
+            full_text = tr("app_scanning")
+        else:
+            full_text = f"{self.config_name}: {get_status_text(self.current_status)}"
         self.statusLabel.set_marquee_text(full_text)
         if self._should_show_task():
             self.taskLabel.set_marquee_text(self.current_task)
