@@ -258,8 +258,6 @@ class WebSocketCommManager:
         """标记配置页面状态不可确认，递增逐配置缺失计数并在达到阈值后暂缓扫描。"""
         name = str(config_name)
         with self._lock:
-            self.statuses[name] = "disconnected"
-            self.tasks[name] = ""
             self.scan_errors[name] = str(error)
 
             # 递增逐配置缺失计数（防御 __new__ 构造的未初始化对象）
@@ -269,6 +267,12 @@ class WebSocketCommManager:
                 self._page_missing_counts = counts
             current_count = counts.get(name, 0) + 1
             counts[name] = current_count
+
+            current_status = self.statuses.get(name)
+            if current_count >= PAGE_MISSING_FAILURE_THRESHOLD or not current_status:
+                self.statuses[name] = "disconnected"
+                self.tasks[name] = ""
+
             if current_count >= PAGE_MISSING_FAILURE_THRESHOLD:
                 skip_until = getattr(self, '_page_missing_skip_until', None)
                 if skip_until is None:
