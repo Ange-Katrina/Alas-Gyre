@@ -290,6 +290,7 @@ class CardWidget(QFrame):
     control_error_signal = Signal(str, str)
     websocket_fallback_notice_signal = Signal()
     poll_interval_update_signal = Signal(int)
+    ws_initial_scanning_placeholder_signal = Signal(bool)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -356,6 +357,9 @@ class CardWidget(QFrame):
         self.control_error_signal.connect(self._on_control_error)
         self.websocket_fallback_notice_signal.connect(self._on_websocket_fallback_notice)
         self.poll_interval_update_signal.connect(self._apply_poll_interval)
+        self.ws_initial_scanning_placeholder_signal.connect(
+            self._set_ws_initial_scanning_placeholder
+        )
 
         self.poll_timer = QTimer(self)
         self.poll_timer.timeout.connect(self._start_poll_thread)
@@ -873,11 +877,11 @@ class CardWidget(QFrame):
         else:
             was_fallback = getattr(self, "_runtime_connection", "overlay") == "websocket_fallback"
         if fallback and not self._is_websocket_snapshot_usable(snapshot):
-            self._set_ws_initial_scanning_placeholder(False)
+            self.ws_initial_scanning_placeholder_signal.emit(False)
             return False
         if fallback:
             self._mark_websocket_fallback()
-        self._set_ws_initial_scanning_placeholder(
+        self.ws_initial_scanning_placeholder_signal.emit(
             self._is_ws_initial_scanning_placeholder(snapshot)
         )
         configs, statuses, tasks, current_status, current_task = build_websocket_ui_snapshot(
