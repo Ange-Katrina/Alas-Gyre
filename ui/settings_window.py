@@ -668,6 +668,8 @@ class SettingsWindow(QDialog):
                         message = tr("runtime_update_success_restart", count=len(updated))
                     else:
                         message = tr("runtime_update_success", count=len(updated))
+                    if result.get("updater_restart_required"):
+                        message += " " + tr("runtime_update_updater_restart")
             elif code == "unauthorized" or code == "missing_token":
                 message = tr("runtime_update_unauthorized")
             elif code == "connect_failed":

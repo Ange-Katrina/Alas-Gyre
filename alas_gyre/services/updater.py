@@ -427,14 +427,22 @@ def do_update(
 
         if sys.platform == "win32":
             bat_path = os.path.join(dir_name, "update.bat")
+            temp_file_bat = temp_file.replace("%", "%%")
+            exe_path_bat = exe_path.replace("%", "%%")
             bat_content = f"""@echo off
+chcp 65001 >nul
+setlocal DisableDelayedExpansion
 set "PID={os.getpid()}"
-set "TEMP_FILE={temp_file}"
-set "EXE_PATH={exe_path}"
+set "TEMP_FILE={temp_file_bat}"
+set "EXE_PATH={exe_path_bat}"
+set /a WAIT_COUNT=0
+set /a REPLACE_COUNT=0
 
 :wait_loop
 tasklist /FI "PID eq %PID%" 2>NUL | find /I "%PID%" >NUL
 if %ERRORLEVEL%==0 (
+    set /a WAIT_COUNT+=1
+    if %WAIT_COUNT% GEQ 60 exit /b 1
     timeout /t 1 /nobreak >nul
     goto wait_loop
 )
@@ -442,6 +450,8 @@ if %ERRORLEVEL%==0 (
 :replace
 move /Y "%TEMP_FILE%" "%EXE_PATH%" >nul
 if not %ERRORLEVEL%==0 (
+    set /a REPLACE_COUNT+=1
+    if %REPLACE_COUNT% GEQ 60 exit /b 1
     timeout /t 1 /nobreak >nul
     goto replace
 )
@@ -449,12 +459,8 @@ if not %ERRORLEVEL%==0 (
 start "" "%EXE_PATH%"
 del /Q "%~f0" >nul
 """
-            with open(bat_path, "w", encoding="ansi") as f:
+            with open(bat_path, "w", encoding="utf-8", newline="\r\n") as f:
                 f.write(bat_content)
-
-            finish_callback(True, "Update downloaded. Restarting via update helper...")
-            import time
-            time.sleep(0.5)
 
             subprocess.Popen(
                 ["cmd.exe", "/c", bat_path],
@@ -463,17 +469,20 @@ del /Q "%~f0" >nul
         else:
             sh_path = os.path.join(dir_name, "update.sh")
             sh_content = f"""#!/bin/sh
+set -eu
 PID={os.getpid()}
 TEMP_FILE={shlex.quote(temp_file)}
 EXE_PATH={shlex.quote(exe_path)}
 
-while kill -0 $PID 2>/dev/null; do
+WAIT_COUNT=0
+while kill -0 "$PID" 2>/dev/null; do
+    WAIT_COUNT=$((WAIT_COUNT + 1))
+    [ "$WAIT_COUNT" -le 60 ] || exit 1
     sleep 1
 done
 
-cp -f "$TEMP_FILE" "$EXE_PATH"
-rm -f "$TEMP_FILE"
-chmod +x "$EXE_PATH"
+chmod +x "$TEMP_FILE"
+mv -f "$TEMP_FILE" "$EXE_PATH"
 "$EXE_PATH" &
 rm -f "$0"
 """
@@ -481,12 +490,9 @@ rm -f "$0"
                 f.write(sh_content)
             os.chmod(sh_path, 0o755)
 
-            finish_callback(True, "Update downloaded. Restarting via update helper...")
-            import time
-            time.sleep(0.5)
-
             subprocess.Popen([sh_path], start_new_session=True)
 
+        finish_callback(True, "Update downloaded. Restarting via update helper...")
         os._exit(0)
 
     except Exception as exc:

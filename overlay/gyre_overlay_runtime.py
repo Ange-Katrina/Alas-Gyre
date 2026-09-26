@@ -1,7 +1,7 @@
 """Pure ASGI API layer for Alas-Gyre Overlay Runtime V1."""
 
-from collections import deque
 from datetime import datetime
+import asyncio
 import gc
 import json
 import mimetypes
@@ -11,6 +11,7 @@ import threading
 import time
 from urllib.parse import parse_qs
 import secrets
+import tempfile
 
 try:
     from rich.console import Console
@@ -27,12 +28,14 @@ ERROR_LOG_DIR = "error"
 LOG_TAIL_CHUNK_SIZE = 64 * 1024
 FILE_RESPONSE_CHUNK_SIZE = 64 * 1024
 MAX_CONFIG_BODY_BYTES = 2 * 1024 * 1024
+MAX_LOG_BYTES = 512 * 1024
+REQUEST_BODY_TIMEOUT = 15
 DEFAULT_LOG_LINES = 200
 MAX_LOG_LINES = 2000
 MAX_LIVE_RENDERABLES = MAX_LOG_LINES * 2
 DEFAULT_ERROR_SCREENSHOT_LIMIT = 20
 MAX_ERROR_SCREENSHOT_LIMIT = 100
-OVERLAY_VERSION = 1
+OVERLAY_VERSION = 2
 DEFAULT_MEMORY_WATCHDOG_INTERVAL = 60
 DEFAULT_MEMORY_LOW_MB = 256
 DEFAULT_MEMORY_LOW_PERCENT = 5.0
@@ -66,6 +69,9 @@ _MEMORY_CLEANUP_STATS = {
 }
 _CONFIG_OPERATION_LOCKS = {}
 _CONFIG_OPERATION_LOCKS_LOCK = threading.Lock()
+_CONFIG_CATALOG_LOCK = threading.Lock()
+_MANAGER_LOCK = threading.Lock()
+_LOG_RENDER_LOCK = threading.Lock()
 
 
 def log_internal_error(context, exc):
@@ -389,6 +395,14 @@ async def handle_api(scope, receive, send):
             await api_post_stop(send, query)
         elif route == "/restart" and method == "POST":
             await api_post_restart(send, query)
+        elif route == "/update" and method == "GET":
+            await api_get_update(send, query)
+        elif route == "/update" and method == "POST":
+            await api_post_update_run(send)
+        elif route == "/update/check" and method == "POST":
+            await api_post_update_check(send)
+        elif route == "/update/cancel" and method == "POST":
+            await api_post_update_cancel(send)
         elif route == "/log" and method == "GET":
             await api_get_log(send, query)
         elif route == "/error_screenshots" and method == "GET":
@@ -463,9 +477,10 @@ def is_api_authorized(scope):
     expected_token = read_expected_token()
     if not expected_token:
         return False
-    headers = headers_from_scope(scope)
-    provided_token = headers.get(TOKEN_HEADER.lower(), "")
-    return secrets.compare_digest(provided_token, expected_token)
+    values = [value for key, value in scope.get("headers", []) if key.lower() == TOKEN_HEADER.lower().encode("ascii")]
+    if len(values) != 1:
+        return False
+    return secrets.compare_digest(values[0], expected_token.encode("utf-8"))
 
 
 def response_headers(content_type="application/json; charset=utf-8", extra=None):
@@ -493,8 +508,12 @@ async def send_json(send, payload, status=200):
 async def read_json_body(receive, max_bytes=MAX_CONFIG_BODY_BYTES):
     chunks = []
     total_size = 0
+    deadline = time.monotonic() + REQUEST_BODY_TIMEOUT
     while True:
-        message = await receive()
+        try:
+            message = await asyncio.wait_for(receive(), max(0, deadline - time.monotonic()))
+        except asyncio.TimeoutError:
+            raise ValueError("request_timeout")
         message_type = message.get("type")
         if message_type == "http.disconnect":
             raise ValueError("client_disconnected")
@@ -543,6 +562,8 @@ def get_alas_root():
 
 
 def get_data_dir(dirname):
+    if os.environ.get("ALAS_ROOT", "").strip():
+        return os.path.join(get_alas_root(), dirname)
     candidates = [
         os.path.abspath(dirname),
         os.path.join(get_alas_root(), dirname),
@@ -556,11 +577,16 @@ def get_data_dir(dirname):
 def normalize_status(status):
     if isinstance(status, str) and status in VALID_STATUSES:
         return status
-    return STATE_MAP.get(status, "idle")
+    return STATE_MAP.get(status, "disconnected")
 
 
-def get_config_names():
-    configs = []
+def get_config_entries():
+    """Map host logical names to files, including name.maa.json/name.fpy.json.
+
+    Ambiguous names are deliberately retained as multiple entries so mutations
+    can reject them instead of choosing an arbitrary file.
+    """
+    configs = {}
     config_dir = get_data_dir(CONFIG_DIR)
     if os.path.isdir(config_dir):
         for entry in os.scandir(config_dir):
@@ -569,9 +595,18 @@ def get_config_names():
             file_name = entry.name
             if not file_name.endswith(".json") or file_name.startswith("template"):
                 continue
-            configs.append(file_name[:-5])
-    configs.sort(key=str.lower)
-    return configs or [DEFAULT_CONFIG]
+            stem = file_name[:-5]
+            name = stem.rsplit(".", 1)[0] if "." in stem else stem
+            try:
+                name = normalize_config_name(name)
+            except ValueError:
+                continue
+            configs.setdefault(name, []).append(file_name)
+    return configs
+
+
+def get_config_names():
+    return sorted(get_config_entries(), key=str.lower)
 
 
 def get_default_config():
@@ -618,9 +653,12 @@ def normalize_config_name(config_name):
 
 def get_config_path(config_name):
     config_name = normalize_config_name(config_name)
-    config_dir = os.path.abspath(get_data_dir(CONFIG_DIR))
-    config_path = os.path.abspath(os.path.join(config_dir, f"{config_name}.json"))
-    if os.path.commonpath([config_dir, config_path]) != config_dir:
+    entries = get_config_entries().get(config_name, [])
+    if len(entries) > 1:
+        raise ValueError("ambiguous_config_name")
+    config_dir = os.path.realpath(get_data_dir(CONFIG_DIR))
+    config_path = os.path.join(config_dir, entries[0] if entries else f"{config_name}.json")
+    if os.path.islink(config_path) or os.path.commonpath([config_dir, os.path.realpath(config_path)]) != config_dir:
         raise ValueError("invalid config path")
     return config_path
 
@@ -638,9 +676,9 @@ def get_config_operation_lock(config_name):
 def validate_single_config(config_name):
     try:
         config_name = normalize_config_name(config_name)
-    except Exception:
-        return None, "invalid_config_name", 400
-    config_path = get_config_path(config_name)
+        config_path = get_config_path(config_name)
+    except ValueError as exc:
+        return None, str(exc), 400
     if not os.path.isfile(config_path):
         return config_name, "unknown_config", 404
     return config_name, "", 200
@@ -662,22 +700,25 @@ def load_config_json(config_name):
 def write_config_json_atomic(config_name, data):
     config_path = get_config_path(config_name)
     config_dir = os.path.dirname(config_path)
-    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
     backup_path = "%s.bak-%s" % (config_path, timestamp)
-    tmp_path = os.path.join(
-        config_dir,
-        ".%s.tmp-%s-%s" % (os.path.basename(config_path), os.getpid(), int(time.time() * 1000)),
-    )
+    fd, tmp_path = tempfile.mkstemp(prefix=".%s.tmp-" % os.path.basename(config_path), dir=config_dir)
     try:
         shutil.copy2(config_path, backup_path)
-        with open(tmp_path, "w", encoding="utf-8") as f:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            fd = None
             json.dump(data, f, ensure_ascii=False, indent=4)
             f.write("\n")
+            f.flush()
+            os.fsync(f.fileno())
+        shutil.copymode(config_path, tmp_path)
         with open(tmp_path, "r", encoding="utf-8") as f:
             json.load(f)
         os.replace(tmp_path, config_path)
         return os.path.basename(backup_path)
     finally:
+        if fd is not None:
+            os.close(fd)
         try:
             if os.path.exists(tmp_path):
                 os.remove(tmp_path)
@@ -688,12 +729,228 @@ def write_config_json_atomic(config_name, data):
 def get_manager(config_name):
     from module.webui.process_manager import ProcessManager
 
-    return ProcessManager.get_manager(config_name)
+    with _MANAGER_LOCK:
+        return ProcessManager.get_manager(config_name)
+
+
+async def run_blocking(function, *args):
+    """Keep host process waits and filesystem work off the ASGI event loop."""
+    return await asyncio.get_running_loop().run_in_executor(None, function, *args)
+
+
+def start_manager(manager):
+    from module.submodule.utils import list_mod_instance
+
+    with _UPDATE_OP_LOCK:
+        event = get_start_event()
+        # Refresh the host's logical-name -> submodule mapping before start().
+        with _MANAGER_LOCK:
+            list_mod_instance()
+            manager.start(None, ev=event)
+
+
+def get_start_event():
+    updater = get_updater()
+    event = getattr(updater, "event", None)
+    state = normalize_update_state(getattr(updater, "state", 0))
+    if _UPDATE_BUSY or state in UPDATE_RUNNING_STATES or (event is not None and event.is_set()):
+        raise ValueError("update_in_progress")
+    return event
 
 
 def get_status(config_name):
     manager = get_manager(config_name)
     return normalize_status(getattr(manager, "state", None))
+
+
+UPDATE_STATE_NAMES = {
+    "checking": "checking",
+    "failed": "failed",
+    "start": "start",
+    "wait": "wait",
+    "run update": "running",
+    "reload": "reload",
+    "finish": "finish",
+    "cancel": "cancel",
+}
+UPDATE_RUNNING_STATES = {"checking", "start", "wait", "running", "reload"}
+UPDATE_ACTIVE_STATES = {"start", "wait", "running"}
+UPDATE_CHECKABLE_STATES = {"up_to_date", "failed", "finish"}
+UPDATE_RUNNABLE_STATES = {"available", "failed"}
+_UPDATE_OP_LOCK = threading.RLock()
+_UPDATE_BUSY = False
+_UPDATE_LAST_ERROR = ""
+
+
+def get_updater():
+    """Lazily import ALAS' global updater singleton.
+
+    Importing at request time keeps the overlay importable even in hosts that
+    do not ship ``module.webui.updater`` (for example the mock server).
+    """
+    from module.webui.updater import updater
+
+    return updater
+
+
+def get_reload_enabled():
+    """Whether ALAS can auto-restart after an update.
+
+    Returns None when the flag cannot be determined, so callers can tell
+    "disabled" apart from "unknown".
+    """
+    try:
+        from module.webui.setting import State
+
+        return bool(getattr(State, "restart_event", None) is not None)
+    except Exception:
+        return None
+
+
+def normalize_update_state(state):
+    if state is True or state == 1:
+        return "available"
+    if state is False or state == 0:
+        return "up_to_date"
+    if isinstance(state, str):
+        return UPDATE_STATE_NAMES.get(state, state)
+    return str(state)
+
+
+def commit_to_dict(commit):
+    if isinstance(commit, (list, tuple)) and commit and isinstance(commit[0], (list, tuple)):
+        commit = commit[0]
+    if not isinstance(commit, (list, tuple)):
+        return {}
+    parts = list(commit)
+    while len(parts) < 4:
+        parts.append("")
+    sha1, author, isotime, message = parts[:4]
+    if not sha1:
+        return {}
+    return {
+        "sha1": str(sha1),
+        "author": str(author or ""),
+        "time": str(isotime or ""),
+        "message": str(message or ""),
+    }
+
+
+def build_update_status_payload(include_commits=False):
+    """Build the update status payload.
+
+    Commit details are opt-in because reading them shells out to ``git log``.
+    Polling clients should call ``GET /update`` without ``commits=1`` so the
+    common response stays cheap and never blocks the event loop.
+    """
+    try:
+        updater = get_updater()
+    except Exception as exc:
+        log_internal_error("update_updater_unavailable", exc)
+        return {
+            "ok": False,
+            "error": "updater_unavailable",
+            "state": "unavailable",
+            "busy": _UPDATE_BUSY,
+            "last_error": _UPDATE_LAST_ERROR or None,
+        }
+
+    try:
+        state = normalize_update_state(getattr(updater, "state", 0))
+    except Exception:
+        state = "unavailable"
+
+    payload = {
+        "ok": True,
+        "state": state,
+        # has_update mirrors ALAS state 1; busy covers the short window before
+        # the background thread flips updater.state.
+        "has_update": state == "available",
+        "busy": bool(_UPDATE_BUSY),
+        "last_error": _UPDATE_LAST_ERROR or None,
+        "reload_enabled": get_reload_enabled(),
+    }
+    try:
+        payload["branch"] = str(getattr(updater, "Branch", "") or "")
+    except Exception:
+        payload["branch"] = ""
+    try:
+        payload["repository"] = str(getattr(updater, "Repository", "") or "")
+    except Exception:
+        payload["repository"] = ""
+
+    payload["commits_included"] = bool(include_commits)
+    if include_commits:
+        try:
+            payload["local_commit"] = commit_to_dict(updater.get_commit(short_sha1=True))
+        except Exception as exc:
+            log_internal_error("update_local_commit_failed", exc)
+            payload["local_commit"] = {}
+        try:
+            branch = str(getattr(updater, "Branch", "") or "")
+            if branch:
+                payload["upstream_commit"] = commit_to_dict(
+                    updater.get_commit("origin/%s" % branch, short_sha1=True)
+                )
+            else:
+                payload["upstream_commit"] = {}
+        except Exception as exc:
+            log_internal_error("update_upstream_commit_failed", exc)
+            payload["upstream_commit"] = {}
+    return payload
+
+
+def begin_update_operation(updater, allowed_states):
+    """Atomically reserve the single update worker slot.
+
+    Returns ``(allowed, error, state)``. The busy flag closes the race where
+    two requests both observe an idle ``updater.state`` before the background
+    worker flips it, which would otherwise start two git fetches or updates.
+    """
+    global _UPDATE_BUSY
+    if not _UPDATE_OP_LOCK.acquire(blocking=False):
+        return False, "update_busy", normalize_update_state(getattr(updater, "state", 0))
+    try:
+        state = normalize_update_state(getattr(updater, "state", 0))
+        if _UPDATE_BUSY:
+            return False, "update_busy", state
+        if state not in allowed_states:
+            return False, "invalid_state", state
+        _UPDATE_BUSY = True
+        return True, "", state
+    finally:
+        _UPDATE_OP_LOCK.release()
+
+
+def spawn_update_task(name, target, updater):
+    """Run *target* on a worker thread while tracking busy/error state."""
+    global _UPDATE_BUSY
+
+    def runner():
+        global _UPDATE_BUSY, _UPDATE_LAST_ERROR
+        _UPDATE_LAST_ERROR = ""
+        try:
+            target()
+        except Exception as exc:
+            _UPDATE_LAST_ERROR = str(exc) or exc.__class__.__name__
+            log_internal_error("update_%s_failed" % name, exc)
+            try:
+                # Mirror ALAS' own failure state so clients can retry.
+                updater.state = "failed"
+            except Exception:
+                pass
+        finally:
+            with _UPDATE_OP_LOCK:
+                _UPDATE_BUSY = False
+
+    try:
+        threading.Thread(target=runner, name="gyre-update-%s" % name, daemon=True).start()
+    except Exception as exc:
+        # Never leave the slot reserved if the worker could not be created.
+        with _UPDATE_OP_LOCK:
+            _UPDATE_BUSY = False
+        log_internal_error("update_%s_spawn_failed" % name, exc)
+        raise
 
 
 def get_log_line_limit(query):
@@ -876,10 +1133,12 @@ def tail_log_file(log_file, line_limit):
     chunks = []
     newline_count = 0
     position = file_size
+    remaining = MAX_LOG_BYTES
 
     with open(log_file, "rb") as f:
-        while position > 0 and newline_count <= line_limit:
-            read_size = min(LOG_TAIL_CHUNK_SIZE, position)
+        while position > 0 and newline_count <= line_limit and remaining > 0:
+            read_size = min(LOG_TAIL_CHUNK_SIZE, position, remaining)
+            remaining -= read_size
             position -= read_size
             f.seek(position)
             chunk = f.read(read_size)
@@ -898,11 +1157,12 @@ def render_log_item(renderable):
     if Console is None:
         return str(renderable) + "\n"
 
-    if _RICH_CONSOLE is None:
-        _RICH_CONSOLE = Console(no_color=True, highlight=False, width=119)
-    with _RICH_CONSOLE.capture() as capture:
-        _RICH_CONSOLE.print(renderable)
-    return capture.get()
+    with _LOG_RENDER_LOCK:
+        if _RICH_CONSOLE is None:
+            _RICH_CONSOLE = Console(no_color=True, highlight=False, width=119)
+        with _RICH_CONSOLE.capture() as capture:
+            _RICH_CONSOLE.print(renderable)
+        return capture.get()
 
 
 def get_live_log(config_name, line_limit):
@@ -911,13 +1171,18 @@ def get_live_log(config_name, line_limit):
     if not renderables:
         return ""
 
-    lines = deque(maxlen=line_limit)
-    recent_renderables = deque(maxlen=min(MAX_LIVE_RENDERABLES, max(line_limit * 2, line_limit)))
-    for renderable in renderables:
-        recent_renderables.append(renderable)
-    for renderable in recent_renderables:
-        lines.extend(render_log_item(renderable).splitlines(True))
-    return "".join(lines)
+    chunks = []
+    remaining = MAX_LOG_BYTES
+    recent = list(renderables)[-min(MAX_LIVE_RENDERABLES, line_limit * 2):]
+    for renderable in reversed(recent):
+        text = render_log_item(renderable)[-MAX_LOG_BYTES:]
+        chunk = text.encode("utf-8", errors="replace")[-remaining:]
+        chunks.append(chunk)
+        remaining -= len(chunk)
+        if remaining <= 0:
+            break
+    text = b"".join(reversed(chunks)).decode("utf-8", errors="replace")
+    return "".join(text.splitlines(keepends=True)[-line_limit:])
 
 
 def extract_running_task(config_name):
@@ -1064,6 +1329,7 @@ async def api_health(send):
             "overlay": True,
             "gyre_overlay_version": OVERLAY_VERSION,
             "api_prefix": API_PREFIX,
+            "update_api": True,
             "memory_watchdog": dict(_MEMORY_CLEANUP_STATS),
             "configs": configs,
             "default": get_default_config(),
@@ -1082,11 +1348,38 @@ async def api_get_config(send, query):
         return
 
     try:
-        data = load_config_json(config_name)
+        data = await run_blocking(load_config_json, config_name)
         await send_json(send, {"ok": True, "config": config_name, "data": data})
     except Exception as exc:
         log_internal_error("config_read_failed:%s" % config_name, exc)
         await send_json(send, {"ok": False, "error": "config_read_failed"}, status=500)
+
+
+def save_config_operation(source, target, data):
+    lock = get_config_operation_lock(target)
+    if not lock.acquire(blocking=False):
+        return {"ok": False, "error": "config_busy", "target": target}, 409
+    try:
+        with _CONFIG_CATALOG_LOCK:
+            for name in (source, target):
+                _, error, status = validate_single_config(name)
+                if error:
+                    return {"ok": False, "error": error}, status
+            try:
+                state = get_status(target)
+            except Exception as exc:
+                log_internal_error("config_status_failed", exc)
+                return {"ok": False, "error": "status_failed", "target": target}, 500
+            if state not in {"idle", "error"}:
+                return {"ok": False, "error": "cannot_save_running_config" if state == "running" else "config_not_stopped", "target": target}, 409
+            load_config_json(source)
+            backup = write_config_json_atomic(target, data)
+        return {"ok": True, "source": source, "target": target, "backup": backup}, 200
+    except Exception as exc:
+        log_internal_error("config_save_failed", exc)
+        return {"ok": False, "error": "config_save_failed", "source": source, "target": target}, 500
+    finally:
+        lock.release()
 
 
 async def api_put_config(send, receive, query):
@@ -1094,111 +1387,62 @@ async def api_put_config(send, receive, query):
     if error:
         await send_json(send, {"ok": False, "error": error}, status=status)
         return
-
-    target_raw = query.get("target") or source
-    target, error, status = validate_single_config(target_raw)
+    target, error, status = validate_single_config(query.get("target") or source)
     if error:
         await send_json(send, {"ok": False, "error": error}, status=status)
         return
-
     try:
         body = await read_json_body(receive)
     except ValueError as exc:
-        await send_json(send, {"ok": False, "error": str(exc)}, status=400)
+        status = 408 if str(exc) == "request_timeout" else 400
+        await send_json(send, {"ok": False, "error": str(exc)}, status=status)
         return
-
-    if not isinstance(body, dict) or "data" not in body or not isinstance(body.get("data"), dict):
+    if not isinstance(body, dict) or not isinstance(body.get("data"), dict):
         await send_json(send, {"ok": False, "error": "invalid_body"}, status=400)
         return
+    payload, status = await run_blocking(save_config_operation, source, target, body["data"])
+    await send_json(send, payload, status=status)
 
-    lock = get_config_operation_lock(target)
-    with lock:
-        try:
-            if get_status(target) == "running":
-                await send_json(
-                    send,
-                    {"ok": False, "error": "cannot_save_running_config", "target": target},
-                    status=409,
-                )
-                return
-        except Exception as exc:
-            log_internal_error("config_status_failed:%s" % target, exc)
-            await send_json(send, {"ok": False, "error": "status_failed", "target": target}, status=500)
-            return
 
-        try:
-            load_config_json(source)
-            backup = write_config_json_atomic(target, body["data"])
-            await send_json(
-                send,
-                {
-                    "ok": True,
-                    "source": source,
-                    "target": target,
-                    "backup": backup,
-                },
-            )
-        except Exception as exc:
-            log_internal_error("config_save_failed:%s->%s" % (source, target), exc)
-            await send_json(
-                send,
-                {"ok": False, "error": "config_save_failed", "source": source, "target": target},
-                status=500,
-            )
+def delete_config_operation(config_name):
+    lock = get_config_operation_lock(config_name)
+    if not lock.acquire(blocking=False):
+        return {"error": "config_busy", "config": config_name}, 409
+    try:
+        with _CONFIG_CATALOG_LOCK:
+            _, error, status = validate_single_config(config_name)
+            if error:
+                return {"error": error, "config": config_name}, status
+            configs = get_config_names()
+            if len(configs) <= 1:
+                return {"error": "cannot_delete_last_config", "config": config_name, "configs": configs}, 409
+            try:
+                state = get_status(config_name)
+            except Exception as exc:
+                log_internal_error("delete_status_failed", exc)
+                return {"error": "status_failed", "config": config_name}, 500
+            if state not in {"idle", "error"}:
+                return {"error": "cannot_delete_running_config" if state == "running" else "config_not_stopped", "config": config_name, "status": state}, 409
+            os.remove(get_config_path(config_name))
+            configs = get_config_names()
+            return {"config": config_name, "message": "deleted", "configs": configs, "default": get_default_config()}, 200
+    except Exception as exc:
+        log_internal_error("delete_failed", exc)
+        return {"error": "delete_failed", "config": config_name}, 500
+    finally:
+        lock.release()
 
 
 async def api_delete_config(send, query):
-    config_name = get_requested_config(query)
-    configs = get_config_names()
-    if config_name not in configs:
-        await send_json(send, {"error": "unknown_config", "config": config_name, "configs": configs}, status=404)
+    config_name, error, status = validate_single_config(get_requested_config(query))
+    if error:
+        await send_json(send, {"error": error}, status=status)
         return
-    if len(configs) <= 1:
-        await send_json(
-            send,
-            {"error": "cannot_delete_last_config", "config": config_name, "configs": configs},
-            status=409,
-        )
-        return
-
-    try:
-        try:
-            status = get_status(config_name)
-        except Exception:
-            status = "idle"
-        if status == "running":
-            await send_json(
-                send,
-                {"error": "cannot_delete_running_config", "config": config_name, "status": "running"},
-                status=409,
-            )
-            return
-
-        config_path = get_config_path(config_name)
-        if not os.path.exists(config_path):
-            await send_json(
-                send,
-                {"error": "config_file_not_found", "config": config_name, "configs": configs},
-                status=404,
-            )
-            return
-        os.remove(config_path)
-        configs = get_config_names()
-        await send_json(
-            send,
-            {
-                "config": config_name,
-                "message": "deleted",
-                "configs": configs,
-                "default": get_default_config(),
-            },
-        )
-    except Exception as exc:
-        log_internal_error("delete_failed", exc)
-        await send_json(send, {"error": "delete_failed", "config": config_name}, status=500)
+    payload, status = await run_blocking(delete_config_operation, config_name)
+    await send_json(send, payload, status=status)
 
 
-async def api_get_status_all(send):
+def build_status_all():
     statuses = {}
     errors = {}
     tasks = {}
@@ -1216,7 +1460,11 @@ async def api_get_status_all(send):
     payload = {"statuses": statuses, "tasks": tasks}
     if errors:
         payload["errors"] = errors
-    await send_json(send, payload)
+    return payload
+
+
+async def api_get_status_all(send):
+    await send_json(send, await run_blocking(build_status_all))
 
 
 async def api_get_status(send, query):
@@ -1227,76 +1475,78 @@ async def api_get_status(send, query):
         return
 
     try:
-        status = get_status(config_name)
-        task = extract_running_task(config_name) if status == "running" else ""
+        status = await run_blocking(get_status, config_name)
+        task = await run_blocking(extract_running_task, config_name) if status == "running" else ""
         await send_json(send, {"config": config_name, "status": status, "task": task})
     except Exception as exc:
         log_internal_error("status_failed:%s" % config_name, exc)
         await send_json(send, {"config": config_name, "status": "error", "error": "status_failed"}, status=500)
 
 
-async def api_post_start(send, query):
-    config_name = get_requested_config(query)
-    error_payload = validate_requested_config(config_name)
-    if error_payload is not None:
-        await send_json(send, error_payload, status=404)
-        return
-
+def control_config_operation(config_name, action):
+    lock = get_config_operation_lock(config_name)
+    if not lock.acquire(blocking=False):
+        return {"ok": False, "error": "config_busy", "config": config_name}, 409
+    update_reserved = False
     try:
+        if action in {"start", "restart"}:
+            update_reserved = _UPDATE_OP_LOCK.acquire(blocking=False)
+            if not update_reserved:
+                return {"ok": False, "error": "update_busy", "config": config_name}, 409
+            get_start_event()
+        _, error, status = validate_single_config(config_name)
+        if error:
+            return {"ok": False, "error": error, "config": config_name}, status
         manager = get_manager(config_name)
-        already_running = bool(getattr(manager, "alive", False))
-        if not already_running:
-            manager.start(None)
-        await send_json(
-            send,
-            {
-                "config": config_name,
-                "message": "already_running" if already_running else "started",
-                "status": get_status(config_name),
-            },
-        )
+        was_running = bool(manager.alive)
+        if action in {"stop", "restart"} and was_running:
+            manager.stop()
+            if not wait_manager_stopped(manager):
+                return {"ok": False, "error": "stop_timeout", "config": config_name, "status": get_status(config_name)}, 504
+        if action in {"start", "restart"} and (action == "restart" or not was_running):
+            start_manager(manager)
+            if not wait_manager_started(manager):
+                return {"ok": False, "error": "start_failed", "config": config_name, "status": get_status(config_name)}, 500
+        message = {"start": "already_running" if was_running else "started",
+                   "stop": "stopped" if was_running else "already_stopped",
+                   "restart": "restarted"}[action]
+        return {"ok": True, "config": config_name, "message": message, "status": get_status(config_name)}, 200
+    except ValueError as exc:
+        if str(exc) == "update_in_progress":
+            return {"ok": False, "error": "update_in_progress", "config": config_name}, 409
+        log_internal_error(action + "_failed", exc)
+        return {"ok": False, "error": action + "_failed", "config": config_name, "status": "error"}, 500
     except Exception as exc:
-        log_internal_error("start_failed:%s" % config_name, exc)
-        await send_json(
-            send,
-            {"config": config_name, "message": "start_failed", "status": "error", "error": "start_failed"},
-            status=500,
-        )
+        log_internal_error(action + "_failed", exc)
+        return {"ok": False, "error": action + "_failed", "config": config_name, "status": "error"}, 500
+    finally:
+        if update_reserved:
+            _UPDATE_OP_LOCK.release()
+        lock.release()
+
+
+async def api_control_config(send, query, action):
+    requested = query.get("config") if action == "restart" else get_requested_config(query)
+    config_name, error, status = validate_single_config(requested)
+    if error:
+        await send_json(send, {"ok": False, "error": error}, status=status)
+        return
+    payload, status = await run_blocking(control_config_operation, config_name, action)
+    await send_json(send, payload, status=status)
+
+
+async def api_post_start(send, query):
+    await api_control_config(send, query, "start")
 
 
 async def api_post_stop(send, query):
-    config_name = get_requested_config(query)
-    error_payload = validate_requested_config(config_name)
-    if error_payload is not None:
-        await send_json(send, error_payload, status=404)
-        return
-
-    try:
-        manager = get_manager(config_name)
-        was_running = bool(getattr(manager, "alive", False))
-        if was_running:
-            manager.stop()
-        await send_json(
-            send,
-            {
-                "config": config_name,
-                "message": "stopped" if was_running else "already_stopped",
-                "status": get_status(config_name),
-            },
-        )
-    except Exception as exc:
-        log_internal_error("stop_failed:%s" % config_name, exc)
-        await send_json(
-            send,
-            {"config": config_name, "message": "stop_failed", "status": "error", "error": "stop_failed"},
-            status=500,
-        )
+    await api_control_config(send, query, "stop")
 
 
 def wait_manager_stopped(manager, timeout=10.0):
-    deadline = time.time() + timeout
+    deadline = time.monotonic() + timeout
     process = getattr(manager, "_process", None)
-    while time.time() < deadline:
+    while time.monotonic() < deadline:
         if not getattr(manager, "alive", False):
             return True
         if process is not None and hasattr(process, "join"):
@@ -1310,8 +1560,8 @@ def wait_manager_stopped(manager, timeout=10.0):
 
 
 def wait_manager_started(manager, timeout=3.0):
-    deadline = time.time() + timeout
-    while time.time() < deadline:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
         if getattr(manager, "alive", False):
             return True
         time.sleep(0.2)
@@ -1319,59 +1569,106 @@ def wait_manager_started(manager, timeout=3.0):
 
 
 async def api_post_restart(send, query):
-    config_name, error, status = validate_query_config(query)
-    if error:
-        await send_json(send, {"ok": False, "config": config_name or "", "error": error, "status": "error"}, status=status)
+    await api_control_config(send, query, "restart")
+
+
+async def api_get_update(send, query):
+    include_commits = str(query.get("commits", "")).strip().lower() in {"1", "true", "yes", "on"}
+    payload = await run_blocking(build_update_status_payload, include_commits)
+    await send_json(send, payload)
+
+
+async def api_post_update_check(send):
+    try:
+        updater = get_updater()
+    except Exception as exc:
+        log_internal_error("update_check_unavailable", exc)
+        await send_json(
+            send,
+            {"ok": False, "error": "updater_unavailable", "state": "unavailable"},
+            status=500,
+        )
         return
 
-    lock = get_config_operation_lock(config_name)
-    with lock:
-        try:
-            manager = get_manager(config_name)
-            if getattr(manager, "alive", False):
-                manager.stop()
-                if not wait_manager_stopped(manager, timeout=10.0):
-                    process = getattr(manager, "_process", None)
-                    if process is not None and hasattr(process, "kill"):
-                        try:
-                            process.kill()
-                            process.join(timeout=1)
-                        except Exception:
-                            pass
-                if getattr(manager, "alive", False):
-                    await send_json(
-                        send,
-                        {"ok": False, "config": config_name, "error": "restart_failed", "status": "error"},
-                        status=500,
-                    )
-                    return
+    allowed, error, state = begin_update_operation(updater, UPDATE_CHECKABLE_STATES)
+    if not allowed:
+        await send_json(send, {"ok": False, "error": error, "state": state}, status=409)
+        return
 
-            manager.start(None)
-            wait_manager_started(manager, timeout=3.0)
-            final_status = get_status(config_name)
-            if final_status != "running":
-                await send_json(
-                    send,
-                    {"ok": False, "config": config_name, "error": "restart_failed", "status": final_status},
-                    status=500,
-                )
-                return
+    spawn_update_task("check", updater.check_update, updater)
+    await send_json(
+        send,
+        {"ok": True, "message": "check_started", "state": "checking", "busy": True},
+    )
 
-            await send_json(
-                send,
-                {"ok": True, "config": config_name, "message": "restarted", "status": final_status},
-            )
-        except Exception as exc:
-            log_internal_error("restart_failed:%s" % config_name, exc)
-            try:
-                final_status = get_status(config_name)
-            except Exception:
-                final_status = "error"
-            await send_json(
-                send,
-                {"ok": False, "config": config_name, "error": "restart_failed", "status": final_status},
-                status=500,
-            )
+
+async def api_post_update_run(send):
+    try:
+        updater = get_updater()
+    except Exception as exc:
+        log_internal_error("update_run_unavailable", exc)
+        await send_json(
+            send,
+            {"ok": False, "error": "updater_unavailable", "state": "unavailable"},
+            status=500,
+        )
+        return
+
+    if getattr(updater, "event", None) is None:
+        await send_json(
+            send,
+            {
+                "ok": False,
+                "error": "update_disabled",
+                "state": normalize_update_state(getattr(updater, "state", 0)),
+            },
+            status=409,
+        )
+        return
+
+    allowed, error, state = begin_update_operation(updater, UPDATE_RUNNABLE_STATES)
+    if not allowed:
+        await send_json(send, {"ok": False, "error": error, "state": state}, status=409)
+        return
+
+    spawn_update_task("run", updater.run_update, updater)
+    await send_json(
+        send,
+        {"ok": True, "message": "update_started", "state": "start", "busy": True},
+    )
+
+
+async def api_post_update_cancel(send):
+    try:
+        updater = get_updater()
+    except Exception as exc:
+        log_internal_error("update_cancel_unavailable", exc)
+        await send_json(
+            send,
+            {"ok": False, "error": "updater_unavailable", "state": "unavailable"},
+            status=500,
+        )
+        return
+
+    # Cancel must stay reachable while the run worker holds the busy slot, so
+    # it only consults the ALAS state machine and never the busy flag.
+    state = normalize_update_state(getattr(updater, "state", 0))
+    if state != "wait":
+        await send_json(
+            send,
+            {"ok": False, "error": "nothing_to_cancel", "state": state},
+            status=409,
+        )
+        return
+
+    try:
+        updater.cancel()
+    except Exception as exc:
+        log_internal_error("update_cancel_failed", exc)
+        await send_json(send, {"ok": False, "error": "cancel_failed", "state": state}, status=500)
+        return
+
+    await send_json(send, {"ok": True, "message": "cancel_requested", "state": "cancel"})
 
 
 async def api_get_log(send, query):
@@ -1384,7 +1681,7 @@ async def api_get_log(send, query):
     line_limit = get_log_line_limit(query)
     live_error = None
     try:
-        live_log = get_live_log(config_name, line_limit)
+        live_log = await run_blocking(get_live_log, config_name, line_limit)
     except Exception as exc:
         live_log = ""
         log_internal_error("live_log_failed:%s" % config_name, exc)
@@ -1409,7 +1706,7 @@ async def api_get_log(send, query):
             "source": "file",
             "file": os.path.basename(log_file),
             "lines": line_limit,
-            "log": tail_log_file(log_file, line_limit),
+            "log": await run_blocking(tail_log_file, log_file, line_limit),
         }
         if live_error:
             payload["live_error"] = live_error
@@ -1434,7 +1731,7 @@ async def api_get_log(send, query):
 async def api_get_error_screenshots(send, query):
     limit = get_error_screenshot_limit(query)
     try:
-        groups = list_error_screenshot_groups(limit)
+        groups = await run_blocking(list_error_screenshot_groups, limit)
         await send_json(
             send,
             {

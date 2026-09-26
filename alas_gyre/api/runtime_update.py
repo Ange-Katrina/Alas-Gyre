@@ -4,7 +4,7 @@ import os
 import shutil
 import tempfile
 
-from alas_gyre.api.client import TOKEN_HEADER, api_request
+from alas_gyre.api.client import TOKEN_HEADER, api_request, http_base_url
 from alas_gyre.api.overlay_launcher import RUNTIME_UPDATE_FILES, generate_portable_overlay_launchers
 
 
@@ -15,12 +15,13 @@ RUNTIME_UPDATE_PATH = "/runtime/update"
 
 def runtime_update_port(config):
     port = str(config.get("runtime_update_port", DEFAULT_RUNTIME_UPDATE_PORT)).strip()
-    return port if port.isdigit() else DEFAULT_RUNTIME_UPDATE_PORT
+    if not port.isascii() or not port.isdigit() or not 1 <= int(port) <= 65535:
+        raise ValueError("invalid_port")
+    return port
 
 
 def runtime_update_base_url(config):
-    ip = str(config.get("ip", "127.0.0.1")).strip() or "127.0.0.1"
-    return f"http://{ip}:{runtime_update_port(config)}"
+    return http_base_url(config, "runtime_update_port", DEFAULT_RUNTIME_UPDATE_PORT)
 
 
 def runtime_update_headers(config):
@@ -85,11 +86,16 @@ def update_remote_runtime(config, current_version, timeout=10.0):
     except Exception as exc:
         return {"success": False, "message": "invalid_info", "detail": str(exc)}
 
-    remote_files = info.get("files") if isinstance(info, dict) else None
+    if not isinstance(info, dict) or info.get("protocol") != "alas-gyre-runtime-update" or info.get("ok") is not True:
+        return {"success": False, "message": "unsupported"}
+    remote_files = info.get("files")
     if not isinstance(remote_files, dict):
         return {"success": False, "message": "unsupported"}
 
-    local_files = build_local_runtime_files(token)
+    try:
+        local_files = build_local_runtime_files(token)
+    except Exception as exc:
+        return {"success": False, "message": "build_failed", "detail": str(exc)}
     upload_files = {}
     for rel_path, item in local_files.items():
         remote_hash = str(remote_files.get(rel_path, "") or "").lower()
@@ -126,6 +132,8 @@ def update_remote_runtime(config, current_version, timeout=10.0):
         data = update_resp.json()
     except Exception:
         data = {}
+    if not isinstance(data, dict):
+        return {"success": False, "message": "invalid_info"}
     if update_resp.status_code != 200 or not data.get("ok"):
         return {
             "success": False,
@@ -133,10 +141,14 @@ def update_remote_runtime(config, current_version, timeout=10.0):
             "detail": data.get("message") or data.get("error") or f"HTTP {update_resp.status_code}",
         }
 
+    applied = data.get("files")
+    if not isinstance(applied, dict) or any(applied.get(path) != item["sha256"] for path, item in local_files.items()):
+        return {"success": False, "message": "update_failed", "detail": "runtime_hash_verification_failed"}
     return {
         "success": True,
         "message": "updated",
         "updated": data.get("updated", []),
         "unchanged": data.get("unchanged", []),
         "restart_required": bool(data.get("restart_required")),
+        "updater_restart_required": bool(data.get("updater_restart_required")),
     }

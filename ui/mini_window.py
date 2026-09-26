@@ -2,7 +2,7 @@ from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QG
 from PySide6.QtCore import QPoint, Qt, Signal
 from PySide6.QtGui import QColor, QPainter, QPainterPath
 import sys
-from alas_gyre.api.client import api_headers, api_request, gyre_api_url
+from alas_gyre.api.client import CONTROL_REQUEST_TIMEOUT, api_headers, api_request, gyre_api_url
 from alas_gyre.core.status import normalize_status
 from .widgets import StatusIndicator, ConfigActionButton, MarqueeLabel
 from .window_snap import snap_to_available_screen
@@ -126,7 +126,7 @@ class MiniConfigRow(QWidget):
                     url,
                     params={"config": self.config_name},
                     headers=api_headers(self.main_card.config),
-                    timeout=3,
+                    timeout=CONTROL_REQUEST_TIMEOUT,
                 )
                 if resp.status_code == 200:
                     status = normalize_status(resp.json().get("status", "idle"))

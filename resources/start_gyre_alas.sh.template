@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-GYRE_RUNTIME="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+GYRE_RUNTIME="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)"
 SCRIPT_PATH="$GYRE_RUNTIME/start_gyre_alas.sh"
 CONF_FILE="$GYRE_RUNTIME/.gyre_runtime.conf"
 LEGACY_ROOT_CACHE="$GYRE_RUNTIME/.gyre_alas_root"
@@ -19,6 +19,12 @@ DEFAULT_GYRE_UPDATE_HOST="0.0.0.0"
 DEFAULT_GYRE_UPDATE_PORT="22268"
 DEFAULT_GYRE_LOG_MAX_BYTES="10485760"
 DEFAULT_GYRE_LOG_BACKUP_COUNT="3"
+ENV_GYRE_UPDATE_HOST="${GYRE_UPDATE_HOST:-}"
+ENV_GYRE_UPDATE_PORT="${GYRE_UPDATE_PORT:-}"
+ENV_GYRE_LOG_MAX_BYTES="${GYRE_LOG_MAX_BYTES:-}"
+ENV_GYRE_LOG_BACKUP_COUNT="${GYRE_LOG_BACKUP_COUNT:-}"
+ENV_ALAS_WEBUI_PORT="${ALAS_WEBUI_PORT:-}"
+ENV_ALAS_ROOT="${ALAS_ROOT:-}"
 GYRE_UPDATE_HOST="${GYRE_UPDATE_HOST:-$DEFAULT_GYRE_UPDATE_HOST}"
 GYRE_UPDATE_PORT="${GYRE_UPDATE_PORT:-$DEFAULT_GYRE_UPDATE_PORT}"
 GYRE_LOG_MAX_BYTES="${GYRE_LOG_MAX_BYTES:-$DEFAULT_GYRE_LOG_MAX_BYTES}"
@@ -31,7 +37,10 @@ export ALAS_GYRE_OVERLAY ALAS_GYRE_API_TOKEN
 
 CANDIDATE_FILE="${TMPDIR:-/tmp}/gyre_alas_candidates.$$"
 FOUND_FILE="${TMPDIR:-/tmp}/gyre_alas_found.$$"
-trap 'rm -f "$CANDIDATE_FILE" "$FOUND_FILE"' EXIT INT TERM
+trap 'rm -f "$CANDIDATE_FILE" "$FOUND_FILE"' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+trap 'exit 129' HUP
 
 C_RESET=""
 C_BOLD=""
@@ -146,11 +155,11 @@ is_alas_root() {
 
 load_config() {
     env_lang="${GYRE_LANG:-}"
-    env_update_host="${GYRE_UPDATE_HOST:-}"
-    env_update_port="${GYRE_UPDATE_PORT:-}"
-    env_alas_webui_port="${ALAS_WEBUI_PORT:-}"
-    env_log_max_bytes="${GYRE_LOG_MAX_BYTES:-}"
-    env_log_backup_count="${GYRE_LOG_BACKUP_COUNT:-}"
+    env_update_host="${ENV_GYRE_UPDATE_HOST:-}"
+    env_update_port="${ENV_GYRE_UPDATE_PORT:-}"
+    env_alas_webui_port="${ENV_ALAS_WEBUI_PORT:-}"
+    env_log_max_bytes="${ENV_GYRE_LOG_MAX_BYTES:-}"
+    env_log_backup_count="${ENV_GYRE_LOG_BACKUP_COUNT:-}"
     ALAS_ROOT=""
     GYRE_LANG=""
     GYRE_UPDATE_HOST="$DEFAULT_GYRE_UPDATE_HOST"
@@ -159,7 +168,9 @@ load_config() {
     GYRE_LOG_BACKUP_COUNT="$DEFAULT_GYRE_LOG_BACKUP_COUNT"
     ALAS_WEBUI_PORT=""
     if [ -f "$CONF_FILE" ]; then
+        config_cr="$(printf '\r')"
         while IFS= read -r line || [ -n "$line" ]; do
+            line=${line%"$config_cr"}
             case "$line" in
                 ALAS_ROOT=*) ALAS_ROOT=${line#ALAS_ROOT=} ;;
                 GYRE_LANG=*) GYRE_LANG=${line#GYRE_LANG=} ;;
@@ -173,6 +184,9 @@ load_config() {
     fi
     if [ -z "$ALAS_ROOT" ] && [ -f "$LEGACY_ROOT_CACHE" ]; then
         IFS= read -r ALAS_ROOT < "$LEGACY_ROOT_CACHE" || ALAS_ROOT=""
+    fi
+    if [ -n "$ENV_ALAS_ROOT" ] && is_alas_root "$ENV_ALAS_ROOT"; then
+        ALAS_ROOT="$ENV_ALAS_ROOT"
     fi
     case "$env_lang" in
         zh|en) GYRE_LANG="$env_lang" ;;
@@ -331,7 +345,7 @@ add_candidate() {
     candidate="${1:-}"
     [ -n "$candidate" ] || return 0
     [ -d "$candidate" ] || return 0
-    candidate="$(CDPATH= cd -- "$candidate" 2>/dev/null && pwd)" || return 0
+    candidate="$(CDPATH= cd -- "$candidate" 2>/dev/null && pwd -P)" || return 0
     is_alas_root "$candidate" || return 0
     grep -Fxq "$candidate" "$CANDIDATE_FILE" 2>/dev/null || printf '%s\n' "$candidate" >> "$CANDIDATE_FILE"
 }
@@ -474,7 +488,7 @@ choose_alas_root() {
                 ;;
         esac
         if is_alas_root "$selected"; then
-            ALAS_ROOT="$(CDPATH= cd -- "$selected" && pwd)"
+            ALAS_ROOT="$(CDPATH= cd -- "$selected" && pwd -P)"
             save_alas_root
             if is_zh; then
                 echo "[Alas-Gyre] 已保存 ALAS 根目录：$ALAS_ROOT"
@@ -492,12 +506,12 @@ choose_alas_root() {
 }
 resolve_alas_root() {
     allow_prompt="${1:-yes}"
-    env_root="${ALAS_ROOT:-}"
+    env_root="${ENV_ALAS_ROOT:-${ALAS_ROOT:-}}"
     load_config
 
     if [ -n "$env_root" ]; then
         if is_alas_root "$env_root"; then
-            ALAS_ROOT="$(CDPATH= cd -- "$env_root" && pwd)"
+            ALAS_ROOT="$(CDPATH= cd -- "$env_root" && pwd -P)"
             save_alas_root
             echo "[Alas-Gyre] ALAS root: $ALAS_ROOT"
             return 0
@@ -506,7 +520,7 @@ resolve_alas_root() {
     fi
 
     if [ -n "$ALAS_ROOT" ] && is_alas_root "$ALAS_ROOT"; then
-        ALAS_ROOT="$(CDPATH= cd -- "$ALAS_ROOT" && pwd)"
+        ALAS_ROOT="$(CDPATH= cd -- "$ALAS_ROOT" && pwd -P)"
         echo "[Alas-Gyre] ALAS root: $ALAS_ROOT"
         return 0
     fi
@@ -539,7 +553,7 @@ get_pid() {
         IFS= read -r pid < "$PID_FILE" || pid=""
     fi
     case "$pid" in
-        ''|*[!0-9]*) return 1 ;;
+        ''|0|1|*[!0-9]*) return 1 ;;
     esac
     printf '%s\n' "$pid"
     return 0
@@ -548,7 +562,8 @@ get_pid() {
 is_managed_running() {
     pid="$(get_pid 2>/dev/null || true)"
     [ -n "$pid" ] || return 1
-    kill -0 "$pid" 2>/dev/null
+    kill -0 "$pid" 2>/dev/null || return 1
+    is_safe_alas_port_pid "$pid"
 }
 
 cleanup_stale_pid() {
@@ -580,7 +595,7 @@ get_updater_pid() {
         IFS= read -r pid < "$UPDATER_PID_FILE" || pid=""
     fi
     case "$pid" in
-        ''|*[!0-9]*) return 1 ;;
+        ''|0|1|*[!0-9]*) return 1 ;;
     esac
     printf '%s
 ' "$pid"
@@ -590,7 +605,8 @@ get_updater_pid() {
 is_updater_running() {
     pid="$(get_updater_pid 2>/dev/null || true)"
     [ -n "$pid" ] || return 1
-    kill -0 "$pid" 2>/dev/null
+    kill -0 "$pid" 2>/dev/null || return 1
+    is_runtime_updater_pid "$pid"
 }
 
 cleanup_stale_updater_pid() {
@@ -627,7 +643,7 @@ is_runtime_updater_pid() {
     pid="$1"
     cmd="$(pid_cmdline "$pid")"
     case "$cmd" in
-        *gyre_runtime_updater.py*)
+        *"$UPDATER_SCRIPT"*)
             return 0
             ;;
     esac
@@ -690,6 +706,37 @@ find_updater_python() {
     return 1
 }
 
+# Give managed services their own session and no terminal file descriptors.
+# nohup alone does not isolate a service from the terminal's process group.
+# Print only the child PID so callers can keep using the existing PID files.
+launch_detached() {
+    detached_log="$1"
+    shift
+    if command -v setsid >/dev/null 2>&1; then
+        (
+            trap '' HUP INT QUIT
+            exec setsid "$@"
+        ) </dev/null >> "$detached_log" 2>&1 &
+        printf '%s\n' "$!"
+    else
+        detached_python="$(find_updater_python 2>/dev/null || true)"
+        if [ -z "$detached_python" ]; then
+            echo "[Alas-Gyre] Detached startup requires setsid or Python." >&2
+            return 1
+        fi
+        "$detached_python" -c '
+import subprocess
+import sys
+with open(sys.argv[1], "ab", buffering=0) as log:
+    process = subprocess.Popen(
+        sys.argv[2:], stdin=subprocess.DEVNULL, stdout=log, stderr=log,
+        start_new_session=True, close_fds=True,
+    )
+print(process.pid)
+' "$detached_log" "$@"
+    fi
+}
+
 start_updater() {
     load_config
     cleanup_stale_updater_pid
@@ -719,8 +766,7 @@ start_updater() {
     rotate_log_file "$UPDATER_LOG_FILE"
     : >> "$UPDATER_LOG_FILE" 2>/dev/null || true
     export ALAS_GYRE_API_TOKEN GYRE_UPDATE_HOST GYRE_UPDATE_PORT GYRE_LOG_MAX_BYTES GYRE_LOG_BACKUP_COUNT
-    nohup "$py" "$UPDATER_SCRIPT" --runtime "$GYRE_RUNTIME" --host "$GYRE_UPDATE_HOST" --port "$GYRE_UPDATE_PORT" >> "$UPDATER_LOG_FILE" 2>&1 &
-    updater_pid=$!
+    updater_pid="$(launch_detached "$UPDATER_LOG_FILE" "$py" "$UPDATER_SCRIPT" --runtime "$GYRE_RUNTIME" --host "$GYRE_UPDATE_HOST" --port "$GYRE_UPDATE_PORT")" || return 1
     printf '%s
 ' "$updater_pid" > "$UPDATER_PID_FILE"
     sleep 1
@@ -733,28 +779,21 @@ start_updater() {
 }
 
 stop_updater() {
+    load_config
     if ! is_updater_running; then
         cleanup_stale_updater_pid
         return 0
     fi
     pid="$(get_updater_pid)"
-    kill "$pid" 2>/dev/null || true
-    i=0
-    while [ "$i" -lt 5 ]; do
-        if ! kill -0 "$pid" 2>/dev/null; then
-            rm -f "$UPDATER_PID_FILE" 2>/dev/null || true
-            return 0
-        fi
-        i=$((i + 1))
-        sleep 1
-    done
-    kill -KILL "$pid" 2>/dev/null || true
-    sleep 1
+    if ! stop_owned_process "$pid"; then
+        error_msg "Runtime updater did not stop; keeping PID file."
+        return 1
+    fi
     rm -f "$UPDATER_PID_FILE" 2>/dev/null || true
 }
 
 restart_updater() {
-    stop_updater
+    stop_updater || return 1
     start_updater
 }
 
@@ -824,21 +863,66 @@ pid_cwd() {
 }
 
 is_safe_alas_port_pid() {
-    pid="$1"
-    managed="$(get_pid 2>/dev/null || true)"
-    [ -n "$managed" ] && [ "$pid" = "$managed" ] && return 0
-    cmd="$(pid_cmdline "$pid")"
-    cwd="$(pid_cwd "$pid")"
-    root="${ALAS_ROOT:-}"
-    if [ -n "$root" ]; then
-        case " $cmd $cwd " in
-            *"$root"*) return 0 ;;
-        esac
-    fi
-    case "$cmd" in
-        *gui.py*AzurLaneAutoScript*|*AzurLaneAutoScript*gui.py*) return 0 ;;
+    checked_pid="$1"
+    checked_cmd="$(pid_cmdline "$checked_pid")"
+    checked_cwd="$(pid_cwd "$checked_pid")"
+    case "$checked_cmd" in
+        *"$SCRIPT_PATH __gyre_service_run"*) return 0 ;;
+    esac
+    [ -n "${ALAS_ROOT:-}" ] || return 1
+    checked_root="$(CDPATH= cd -- "$ALAS_ROOT" 2>/dev/null && pwd -P)" || return 1
+    [ "$checked_cwd" = "$checked_root" ] || return 1
+    case "$checked_cmd" in
+        *gui.py*|*run_alas.sh*) return 0 ;;
     esac
     return 1
+}
+
+# Only called after checking that the PID belongs to this runtime.
+# Detached ALAS may have reload/worker children; stop its whole private group.
+stop_owned_process() {
+    stop_python="$(find_updater_python 2>/dev/null || true)"
+    [ -n "$stop_python" ] || { error_msg "Python is required to stop and verify the service safely."; return 1; }
+    "$stop_python" - "$1" <<'PY'
+import os
+import signal
+import sys
+import time
+pid = int(sys.argv[1])
+if pid <= 1:
+    sys.exit(1)
+try:
+    private_group = os.getpgid(pid) == pid
+except ProcessLookupError:
+    sys.exit(0)
+def alive():
+    # Ignore zombies: they are already stopped and await their parent's reap.
+    for entry in os.scandir('/proc'):
+        if not entry.name.isdigit():
+            continue
+        try:
+            with open(entry.path + '/stat') as f:
+                fields = f.read().rsplit(')', 1)[1].split()
+            if fields[0] != 'Z' and (int(fields[2]) == pid if private_group else int(entry.name) == pid):
+                return True
+        except (OSError, IndexError, ValueError):
+            continue
+    return False
+for sig, timeout in ((signal.SIGTERM, 10), (signal.SIGKILL, 2)):
+    try:
+        if private_group:
+            os.killpg(pid, sig)
+        else:
+            os.kill(pid, sig)
+    except ProcessLookupError:
+        pass
+    deadline = time.monotonic() + timeout
+    while alive() and time.monotonic() < deadline:
+        time.sleep(0.1)
+    if not alive():
+        sys.exit(0)
+sys.exit(1)
+PY
 }
 
 stop_port_pid() {
@@ -930,6 +1014,7 @@ run_alas_foreground() {
 }
 
 start_background() {
+    load_config
     allow_prompt="${1:-yes}"
     cleanup_stale_pid
     if is_managed_running; then
@@ -944,8 +1029,7 @@ start_background() {
     rotate_log_file "$LOG_FILE"
     : >> "$LOG_FILE" 2>/dev/null || true
     echo "[Alas-Gyre] Starting ALAS in background..."
-    nohup sh "$SCRIPT_PATH" __gyre_service_run >> "$LOG_FILE" 2>&1 &
-    bg_pid=$!
+    bg_pid="$(launch_detached "$LOG_FILE" sh "$SCRIPT_PATH" __gyre_service_run)" || return 1
     printf '%s\n' "$bg_pid" > "$PID_FILE"
     sleep 2
     if is_managed_running; then
@@ -961,7 +1045,18 @@ start_background() {
     return 1
 }
 
+start_with_logs() {
+    start_background || return 1
+    if is_zh; then
+        echo "[Alas-Gyre] Ctrl+C 仅退出日志查看，ALAS 将继续运行。停止服务请使用菜单 3。"
+    else
+        echo "[Alas-Gyre] Ctrl+C exits the log viewer only; ALAS keeps running. Use menu 3 to stop ALAS."
+    fi
+    tail -n 40 -f "$LOG_FILE" || true
+}
+
 stop_managed_alas() {
+    load_config
     if ! is_managed_running; then
         cleanup_stale_pid
         echo "[Alas-Gyre] No Gyre-managed ALAS is running."
@@ -969,33 +1064,23 @@ stop_managed_alas() {
     fi
     pid="$(get_pid)"
     echo "[Alas-Gyre] Stopping Gyre-managed ALAS. pid=$pid"
-    kill "$pid" 2>/dev/null || true
-    i=0
-    while [ "$i" -lt 10 ]; do
-        if ! kill -0 "$pid" 2>/dev/null; then
-            rm -f "$PID_FILE" 2>/dev/null || true
-            echo "[Alas-Gyre] Stopped."
-            return 0
-        fi
-        i=$((i + 1))
-        sleep 1
-    done
-    echo "[Alas-Gyre] Process did not exit after TERM; sending KILL."
-    kill -KILL "$pid" 2>/dev/null || true
-    sleep 1
+    if ! stop_owned_process "$pid"; then
+        error_msg "ALAS did not stop; keeping PID file."
+        return 1
+    fi
     rm -f "$PID_FILE" 2>/dev/null || true
     echo "[Alas-Gyre] Stopped."
 }
 
 restart_background() {
-    stop_managed_alas
+    stop_managed_alas || return 1
     start_background "${1:-yes}"
 }
 
 show_status() {
+    load_config
     cleanup_stale_pid
     cleanup_stale_updater_pid
-    load_config
     if is_zh; then
         panel_top "Alas-Gyre Overlay 状态"
         panel_line "状态" "$(status_line)"
@@ -1385,9 +1470,9 @@ pause_menu() {
 }
 show_menu() {
     while :; do
+        load_config
         cleanup_stale_pid
         cleanup_stale_updater_pid
-        load_config
         auto_discover_menu
         if is_zh; then
             panel_top "Alas-Gyre Overlay 管理面板"
@@ -1403,7 +1488,7 @@ show_menu() {
             panel_bottom
 
             menu_group "启动控制"
-            menu_item 1 "启动 ALAS（前台）" good
+            menu_item 1 "启动 ALAS 并查看日志（Ctrl+C 不停止服务）" good
             menu_item 2 "启动 ALAS（后台）" good
             menu_item 3 "停止 ALAS" danger
             menu_item 4 "重启 ALAS" warn
@@ -1441,7 +1526,7 @@ show_menu() {
             panel_bottom
 
             menu_group "Start / Control"
-            menu_item 1 "Start ALAS foreground" good
+            menu_item 1 "Start ALAS and view logs (Ctrl+C keeps ALAS running)" good
             menu_item 2 "Start ALAS background" good
             menu_item 3 "Stop ALAS" danger
             menu_item 4 "Restart ALAS" warn
@@ -1469,7 +1554,7 @@ show_menu() {
         IFS= read -r choice || exit 1
         choice="$(printf '%s' "$choice" | tr -d '\r')"
         case "$choice" in
-            1) run_alas_foreground yes ;;
+            1) start_with_logs ;;
             2) start_background; pause_menu ;;
             3) stop_managed_alas; pause_menu ;;
             4) restart_background; pause_menu ;;

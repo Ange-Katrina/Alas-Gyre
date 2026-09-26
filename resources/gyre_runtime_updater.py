@@ -14,6 +14,8 @@ import secrets
 import shutil
 import stat
 import threading
+import tempfile
+from socketserver import ThreadingMixIn
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 
@@ -24,6 +26,8 @@ DEFAULT_HOST = "0.0.0.0"
 DEFAULT_PORT = 22268
 MAX_FILE_BYTES = 1024 * 1024
 MAX_REQUEST_BYTES = 8 * 1024 * 1024
+REQUEST_TIMEOUT = 5
+MAX_CONNECTIONS = 16
 DEFAULT_LOG_MAX_BYTES = 10 * 1024 * 1024
 DEFAULT_LOG_BACKUP_COUNT = 3
 DEFAULT_LOG_CHECK_INTERVAL = 60
@@ -116,22 +120,32 @@ def write_allowed_file(runtime_dir, rel_path, content):
     info = ALLOWED_FILES[rel_path]
     target = safe_target(runtime_dir, rel_path)
     os.makedirs(os.path.dirname(target), exist_ok=True)
-    tmp_path = target + ".tmp"
     bak_path = target + ".bak"
-    with open(tmp_path, "wb") as f:
-        f.write(content)
-    if sha256_file(tmp_path) != sha256_bytes(content):
+    if os.path.exists(target):
+        with open(target, "rb") as source:
+            atomic_write(bak_path, source.read(), stat.S_IMODE(os.stat(target).st_mode))
+    mode = stat.S_IMODE(os.stat(target).st_mode) if os.path.exists(target) else 0o600
+    if info.get("executable"):
+        mode |= stat.S_IXUSR
+    atomic_write(target, content, mode)
+
+
+def atomic_write(target, content, mode):
+    fd, tmp_path = tempfile.mkstemp(prefix=".gyre-update-", dir=os.path.dirname(target))
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(content)
+            f.flush()
+            os.fsync(f.fileno())
+        if sha256_file(tmp_path) != sha256_bytes(content):
+            raise ValueError("tmp_hash_mismatch")
+        os.chmod(tmp_path, mode)
+        os.replace(tmp_path, target)
+    finally:
         try:
             os.remove(tmp_path)
-        except OSError:
+        except FileNotFoundError:
             pass
-        raise ValueError("tmp_hash_mismatch")
-    if os.path.exists(target):
-        shutil.copy2(target, bak_path)
-    os.replace(tmp_path, target)
-    if info.get("executable"):
-        mode = os.stat(target).st_mode
-        os.chmod(target, mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
 
 def copy_file_stream(src_path, dst_path):
@@ -220,6 +234,13 @@ class RuntimeUpdaterHandler(BaseHTTPRequestHandler):
         if not self.authorized():
             json_response(self, {"error": "unauthorized"}, status=401)
             return
+        if not self.server.update_lock.acquire(blocking=False):
+            json_response(self, {"error": "update_busy"}, status=409)
+            return
+        try:
+            files = current_files(self.server.runtime_dir)
+        finally:
+            self.server.update_lock.release()
         payload = {
             "ok": True,
             "protocol": PROTOCOL,
@@ -227,7 +248,7 @@ class RuntimeUpdaterHandler(BaseHTTPRequestHandler):
             "runtime_dir": self.server.runtime_dir,
             "update_host": self.server.update_host,
             "update_port": self.server.update_port,
-            "files": current_files(self.server.runtime_dir),
+            "files": files,
         }
         json_response(self, payload)
 
@@ -240,10 +261,18 @@ class RuntimeUpdaterHandler(BaseHTTPRequestHandler):
             return
         try:
             data = self.read_json_body()
-            result = apply_update(self.server.runtime_dir, data)
+            if not self.server.update_lock.acquire(blocking=False):
+                json_response(self, {"error": "update_busy"}, status=409)
+                return
+            try:
+                result = apply_update(self.server.runtime_dir, data)
+            finally:
+                self.server.update_lock.release()
             result["ok"] = True
             result["runtime_version"] = RUNTIME_VERSION
             json_response(self, result)
+        except TimeoutError:
+            json_response(self, {"error": "request_timeout"}, status=408)
         except ValueError as exc:
             json_response(self, {"error": str(exc)}, status=400)
         except Exception as exc:
@@ -254,10 +283,12 @@ class RuntimeUpdaterHandler(BaseHTTPRequestHandler):
         expected = read_token()
         if not expected:
             return False
-        provided = self.headers.get(TOKEN_HEADER, "")
-        return secrets.compare_digest(provided, expected)
+        values = self.headers.get_all(TOKEN_HEADER, [])
+        return len(values) == 1 and secrets.compare_digest(values[0].encode("utf-8"), expected.encode("utf-8"))
 
     def read_json_body(self):
+        if self.headers.get("Transfer-Encoding") or len(self.headers.get_all("Content-Length", [])) != 1:
+            raise ValueError("invalid_content_length")
         try:
             length = int(self.headers.get("Content-Length", "0"))
         except ValueError:
@@ -267,6 +298,8 @@ class RuntimeUpdaterHandler(BaseHTTPRequestHandler):
         if length > MAX_REQUEST_BYTES:
             raise ValueError("request_too_large")
         raw = self.rfile.read(length)
+        if len(raw) != length:
+            raise ValueError("incomplete_body")
         try:
             return json.loads(raw.decode("utf-8"))
         except Exception:
@@ -283,9 +316,13 @@ def apply_update(runtime_dir, data):
     operations = []
     unchanged = []
     restart_required = False
+    normalized_paths = set()
 
     for rel_path, item in files.items():
         rel_path = normalize_rel_path(rel_path)
+        if rel_path in normalized_paths:
+            raise ValueError("duplicate_path")
+        normalized_paths.add(rel_path)
         if not isinstance(item, dict):
             raise ValueError("invalid_file_item")
         expected_hash = str(item.get("sha256", "")).lower().strip()
@@ -313,20 +350,74 @@ def apply_update(runtime_dir, data):
         restart_required = restart_required or bool(ALLOWED_FILES[rel_path].get("restart_required"))
 
     updated = []
-    for rel_path, content in operations:
-        write_allowed_file(runtime_dir, rel_path, content)
-        updated.append(rel_path)
+    originals = {}
+    for rel_path, _ in operations:
+        target = safe_target(runtime_dir, rel_path)
+        if os.path.isfile(target):
+            with open(target, "rb") as source:
+                originals[rel_path] = (source.read(), stat.S_IMODE(os.stat(target).st_mode))
+        else:
+            originals[rel_path] = None
+    try:
+        for rel_path, content in operations:
+            write_allowed_file(runtime_dir, rel_path, content)
+            updated.append(rel_path)
+    except Exception as install_error:
+        # Restore files already committed if a later file cannot be installed.
+        rollback_errors = []
+        for rel_path in reversed(updated):
+            try:
+                target = safe_target(runtime_dir, rel_path)
+                original = originals[rel_path]
+                if original is None:
+                    os.remove(target)
+                else:
+                    atomic_write(target, *original)
+            except Exception as exc:
+                rollback_errors.append(rel_path)
+                print("[Alas-Gyre Updater] rollback_failed %s: %r" % (rel_path, exc), flush=True)
+        if rollback_errors:
+            raise RuntimeError("update_rollback_failed") from install_error
+        raise
 
     return {
         "updated": updated,
         "unchanged": unchanged,
         "restart_required": restart_required,
+        "updater_restart_required": "gyre_runtime_updater.py" in updated,
         "files": current_files(runtime_dir),
     }
 
 
-class RuntimeUpdaterHTTPServer(HTTPServer):
+class RuntimeUpdaterHTTPServer(ThreadingMixIn, HTTPServer):
     allow_reuse_address = True
+    daemon_threads = True
+
+    def __init__(self, *args, **kwargs):
+        self.connections = threading.BoundedSemaphore(MAX_CONNECTIONS)
+        self.update_lock = threading.Lock()
+        super().__init__(*args, **kwargs)
+
+    def get_request(self):
+        connection, address = super().get_request()
+        connection.settimeout(REQUEST_TIMEOUT)
+        return connection, address
+
+    def process_request(self, request, client_address):
+        if not self.connections.acquire(blocking=False):
+            self.shutdown_request(request)
+            return
+        try:
+            super().process_request(request, client_address)
+        except Exception:
+            self.connections.release()
+            raise
+
+    def process_request_thread(self, request, client_address):
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            self.connections.release()
 
 
 def parse_args():
@@ -387,4 +478,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

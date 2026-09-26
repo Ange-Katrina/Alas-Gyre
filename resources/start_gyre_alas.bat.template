@@ -247,12 +247,30 @@ exit /b 1
 :get_managed_pid
 set "MANAGED_PID="
 if exist "!PID_FILE!" set /p MANAGED_PID=<"!PID_FILE!"
+if defined MANAGED_PID (
+    set "CHECK_PID=!MANAGED_PID!"
+    set "CHECK_PATH=!ALAS_RUNNER!"
+    set "CHECK_ALT_PATH=!SCRIPT_PATH!"
+    call :is_owned_pid
+    if errorlevel 1 set "MANAGED_PID="
+)
 exit /b 0
 
 :get_updater_pid
 set "UPDATER_PID="
 if exist "!UPDATER_PID_FILE!" set /p UPDATER_PID=<"!UPDATER_PID_FILE!"
+if defined UPDATER_PID (
+    set "CHECK_PID=!UPDATER_PID!"
+    set "CHECK_PATH=!UPDATER_RUNNER!"
+    set "CHECK_ALT_PATH=!UPDATER_SCRIPT!"
+    call :is_owned_pid
+    if errorlevel 1 set "UPDATER_PID="
+)
 exit /b 0
+
+:is_owned_pid
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$n=0; if (-not [int]::TryParse($env:CHECK_PID,[ref]$n) -or $n -le 1) { exit 1 }; try { $p=Get-CimInstance Win32_Process -Filter ('ProcessId='+$n) -ErrorAction Stop; $cmd=[string]$p.CommandLine; foreach ($path in @($env:CHECK_PATH,$env:CHECK_ALT_PATH)) { if ($path -and $cmd.IndexOf($path,[StringComparison]::OrdinalIgnoreCase) -ge 0) { exit 0 } }; exit 1 } catch { exit 1 }" <nul >nul 2>nul
+exit /b !ERRORLEVEL!
 
 :is_pid_running
 if "%~1"=="" exit /b 1
@@ -271,7 +289,7 @@ exit /b 0
 :is_runtime_updater_pid
 set "CHECK_PID=%~1"
 if not defined CHECK_PID exit /b 1
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$check=[int]$env:CHECK_PID; try { $p=Get-CimInstance Win32_Process -Filter ('ProcessId='+$check) -ErrorAction SilentlyContinue; if (-not $p) { $p=Get-WmiObject Win32_Process -Filter ('ProcessId='+$check) -ErrorAction SilentlyContinue }; $cmd=[string]$p.CommandLine; if ($cmd -like '*gyre_runtime_updater.py*') { exit 0 }; exit 1 } catch { exit 1 }" <nul >nul 2>nul
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$check=[int]$env:CHECK_PID; try { $p=Get-CimInstance Win32_Process -Filter ('ProcessId='+$check) -ErrorAction SilentlyContinue; if (-not $p) { $p=Get-WmiObject Win32_Process -Filter ('ProcessId='+$check) -ErrorAction SilentlyContinue }; $cmd=[string]$p.CommandLine; if ($cmd.IndexOf($env:UPDATER_SCRIPT,[StringComparison]::OrdinalIgnoreCase) -ge 0) { exit 0 }; exit 1 } catch { exit 1 }" <nul >nul 2>nul
 exit /b !ERRORLEVEL!
 
 :adopt_or_report_updater_port
@@ -665,7 +683,7 @@ if errorlevel 1 (
     exit /b 1
 )
 call :rotate_log "!UPDATER_LOG_FILE!"
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$q=[char]34; $lines=@(); $lines += '@echo off'; $lines += ('set '+$q+'ALAS_GYRE_API_TOKEN='+$env:ALAS_GYRE_API_TOKEN+$q); $lines += ('set '+$q+'GYRE_UPDATE_HOST='+$env:GYRE_UPDATE_HOST+$q); $lines += ('set '+$q+'GYRE_UPDATE_PORT='+$env:GYRE_UPDATE_PORT+$q); $lines += ('set '+$q+'GYRE_LOG_MAX_BYTES='+$env:GYRE_LOG_MAX_BYTES+$q); $lines += ('set '+$q+'GYRE_LOG_BACKUP_COUNT='+$env:GYRE_LOG_BACKUP_COUNT+$q); $lines += ('cd /d '+$q+$env:GYRE_RUNTIME+$q); $lines += ($q+$env:GYRE_PYTHON+$q+' '+$q+$env:UPDATER_SCRIPT+$q+' --runtime '+$q+$env:GYRE_RUNTIME+$q+' --host '+$q+$env:GYRE_UPDATE_HOST+$q+' --port '+$q+$env:GYRE_UPDATE_PORT+$q+' >> '+$q+$env:UPDATER_LOG_FILE+$q+' 2>&1'); [System.IO.File]::WriteAllLines($env:UPDATER_RUNNER,[string[]]$lines,[System.Text.Encoding]::ASCII)" <nul >nul 2>nul
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$q=[char]34; $lines=@(); $lines += '@echo off'; $lines += 'chcp 65001 >nul'; $lines += ('set '+$q+'ALAS_GYRE_API_TOKEN='+$env:ALAS_GYRE_API_TOKEN+$q); $lines += ('set '+$q+'GYRE_UPDATE_HOST='+$env:GYRE_UPDATE_HOST+$q); $lines += ('set '+$q+'GYRE_UPDATE_PORT='+$env:GYRE_UPDATE_PORT+$q); $lines += ('set '+$q+'GYRE_LOG_MAX_BYTES='+$env:GYRE_LOG_MAX_BYTES+$q); $lines += ('set '+$q+'GYRE_LOG_BACKUP_COUNT='+$env:GYRE_LOG_BACKUP_COUNT+$q); $lines += ('cd /d '+$q+$env:GYRE_RUNTIME+$q); $lines += ($q+$env:GYRE_PYTHON+$q+' '+$q+$env:UPDATER_SCRIPT+$q+' --runtime '+$q+$env:GYRE_RUNTIME+$q+' --host '+$q+$env:GYRE_UPDATE_HOST+$q+' --port '+$q+$env:GYRE_UPDATE_PORT+$q+' >> '+$q+$env:UPDATER_LOG_FILE+$q+' 2>&1'); [System.IO.File]::WriteAllLines($env:UPDATER_RUNNER,[string[]]$lines,(New-Object System.Text.UTF8Encoding $false))" <nul >nul 2>nul
 if errorlevel 1 (
     echo([WARN] Failed to write updater runner: !UPDATER_RUNNER!
     exit /b 1
@@ -700,12 +718,18 @@ if errorlevel 1 (
     exit /b 0
 )
 taskkill /PID !UPDATER_PID! /T /F >nul 2>nul
+call :is_pid_running "!UPDATER_PID!"
+if not errorlevel 1 (
+    echo([ERR] Runtime updater did not stop; keeping PID file.
+    exit /b 1
+)
 del "!UPDATER_PID_FILE!" >nul 2>nul
 echo(Runtime updater stopped.
 exit /b 0
 
 :restart_updater
 call :stop_updater
+if errorlevel 1 exit /b 1
 call :start_updater
 exit /b !ERRORLEVEL!
 
@@ -808,7 +832,7 @@ if errorlevel 1 exit /b 1
 call :ensure_alas_port_free
 if errorlevel 1 exit /b 1
 call :rotate_log "!LOG_FILE!"
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$q=[char]34; $cmd='call '+$q+$env:SCRIPT_PATH+$q+' __gyre_service_run >> '+$q+$env:LOG_FILE+$q+' 2>&1'; $lines=@('@echo off',$cmd); Set-Content -LiteralPath $env:ALAS_RUNNER -Value $lines -Encoding ASCII" <nul >nul 2>nul
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$q=[char]34; $cmd='call '+$q+$env:SCRIPT_PATH+$q+' __gyre_service_run >> '+$q+$env:LOG_FILE+$q+' 2>&1'; $lines=@('@echo off','chcp 65001 >nul',$cmd); [System.IO.File]::WriteAllLines($env:ALAS_RUNNER,[string[]]$lines,(New-Object System.Text.UTF8Encoding $false))" <nul >nul 2>nul
 if errorlevel 1 (
     echo(Failed to write ALAS runner: !ALAS_RUNNER!
     exit /b 1
@@ -846,11 +870,17 @@ if errorlevel 1 (
 )
 echo(Stopping ALAS pid=!MANAGED_PID! ...
 taskkill /PID !MANAGED_PID! /T /F >nul 2>nul
+call :is_pid_running "!MANAGED_PID!"
+if not errorlevel 1 (
+    echo([ERR] ALAS did not stop; keeping PID file.
+    exit /b 1
+)
 del "!PID_FILE!" >nul 2>nul
 echo(ALAS stopped.
 exit /b 0
 
 :restart_managed
 call :stop_managed
+if errorlevel 1 exit /b 1
 call :start_background
 exit /b !ERRORLEVEL!

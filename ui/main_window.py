@@ -8,7 +8,7 @@ from PySide6.QtCore import Qt, QTimer, Signal
 import threading
 import time
 
-from alas_gyre.api.client import api_headers, api_request, gyre_api_url
+from alas_gyre.api.client import CONTROL_REQUEST_TIMEOUT, api_headers, api_request, gyre_api_url
 from alas_gyre.core.paths import (
     app_base_dir as app_base_dir, asset_path, config_path,
 )
@@ -214,7 +214,7 @@ class MainConfigRow(QWidget):
                     url,
                     params={"config": self.config_name},
                     headers=api_headers(self.main_card.config),
-                    timeout=3,
+                    timeout=CONTROL_REQUEST_TIMEOUT,
                 )
                 if resp.status_code == 200:
                     status = normalize_status(resp.json().get("status", "idle"))
@@ -690,16 +690,19 @@ class CardWidget(QFrame):
             resp = api_request("GET", url, headers=api_headers(self.config), timeout=1.5)
             if resp.status_code == 200:
                 data = resp.json()
-                statuses = {
+                if not isinstance(data, dict) or not isinstance(data.get("statuses"), dict) or not isinstance(data.get("tasks", {}), dict):
+                    raise ValueError("invalid_status_response")
+                statuses = {name: "disconnected" for name in self._configs}
+                statuses.update({
                     str(config_name): normalize_status(status)
                     for config_name, status in data.get("statuses", {}).items()
-                }
+                })
                 tasks = {
                     str(config_name): str(task)
                     for config_name, task in data.get("tasks", {}).items()
                 }
                 self.status_all_update_signal.emit(statuses, tasks)
-                current_status = statuses.get(self.current_config, "idle")
+                current_status = statuses.get(self.current_config, "disconnected")
                 current_task = tasks.get(self.current_config, "")
                 self.status_update_signal.emit(current_status, current_task)
             elif resp.status_code == 404:
@@ -727,8 +730,10 @@ class CardWidget(QFrame):
                 self.status_all_update_signal.emit(statuses, tasks)
                 self.status_update_signal.emit(statuses.get(self.current_config, "disconnected"), tasks.get(self.current_config, ""))
             else:
+                self.status_all_update_signal.emit({name: "disconnected" for name in self._configs}, {})
                 self.status_update_signal.emit("disconnected", "")
         except Exception:
+            self.status_all_update_signal.emit({name: "disconnected" for name in self._configs}, {})
             self.status_update_signal.emit("disconnected", "")
 
     def restore_main_window(self):
