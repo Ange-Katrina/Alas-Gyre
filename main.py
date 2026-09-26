@@ -1,7 +1,7 @@
 ﻿from alas_gyre.app import main
 
 
-VERSION = "v1.2.3"
+VERSION = "v1.2.4"
 
 
 if __name__ == "__main__":

@@ -1,4 +1,4 @@
-﻿_current_version = "v1.2.3"
+﻿_current_version = "v1.2.4"
 
 
 def set_current_version(version):
