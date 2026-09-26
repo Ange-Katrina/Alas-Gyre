@@ -6,6 +6,8 @@ import subprocess
 import sys
 from urllib.parse import quote
 
+from alas_gyre.core.paths import packaged_executable_path
+
 try:
     from build_info import BUILD_FLAVOR
 except Exception:
@@ -54,9 +56,7 @@ def close_response(resp):
 
 
 def get_current_exe_path():
-    if getattr(sys, "frozen", False):
-        return sys.executable
-    return None
+    return packaged_executable_path()
 
 
 def normalize_build_flavor(flavor):
@@ -443,7 +443,7 @@ tasklist /FI "PID eq %PID%" 2>NUL | find /I "%PID%" >NUL
 if %ERRORLEVEL%==0 (
     set /a WAIT_COUNT+=1
     if %WAIT_COUNT% GEQ 60 exit /b 1
-    timeout /t 1 /nobreak >nul
+    powershell.exe -NoLogo -NoProfile -NonInteractive -Command "Start-Sleep -Seconds 1"
     goto wait_loop
 )
 
@@ -452,19 +452,22 @@ move /Y "%TEMP_FILE%" "%EXE_PATH%" >nul
 if not %ERRORLEVEL%==0 (
     set /a REPLACE_COUNT+=1
     if %REPLACE_COUNT% GEQ 60 exit /b 1
-    timeout /t 1 /nobreak >nul
+    powershell.exe -NoLogo -NoProfile -NonInteractive -Command "Start-Sleep -Seconds 1"
     goto replace
 )
 
-start "" "%EXE_PATH%"
-del /Q "%~f0" >nul
+start "" "%EXE_PATH%" & exit /b 0
 """
             with open(bat_path, "w", encoding="utf-8", newline="\r\n") as f:
                 f.write(bat_content)
 
             subprocess.Popen(
-                ["cmd.exe", "/c", bat_path],
-                creationflags=subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS
+                ["cmd.exe", "/d", "/c", "update.bat"],
+                cwd=dir_name,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                creationflags=subprocess.CREATE_NO_WINDOW,
             )
         else:
             sh_path = os.path.join(dir_name, "update.sh")

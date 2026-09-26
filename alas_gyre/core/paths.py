@@ -2,10 +2,20 @@ import os
 import sys
 
 
+def packaged_executable_path():
+    """Return the installed executable, not Nuitka's onefile extraction binary."""
+    if "__compiled__" in globals():
+        return os.path.abspath(sys.argv[0])
+    if getattr(sys, "frozen", False):
+        return sys.executable
+    return None
+
+
 def app_base_dir():
     """Return the directory that contains user config and external resources."""
-    if getattr(sys, "frozen", False):
-        return os.path.dirname(sys.executable)
+    executable = packaged_executable_path()
+    if executable:
+        return os.path.dirname(executable)
     return os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
@@ -13,13 +23,13 @@ def bundled_base_dir():
     """Return the directory that contains bundled package resources."""
     if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
         return sys._MEIPASS
-    return app_base_dir()
+    if getattr(sys, "frozen", False):
+        return app_base_dir()
+    return os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
 def resource_path(relative_path):
-    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
-        return os.path.join(sys._MEIPASS, relative_path)
-    return os.path.join(app_base_dir(), relative_path)
+    return os.path.join(bundled_base_dir(), relative_path)
 
 
 def config_path():
